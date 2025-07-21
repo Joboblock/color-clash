@@ -1,0 +1,113 @@
+html, body {
+    overflow: hidden;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+}
+
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 85h;
+    background-color: #333;
+    transition: background-color var(--delay-animation);
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(var(--grid-size), 1fr);
+    grid-gap: calc(50vmin / (var(--grid-size) * 8));
+    margin: auto;
+}
+
+.cell {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: calc((95vmin - (var(--grid-size) - 1) * (100vmin / (var(--grid-size) * 8))) / var(--grid-size));
+    height: calc((95vmin - (var(--grid-size) - 1) * (100vmin / (var(--grid-size) * 8))) / var(--grid-size));
+    background-color: #e7eddb;
+    border-radius: calc(20vmin / var(--grid-size));
+    transition: background-color var(--delay-animation);
+}
+
+.inner-circle {
+    position: absolute;
+    width: 75%;
+    height: 75%;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1;
+    transition: transform var(--delay-animation) ease-in-out, background-color var(--delay-animation) ease-in-out, opacity var(--delay-explosion) ease-out;
+    opacity: 1; /* Default to fully visible */
+}
+
+.inner-circle.fade-out {
+    opacity: 0.0;
+}
+
+.inner-circle.animated {
+    position: absolute;
+    z-index: 1; /* Ensure it's above static inner circles */
+    opacity: 1;
+    transition: transform var(--delay-explosion) ease-out, opacity var(--delay-explosion) ease-out; /* Add opacity transition */
+}
+
+@keyframes moveAnimation {
+    0% { transform: translate(0, 0); }
+    100% { /* Final position is set in JS */ }
+}
+
+.value-circle {
+    position: absolute;
+    width: 20%;  /* Adjust size as needed */
+    height: 20%; /* Adjust size as needed */
+    background-color: #fff;
+    border-radius: 50%;
+    z-index: 3; /* Above inner circles */
+    transition: transform var(--delay-animation) ease, opacity var(--delay-animation) ease;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.value-circle.animated {
+    z-index: 3; /* Above static inner circles but below value circles */
+}
+
+/* Player Colors for Cells */
+.cell.red { background-color: #f5b9b9 !important; }
+.cell.orange { background-color: #f5d9b9 !important; }
+.cell.yellow { background-color: #edf5b9 !important; }
+.cell.green { background-color: #cdf5b9 !important; }
+.cell.cyan { background-color: #b9f5f5 !important; }
+.cell.blue { background-color: #b9d9f5 !important; }
+.cell.purple { background-color: #cdb9f5 !important; }
+.cell.magenta { background-color: #edb9f5 !important; }
+
+.cell.invalid { background-color: #b8beac; }
+.cell.hidden { background-color: #e7eddb !important;}
+
+/* Player Colors for Inner Circles */
+.inner-circle.red { background-color: #d55f5f; }
+.inner-circle.orange { background-color: #d5a35f; }
+.inner-circle.yellow { background-color: #d5d35f; }
+.inner-circle.green { background-color: #a3d55f; }
+.inner-circle.cyan { background-color: #5fd5d3; }
+.inner-circle.blue { background-color: #5f95d5; }
+.inner-circle.purple { background-color: #8f5fd5; }
+.inner-circle.magenta { background-color: #d35fd3; }
+
+/* Body Colors */
+body.red { background-color: #d55f5f; }
+body.orange { background-color: #d5a35f; }
+body.yellow { background-color: #d5d35f; }
+body.green { background-color: #a3d55f; }
+body.cyan { background-color: #5fd5d3; }
+body.blue { background-color: #5f95d5; }
+body.purple { background-color: #8f5fd5; }
+body.magenta { background-color: #d35fd3; }

@@ -14,6 +14,129 @@ body {
     transition: background-color var(--delay-animation);
 }
 
+/* Main Menu Styles */
+.menu {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0,0,0,0.45);
+    z-index: 10;
+}
+
+.menu-panel {
+    width: min(680px, calc(90vmin));
+    background: #e7eddb;
+    border-radius: 22px;
+    padding: 24px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+}
+
+.menu-title {
+    margin: 0;
+    font-size: 2rem;
+    text-align: center;
+    padding: 6px 0;
+}
+
+.control-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.control-row label {
+    width: 95px;
+    font-weight: 600;
+}
+
+.control-row input[type="range"] {
+    flex: 1 1 auto;
+}
+
+.control-row input[type="number"] {
+    width: 72px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(0,0,0,0.12);
+    background: white;
+}
+
+.menu-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 6px;
+}
+
+.btn {
+    background: #5f95d5;
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+}
+
+.btn.secondary {
+    background: transparent;
+    color: #333;
+    border: 1px solid rgba(0,0,0,0.08);
+}
+
+.menu-hint {
+    font-size: 0.8rem;
+    color: rgba(0,0,0,0.6);
+    text-align: center;
+    margin-top: 6px;
+}
+
+/* Player box slider (visual) */
+.hidden-range {
+    position: absolute;
+    left: -9999px; /* keep for accessibility but hide visually */
+}
+
+.player-box-slider {
+    display: flex;
+    gap: 8px; /* small distance between elements */
+    align-items: center;
+    padding: 8px;
+    background: #f0f2e8;
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.06);
+    width: 100%;
+}
+
+.player-box-slider .box {
+    flex: 1 1 0; /* evenly distribute across the parent width */
+    aspect-ratio: 1 / 1; /* keep squares */
+    border-radius: 25%; /* proportional rounding that scales with box size */
+    box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+    opacity: 0.4;
+    transition: transform .12s ease, opacity .12s ease, box-shadow .12s ease;
+    border: 2px solid rgba(255,255,255,0.6);
+    -webkit-user-drag: none;
+    user-select: none;
+    touch-action: none; /* allow pointer events without default gestures */
+}
+.player-box-slider .box.active {
+    transform: translateY(-18%) scale(1.06); /* lift proportional to height */
+    opacity: 1;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.18);
+}
+
+/* grid-size slider track coloring using CSS variable */
+.grid-size { display: none; }
+
+
 .grid {
     display: grid;
     grid-template-columns: repeat(var(--grid-size), 1fr);
@@ -29,7 +152,7 @@ body {
     width: calc((95vmin - (var(--grid-size) - 1) * (100vmin / (var(--grid-size) * 8))) / var(--grid-size));
     height: calc((95vmin - (var(--grid-size) - 1) * (100vmin / (var(--grid-size) * 8))) / var(--grid-size));
     background-color: #e7eddb;
-    border-radius: calc(20vmin / var(--grid-size));
+    border-radius: 25%;
     transition: background-color var(--delay-animation);
 }
 

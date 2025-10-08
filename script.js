@@ -26,6 +26,207 @@ document.addEventListener('DOMContentLoaded', () => {
     document.documentElement.style.setProperty('--delay-animation', `${delayAnimation}ms`);
     document.documentElement.style.setProperty('--grid-size', gridSize);
     
+    // --- Main Menu wiring ---
+    const menu = document.getElementById('mainMenu');
+    const playersRange = document.getElementById('playersRange');
+    const sizeNumber = document.getElementById('sizeNumber');
+    const startBtn = document.getElementById('startBtn');
+    const previewBtn = document.getElementById('previewBtn');
+
+    // Initialize menu controls based on URL params or defaults
+    const urlPlayers = parseInt(getQueryParam('players')) || playerCount;
+    const urlSize = parseInt(getQueryParam('size')) || gridSize;
+
+    // set dynamic bounds
+    const maxPlayers = playerColors.length;
+    playersRange.max = String(maxPlayers);
+
+    // Build visual player box slider
+    const playerBoxSlider = document.getElementById('playerBoxSlider');
+    // inner-circle color map (match styles.css .inner-circle.* colors)
+    const innerCircleColors = {
+        red: '#d55f5f',
+        orange: '#d5a35f',
+        yellow: '#d5d35f',
+        green: '#a3d55f',
+        cyan: '#5fd5d3',
+        blue: '#5f95d5',
+        purple: '#8f5fd5',
+        magenta: '#d35fd3'
+    };
+
+    // Build boxes for counts 1..maxPlayers (we'll enforce a minimum selection of 2)
+    function buildPlayerBoxes() {
+        playerBoxSlider.innerHTML = '';
+        for (let count = 1; count <= maxPlayers; count++) {
+            const box = document.createElement('div');
+            box.className = 'box';
+            box.dataset.count = String(count); // the player count this box represents
+            box.title = `${count} player${count > 1 ? 's' : ''}`;
+            const colorKey = playerColors[(count - 1) % playerColors.length];
+            box.style.backgroundColor = innerCircleColors[colorKey] || '#ccc';
+
+            box.addEventListener('click', () => {
+                // clamp to minimum 2
+                const raw = parseInt(box.dataset.count, 10);
+                const val = Math.max(2, clampPlayers(raw));
+                playersRange.value = String(val);
+                updateSizeBoundsForPlayers(val);
+                highlightPlayerBoxes(val);
+            });
+
+            // Disable native dragging/selection that can interfere with pointer interactions
+            box.setAttribute('draggable', 'false');
+            box.addEventListener('dragstart', (ev) => ev.preventDefault());
+
+            playerBoxSlider.appendChild(box);
+        }
+    }
+
+    function highlightPlayerBoxes(count) {
+        Array.from(playerBoxSlider.children).forEach((child) => {
+            const boxCount = parseInt(child.dataset.count, 10);
+            if (boxCount <= count) child.classList.add('active'); else child.classList.remove('active');
+        });
+        playerBoxSlider.setAttribute('aria-valuenow', String(count));
+        // sync the hidden native range for screen readers
+        if (playersRange) playersRange.value = String(count);
+    }
+
+    buildPlayerBoxes();
+    highlightPlayerBoxes(parseInt(playersRange.value, 10));
+
+    // Make the visual box slider draggable like a real slider
+    let isDragging = false;
+    function setPlayerCountFromPointer(clientX) {
+        const children = Array.from(playerBoxSlider.children);
+        if (children.length === 0) return;
+        // find nearest box center to clientX
+        let nearest = children[0];
+        let nearestDist = Infinity;
+        children.forEach(child => {
+            const r = child.getBoundingClientRect();
+            const center = r.left + r.width / 2;
+            const d = Math.abs(clientX - center);
+            if (d < nearestDist) {
+                nearestDist = d;
+                nearest = child;
+            }
+        });
+        // clamp to minimum 2
+        const mapped = Math.max(2, clampPlayers(parseInt(nearest.dataset.count, 10)));
+        playersRange.value = String(mapped);
+        updateSizeBoundsForPlayers(mapped);
+        highlightPlayerBoxes(mapped);
+    }
+
+    playerBoxSlider.addEventListener('pointerdown', (e) => {
+        isDragging = true;
+        playerBoxSlider.setPointerCapture(e.pointerId);
+        setPlayerCountFromPointer(e.clientX);
+    });
+
+    playerBoxSlider.addEventListener('pointermove', (e) => {
+        if (!isDragging) return;
+        setPlayerCountFromPointer(e.clientX);
+    });
+
+    playerBoxSlider.addEventListener('pointerup', (e) => {
+        isDragging = false;
+        try { playerBoxSlider.releasePointerCapture(e.pointerId); } catch (err) {}
+    });
+
+    // Also handle pointercancel/leave
+    playerBoxSlider.addEventListener('pointercancel', () => { isDragging = false; });
+    playerBoxSlider.addEventListener('pointerleave', (e) => { if (isDragging) setPlayerCountFromPointer(e.clientX); });
+
+    // grid size range depends on player count: min = 3 + players, max = 2*(3 + players)
+    function updateSizeBoundsForPlayers(pCount) {
+        const minSz = Math.max(3, 3 + pCount);
+        const maxSz = Math.max(minSz, 2 * (3 + pCount));
+        sizeNumber.min = String(minSz);
+        sizeNumber.max = String(maxSz);
+        // clamp current value
+        if (parseInt(sizeNumber.value) < minSz) sizeNumber.value = String(minSz);
+        if (parseInt(sizeNumber.value) > maxSz) sizeNumber.value = String(maxSz);
+    }
+
+    // Start with URL or defaults
+    playersRange.value = String(urlPlayers);
+    updateSizeBoundsForPlayers(urlPlayers);
+    sizeNumber.value = String(urlSize);
+
+    // Decide initial menu visibility: only open menu if no players/size params OR preview param is present
+    const initialParams = new URLSearchParams(window.location.search);
+    const hasPlayersOrSize = initialParams.has('players') || initialParams.has('size');
+    const isPreview = initialParams.has('preview');
+    if (hasPlayersOrSize && !isPreview) {
+        // hide menu when explicit game params provided (and not in preview mode)
+        if (menu) menu.style.display = 'none';
+    } else {
+        if (menu) menu.style.display = '';
+    }
+
+    // Sync functions
+    function clampPlayers(n) {
+        const v = Math.max(2, Math.min(maxPlayers, Math.floor(n) || 2));
+        return v;
+    }
+
+    playersRange.addEventListener('input', e => {
+        const val = clampPlayers(e.target.value);
+        updateSizeBoundsForPlayers(val);
+        highlightPlayerBoxes(val);
+    });
+
+    sizeNumber.addEventListener('input', e => {
+        let val = Math.max(3, Math.floor(e.target.value) || 3);
+        const minSz = parseInt(sizeNumber.min);
+        const maxSz = parseInt(sizeNumber.max);
+        if (val < minSz) val = minSz;
+        if (val > maxSz) val = maxSz;
+        sizeNumber.value = String(val);
+    });
+
+    startBtn.addEventListener('click', () => {
+        const p = clampPlayers(playersRange.value);
+    let s = Math.max(3, Math.floor(sizeNumber.value) || 3);
+        // enforce relationship: size must be >= 3 + players
+        const minAllowed = 3 + p;
+        if (s < minAllowed) s = minAllowed;
+    // enforce upper bound from number input
+    const maxSz = parseInt(sizeNumber.max);
+    if (s > maxSz) s = maxSz;
+        // set params and reload so existing initialization picks them up
+        const params = new URLSearchParams(window.location.search);
+        // remove preview when starting
+        params.delete('preview');
+        params.set('players', String(p));
+        params.set('size', String(s));
+        window.location.search = params.toString();
+    });
+
+    // Preview button: add preview=true and players/size to URL then reload
+    previewBtn.addEventListener('click', () => {
+        const p = clampPlayers(playersRange.value);
+    let s = Math.max(3, Math.floor(sizeNumber.value) || 3);
+        const minAllowed = 3 + p;
+        if (s < minAllowed) s = minAllowed;
+    const maxSz = parseInt(sizeNumber.max);
+        if (s > maxSz) s = maxSz;
+
+        const params = new URLSearchParams(window.location.search);
+        params.set('players', String(p));
+        params.set('size', String(s));
+        params.set('preview', 'true');
+        window.location.search = params.toString();
+    });
+
+    // Allow Esc to hide menu (doesn't change URL)
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && menu) menu.style.display = 'none';
+    });
+    
     let grid = [];
     let isProcessing = false;
     let performanceMode = false;

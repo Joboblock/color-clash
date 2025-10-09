@@ -57,7 +57,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize menu controls based on URL params or defaults
     const urlPlayers = parseInt(getQueryParam('players')) || playerCount;
-    const urlSize = parseInt(getQueryParam('size')) || gridSize;
 
     // set dynamic bounds
     const maxPlayers = playerColors.length;
@@ -198,19 +197,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // grid size range depends on player count: min = 3 + players, max = 2*(3 + players)
     function updateSizeBoundsForPlayers(pCount) {
-        const minSz = Math.max(3, 3 + pCount);
-        const maxSz = Math.max(minSz, 2 * (3 + pCount));
-        sizeNumber.min = String(minSz);
-        sizeNumber.max = String(maxSz);
-        // clamp current value
-        if (parseInt(sizeNumber.value) < minSz) sizeNumber.value = String(minSz);
-        if (parseInt(sizeNumber.value) > maxSz) sizeNumber.value = String(maxSz);
+        // Fixed bounds independent of player count
+        const MIN_SZ = 3;
+        const MAX_SZ = 16;
+        sizeNumber.min = String(MIN_SZ);
+        sizeNumber.max = String(MAX_SZ);
+
+        // default size is players + 3, clamped to MIN..MAX
+        const desired = pCount + 3;
+        const clamped = Math.max(MIN_SZ, Math.min(MAX_SZ, desired));
+        sizeNumber.value = String(clamped);
     }
 
     // Start with URL or defaults
     selectedPlayers = clampPlayers(urlPlayers);
     updateSizeBoundsForPlayers(selectedPlayers);
-    sizeNumber.value = String(urlSize);
 
     // Decide initial menu visibility: only open menu if no players/size params OR preview param is present
     const initialParams = new URLSearchParams(window.location.search);

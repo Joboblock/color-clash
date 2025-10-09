@@ -14,6 +14,11 @@ body {
     transition: background-color var(--delay-animation);
 }
 
+/* Use Nunito for all text */
+body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
+    font-family: 'Nunito', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+}
+
 /* Main Menu Styles */
 .menu {
     position: fixed;
@@ -36,6 +41,29 @@ body {
     gap: 12px;
     align-items: stretch;
 }
+
+/* Header above the menu that displays the game name */
+.game-header {
+    position: fixed;
+    top: 50%; /* align vertically with menu center */
+    left: 50%;
+    transform: translate(-50%, calc(-50% - 220px)); /* move up above the menu */
+    z-index: 11;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.game-header-panel {
+    background: #e7eddb; /* match menu panel */
+    border-radius: 16px;
+    padding: 10px 22px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    font-weight: 800;
+    color: #222;
+    font-size: 2.5rem;
+}
+
 
 .menu-title {
     margin: 0;

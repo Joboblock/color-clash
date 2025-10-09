@@ -20,11 +20,264 @@ document.addEventListener('DOMContentLoaded', () => {
     const maxCellValue = 5;
     const delayExplosion = 500;
     const delayAnimation = 300;
-    const delayExplosionUpdate = 100;
 
     document.documentElement.style.setProperty('--delay-explosion', `${delayExplosion}ms`);
     document.documentElement.style.setProperty('--delay-animation', `${delayAnimation}ms`);
     document.documentElement.style.setProperty('--grid-size', gridSize);
+    
+    // --- Main Menu wiring ---
+    const menu = document.getElementById('mainMenu');
+    // removed hidden native range input; visual slider maintains selectedPlayers
+    let selectedPlayers = playerCount; // current selection from visual slider
+
+    // Temporary debug display for the selectedPlayers variable
+    const debugDisplay = document.createElement('div');
+    debugDisplay.id = 'debugSelectedPlayers';
+    // lightweight inline styling so no CSS edits are required
+    debugDisplay.style.position = 'fixed';
+    debugDisplay.style.right = '12px';
+    debugDisplay.style.bottom = '12px';
+    debugDisplay.style.padding = '8px 10px';
+    debugDisplay.style.background = 'rgba(0,0,0,0.72)';
+    debugDisplay.style.color = '#ffffff';
+    debugDisplay.style.fontFamily = 'monospace, monospace';
+    debugDisplay.style.fontSize = '13px';
+    debugDisplay.style.borderRadius = '8px';
+    debugDisplay.style.zIndex = '9999';
+    debugDisplay.style.pointerEvents = 'none';
+    document.body.appendChild(debugDisplay);
+
+    function updateDebugSelectedPlayers() {
+        debugDisplay.textContent = `selectedPlayers: ${selectedPlayers}`;
+    }
+    const sizeNumber = document.getElementById('sizeNumber');
+    const startBtn = document.getElementById('startBtn');
+    const previewBtn = document.getElementById('previewBtn');
+
+    // Initialize menu controls based on URL params or defaults
+    const urlPlayers = parseInt(getQueryParam('players')) || playerCount;
+
+    // set dynamic bounds
+    const maxPlayers = playerColors.length;
+
+    // Build visual player box slider
+    const playerBoxSlider = document.getElementById('playerBoxSlider');
+    // inner-circle color map (match styles.css .inner-circle.* colors)
+    const innerCircleColors = {
+        red: '#d55f5f',
+        orange: '#d5a35f',
+        yellow: '#d5d35f',
+        green: '#a3d55f',
+        cyan: '#5fd5d3',
+        blue: '#5f95d5',
+        purple: '#8f5fd5',
+        magenta: '#d35fd3'
+    };
+
+    // Ensure CSS variables for colors are set on :root BEFORE building boxes
+    function hexToRgb(hex) {
+        const h = hex.replace('#', '');
+        const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+        const bigint = parseInt(full, 16);
+        return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
+    }
+
+    // cell color: pastel mix toward white (opaque), use 50% white by default
+    function mixWithWhite(hex, factor = 0.5) {
+        // factor = portion of white (0..1)
+        const { r, g, b } = hexToRgb(hex);
+        const mix = (c) => Math.round((1 - factor) * c + factor * 255);
+        return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+    }
+
+    Object.entries(innerCircleColors).forEach(([key, hex]) => {
+        // inner circle strong color (hex)
+        document.documentElement.style.setProperty(`--inner-${key}`, hex);
+        // cell color: pastel mix toward white (opaque), use 70% white by default
+        const pastel = mixWithWhite(hex, 0.5);
+        document.documentElement.style.setProperty(`--cell-${key}`, pastel);
+        // body color: slightly darker by multiplying channels
+        const dark = (c) => Math.max(0, Math.min(255, Math.round(c * 0.88)));
+        const { r: rr, g: gg, b: bb } = hexToRgb(hex);
+        document.documentElement.style.setProperty(`--body-${key}`, `rgb(${dark(rr)}, ${dark(gg)}, ${dark(bb)})`);
+    });
+
+    // Build boxes for counts 1..maxPlayers (we'll enforce a minimum selection of 2)
+    function buildPlayerBoxes() {
+        playerBoxSlider.innerHTML = '';
+        for (let count = 1; count <= maxPlayers; count++) {
+            const box = document.createElement('div');
+            box.className = 'box';
+            box.dataset.count = String(count); // the player count this box represents
+            box.title = `${count} player${count > 1 ? 's' : ''}`;
+            const colorKey = playerColors[(count - 1) % playerColors.length];
+            // set per-box CSS variables pointing to the global color vars
+            box.style.setProperty('--box-inner', `var(--inner-${colorKey})`);
+            box.style.setProperty('--box-cell', `var(--cell-${colorKey})`);
+
+            box.addEventListener('click', () => {
+                // clamp to minimum 2
+                const raw = parseInt(box.dataset.count, 10);
+                const val = Math.max(2, clampPlayers(raw));
+                selectedPlayers = val;
+                updateSizeBoundsForPlayers(val);
+                highlightPlayerBoxes(val);
+            });
+
+            // Disable native dragging/selection that can interfere with pointer interactions
+            box.setAttribute('draggable', 'false');
+            box.addEventListener('dragstart', (ev) => ev.preventDefault());
+
+            playerBoxSlider.appendChild(box);
+        }
+    }
+
+    function highlightPlayerBoxes(count) {
+        Array.from(playerBoxSlider.children).forEach((child) => {
+            const boxCount = parseInt(child.dataset.count, 10);
+            if (boxCount <= count) child.classList.add('active'); else child.classList.remove('active');
+        });
+        playerBoxSlider.setAttribute('aria-valuenow', String(count));
+        // update internal selection
+        selectedPlayers = count;
+        // update temporary debug display
+        updateDebugSelectedPlayers();
+    }
+
+    buildPlayerBoxes();
+    // highlight using initial URL or default
+    const initialPlayersToShow = clampPlayers(urlPlayers);
+    highlightPlayerBoxes(initialPlayersToShow);
+    updateDebugSelectedPlayers();
+
+    // Make the visual box slider draggable like a real slider
+    let isDragging = false;
+    function setPlayerCountFromPointer(clientX) {
+        const children = Array.from(playerBoxSlider.children);
+        if (children.length === 0) return;
+        // find nearest box center to clientX
+        let nearest = children[0];
+        let nearestDist = Infinity;
+        children.forEach(child => {
+            const r = child.getBoundingClientRect();
+            const center = r.left + r.width / 2;
+            const d = Math.abs(clientX - center);
+            if (d < nearestDist) {
+                nearestDist = d;
+                nearest = child;
+            }
+        });
+        // clamp to minimum 2
+        const mapped = Math.max(2, clampPlayers(parseInt(nearest.dataset.count, 10)));
+        selectedPlayers = mapped;
+        updateSizeBoundsForPlayers(mapped);
+        highlightPlayerBoxes(mapped);
+    }
+
+    playerBoxSlider.addEventListener('pointerdown', (e) => {
+        isDragging = true;
+        playerBoxSlider.setPointerCapture(e.pointerId);
+        setPlayerCountFromPointer(e.clientX);
+    });
+
+    playerBoxSlider.addEventListener('pointermove', (e) => {
+        if (!isDragging) return;
+        setPlayerCountFromPointer(e.clientX);
+    });
+
+    playerBoxSlider.addEventListener('pointerup', (e) => {
+        isDragging = false;
+        try { playerBoxSlider.releasePointerCapture(e.pointerId); } catch (err) {}
+    });
+
+    // Also handle pointercancel/leave
+    playerBoxSlider.addEventListener('pointercancel', () => { isDragging = false; });
+    playerBoxSlider.addEventListener('pointerleave', (e) => { if (isDragging) setPlayerCountFromPointer(e.clientX); });
+
+    // grid size range depends on player count: min = 3 + players, max = 2*(3 + players)
+    function updateSizeBoundsForPlayers(pCount) {
+        // Fixed bounds independent of player count
+        const MIN_SZ = 3;
+        const MAX_SZ = 16;
+        sizeNumber.min = String(MIN_SZ);
+        sizeNumber.max = String(MAX_SZ);
+
+        // default size is players + 3, clamped to MIN..MAX
+        const desired = pCount + 3;
+        const clamped = Math.max(MIN_SZ, Math.min(MAX_SZ, desired));
+        sizeNumber.value = String(clamped);
+    }
+
+    // Start with URL or defaults
+    selectedPlayers = clampPlayers(urlPlayers);
+    updateSizeBoundsForPlayers(selectedPlayers);
+
+    // Decide initial menu visibility: only open menu if no players/size params OR preview param is present
+    const initialParams = new URLSearchParams(window.location.search);
+    const hasPlayersOrSize = initialParams.has('players') || initialParams.has('size');
+    const isPreview = initialParams.has('preview');
+    if (hasPlayersOrSize && !isPreview) {
+        // hide menu when explicit game params provided (and not in preview mode)
+        if (menu) menu.style.display = 'none';
+    } else {
+        if (menu) menu.style.display = '';
+    }
+
+    // Sync functions
+    function clampPlayers(n) {
+        const v = Math.max(2, Math.min(maxPlayers, Math.floor(n) || 2));
+        return v;
+    }
+
+    // removed playersRange input; visual slider handles player selection
+
+    sizeNumber.addEventListener('input', e => {
+        let val = Math.max(3, Math.floor(e.target.value) || 3);
+        const minSz = parseInt(sizeNumber.min);
+        const maxSz = parseInt(sizeNumber.max);
+        if (val < minSz) val = minSz;
+        if (val > maxSz) val = maxSz;
+        sizeNumber.value = String(val);
+    });
+
+    startBtn.addEventListener('click', () => {
+        const p = clampPlayers(selectedPlayers);
+    let s = Math.max(3, Math.floor(sizeNumber.value) || 3);
+        // enforce relationship: size must be >= 3 + players
+        const minAllowed = 3 + p;
+        if (s < minAllowed) s = minAllowed;
+    // enforce upper bound from number input
+    const maxSz = parseInt(sizeNumber.max);
+    if (s > maxSz) s = maxSz;
+        // set params and reload so existing initialization picks them up
+        const params = new URLSearchParams(window.location.search);
+        // remove preview when starting
+        params.delete('preview');
+        params.set('players', String(p));
+        params.set('size', String(s));
+        window.location.search = params.toString();
+    });
+
+    // Preview button: add preview=true and players/size to URL then reload
+    previewBtn.addEventListener('click', () => {
+        const p = clampPlayers(selectedPlayers);
+    let s = Math.max(3, Math.floor(sizeNumber.value) || 3);
+        const minAllowed = 3 + p;
+        if (s < minAllowed) s = minAllowed;
+    const maxSz = parseInt(sizeNumber.max);
+        if (s > maxSz) s = maxSz;
+
+        const params = new URLSearchParams(window.location.search);
+        params.set('players', String(p));
+        params.set('size', String(s));
+        params.set('preview', 'true');
+        window.location.search = params.toString();
+    });
+
+    // Allow Esc to hide menu (doesn't change URL)
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && menu) menu.style.display = 'none';
+    });
     
     let grid = [];
     let isProcessing = false;
@@ -113,7 +366,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function animateInnerCircles(cell, targetCells, player, explosionValue) {
-        const cellSize = cell.offsetWidth;
 
         targetCells.forEach(target => {
             const innerCircle = document.createElement('div');
@@ -402,7 +654,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const activePlayers = playerCells.filter(count => count > 0).length;
         if (activePlayers === 1) {
             gameWon = true;
-            const winnerIndex = playerCells.findIndex(count => count > 0);
             setTimeout(() => {
                 if (!gameWon) return;
                 resetGame();

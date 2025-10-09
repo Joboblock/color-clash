@@ -124,6 +124,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     buildPlayerBoxes();
+    // Initialize native range and size inputs from URL/defaults before highlighting the visual boxes
+    playersRange.value = String(urlPlayers);
+    updateSizeBoundsForPlayers(urlPlayers);
+    sizeNumber.value = String(urlSize);
     highlightPlayerBoxes(parseInt(playersRange.value, 10));
 
     // Make the visual box slider draggable like a real slider
@@ -180,11 +184,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (parseInt(sizeNumber.value) < minSz) sizeNumber.value = String(minSz);
         if (parseInt(sizeNumber.value) > maxSz) sizeNumber.value = String(maxSz);
     }
-
-    // Start with URL or defaults
-    playersRange.value = String(urlPlayers);
-    updateSizeBoundsForPlayers(urlPlayers);
-    sizeNumber.value = String(urlSize);
 
     // Decide initial menu visibility: only open menu if no players/size params OR preview param is present
     const initialParams = new URLSearchParams(window.location.search);

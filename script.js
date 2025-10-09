@@ -55,6 +55,34 @@ document.addEventListener('DOMContentLoaded', () => {
         magenta: '#d35fd3'
     };
 
+    // Ensure CSS variables for colors are set on :root BEFORE building boxes
+    function hexToRgb(hex) {
+        const h = hex.replace('#', '');
+        const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+        const bigint = parseInt(full, 16);
+        return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
+    }
+
+    // cell color: pastel mix toward white (opaque), use 50% white by default
+    function mixWithWhite(hex, factor = 0.5) {
+        // factor = portion of white (0..1)
+        const { r, g, b } = hexToRgb(hex);
+        const mix = (c) => Math.round((1 - factor) * c + factor * 255);
+        return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+    }
+
+    Object.entries(innerCircleColors).forEach(([key, hex]) => {
+        // inner circle strong color (hex)
+        document.documentElement.style.setProperty(`--inner-${key}`, hex);
+        // cell color: pastel mix toward white (opaque), use 70% white by default
+        const pastel = mixWithWhite(hex, 0.5);
+        document.documentElement.style.setProperty(`--cell-${key}`, pastel);
+        // body color: slightly darker by multiplying channels
+        const dark = (c) => Math.max(0, Math.min(255, Math.round(c * 0.88)));
+        const { r: rr, g: gg, b: bb } = hexToRgb(hex);
+        document.documentElement.style.setProperty(`--body-${key}`, `rgb(${dark(rr)}, ${dark(gg)}, ${dark(bb)})`);
+    });
+
     // Build boxes for counts 1..maxPlayers (we'll enforce a minimum selection of 2)
     function buildPlayerBoxes() {
         playerBoxSlider.innerHTML = '';
@@ -64,7 +92,9 @@ document.addEventListener('DOMContentLoaded', () => {
             box.dataset.count = String(count); // the player count this box represents
             box.title = `${count} player${count > 1 ? 's' : ''}`;
             const colorKey = playerColors[(count - 1) % playerColors.length];
-            box.style.backgroundColor = innerCircleColors[colorKey] || '#ccc';
+            // set per-box CSS variables pointing to the global color vars
+            box.style.setProperty('--box-inner', `var(--inner-${colorKey})`);
+            box.style.setProperty('--box-cell', `var(--cell-${colorKey})`);
 
             box.addEventListener('click', () => {
                 // clamp to minimum 2

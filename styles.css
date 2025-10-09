@@ -120,7 +120,9 @@ body {
     aspect-ratio: 1 / 1; /* keep squares */
     border-radius: 25%; /* proportional rounding that scales with box size */
     box-shadow: 0 4px 10px rgba(0,0,0,0.12);
-    opacity: 0.4;
+    opacity: 1;
+    /* default background is the lighter 'cell' color for this box */
+    background: var(--box-cell, #ccc);
     transition: transform .12s ease, opacity .12s ease, box-shadow .12s ease;
     border: 2px solid rgba(255,255,255,0.6);
     -webkit-user-drag: none;
@@ -130,6 +132,8 @@ body {
 .player-box-slider .box.active {
     transform: translateY(-18%) scale(1.06); /* lift proportional to height */
     opacity: 1;
+    /* active boxes use the inner circle (strong) color */
+    background: var(--box-inner, #999);
     box-shadow: 0 8px 20px rgba(0,0,0,0.18);
 }
 
@@ -202,35 +206,35 @@ body {
     z-index: 3; /* Above static inner circles but below value circles */
 }
 
-/* Player Colors for Cells */
-.cell.red { background-color: #f5b9b9 !important; }
-.cell.orange { background-color: #f5d9b9 !important; }
-.cell.yellow { background-color: #edf5b9 !important; }
-.cell.green { background-color: #cdf5b9 !important; }
-.cell.cyan { background-color: #b9f5f5 !important; }
-.cell.blue { background-color: #b9d9f5 !important; }
-.cell.purple { background-color: #cdb9f5 !important; }
-.cell.magenta { background-color: #edb9f5 !important; }
+/* Player Colors for Cells (Pastel) (use JS-set CSS variables) */
+.cell.red { background-color: var(--cell-red) !important; }
+.cell.orange { background-color: var(--cell-orange) !important; }
+.cell.yellow { background-color: var(--cell-yellow) !important; }
+.cell.green { background-color: var(--cell-green) !important; }
+.cell.cyan { background-color: var(--cell-cyan) !important; }
+.cell.blue { background-color: var(--cell-blue) !important; }
+.cell.purple { background-color: var(--cell-purple) !important; }
+.cell.magenta { background-color: var(--cell-magenta) !important; }
 
 .cell.invalid { background-color: #b8beac; }
 .cell.hidden { background-color: #e7eddb !important;}
 
-/* Player Colors for Inner Circles */
-.inner-circle.red { background-color: #d55f5f; }
-.inner-circle.orange { background-color: #d5a35f; }
-.inner-circle.yellow { background-color: #d5d35f; }
-.inner-circle.green { background-color: #a3d55f; }
-.inner-circle.cyan { background-color: #5fd5d3; }
-.inner-circle.blue { background-color: #5f95d5; }
-.inner-circle.purple { background-color: #8f5fd5; }
-.inner-circle.magenta { background-color: #d35fd3; }
+/* Player Colors for Inner Circles (Strong) (use JS-set CSS variables) */
+.inner-circle.red { background-color: var(--inner-red); }
+.inner-circle.orange { background-color: var(--inner-orange); }
+.inner-circle.yellow { background-color: var(--inner-yellow); }
+.inner-circle.green { background-color: var(--inner-green); }
+.inner-circle.cyan { background-color: var(--inner-cyan); }
+.inner-circle.blue { background-color: var(--inner-blue); }
+.inner-circle.purple { background-color: var(--inner-purple); }
+.inner-circle.magenta { background-color: var(--inner-magenta); }
 
-/* Body Colors */
-body.red { background-color: #d55f5f; }
-body.orange { background-color: #d5a35f; }
-body.yellow { background-color: #d5d35f; }
-body.green { background-color: #a3d55f; }
-body.cyan { background-color: #5fd5d3; }
-body.blue { background-color: #5f95d5; }
-body.purple { background-color: #8f5fd5; }
-body.magenta { background-color: #d35fd3; }
+/* Body Colors (Strong) (use JS-set CSS variables) */
+body.red { background-color: var(--body-red); }
+body.orange { background-color: var(--body-orange); }
+body.yellow { background-color: var(--body-yellow); }
+body.green { background-color: var(--body-green); }
+body.cyan { background-color: var(--body-cyan); }
+body.blue { background-color: var(--body-blue); }
+body.purple { background-color: var(--body-purple); }
+body.magenta { background-color: var(--body-magenta); }

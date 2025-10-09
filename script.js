@@ -20,7 +20,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const maxCellValue = 5;
     const delayExplosion = 500;
     const delayAnimation = 300;
-    const delayExplosionUpdate = 100;
 
     document.documentElement.style.setProperty('--delay-explosion', `${delayExplosion}ms`);
     document.documentElement.style.setProperty('--delay-animation', `${delayAnimation}ms`);
@@ -367,7 +366,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function animateInnerCircles(cell, targetCells, player, explosionValue) {
-        const cellSize = cell.offsetWidth;
 
         targetCells.forEach(target => {
             const innerCircle = document.createElement('div');
@@ -656,7 +654,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const activePlayers = playerCells.filter(count => count > 0).length;
         if (activePlayers === 1) {
             gameWon = true;
-            const winnerIndex = playerCells.findIndex(count => count > 0);
             setTimeout(() => {
                 if (!gameWon) return;
                 resetGame();

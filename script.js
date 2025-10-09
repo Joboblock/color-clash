@@ -28,7 +28,29 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // --- Main Menu wiring ---
     const menu = document.getElementById('mainMenu');
-    const playersRange = document.getElementById('playersRange');
+    // removed hidden native range input; visual slider maintains selectedPlayers
+    let selectedPlayers = playerCount; // current selection from visual slider
+
+    // Temporary debug display for the selectedPlayers variable
+    const debugDisplay = document.createElement('div');
+    debugDisplay.id = 'debugSelectedPlayers';
+    // lightweight inline styling so no CSS edits are required
+    debugDisplay.style.position = 'fixed';
+    debugDisplay.style.right = '12px';
+    debugDisplay.style.bottom = '12px';
+    debugDisplay.style.padding = '8px 10px';
+    debugDisplay.style.background = 'rgba(0,0,0,0.72)';
+    debugDisplay.style.color = '#ffffff';
+    debugDisplay.style.fontFamily = 'monospace, monospace';
+    debugDisplay.style.fontSize = '13px';
+    debugDisplay.style.borderRadius = '8px';
+    debugDisplay.style.zIndex = '9999';
+    debugDisplay.style.pointerEvents = 'none';
+    document.body.appendChild(debugDisplay);
+
+    function updateDebugSelectedPlayers() {
+        debugDisplay.textContent = `selectedPlayers: ${selectedPlayers}`;
+    }
     const sizeNumber = document.getElementById('sizeNumber');
     const startBtn = document.getElementById('startBtn');
     const previewBtn = document.getElementById('previewBtn');
@@ -39,7 +61,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // set dynamic bounds
     const maxPlayers = playerColors.length;
-    playersRange.max = String(maxPlayers);
 
     // Build visual player box slider
     const playerBoxSlider = document.getElementById('playerBoxSlider');
@@ -100,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // clamp to minimum 2
                 const raw = parseInt(box.dataset.count, 10);
                 const val = Math.max(2, clampPlayers(raw));
-                playersRange.value = String(val);
+                selectedPlayers = val;
                 updateSizeBoundsForPlayers(val);
                 highlightPlayerBoxes(val);
             });
@@ -119,16 +140,17 @@ document.addEventListener('DOMContentLoaded', () => {
             if (boxCount <= count) child.classList.add('active'); else child.classList.remove('active');
         });
         playerBoxSlider.setAttribute('aria-valuenow', String(count));
-        // sync the hidden native range for screen readers
-        if (playersRange) playersRange.value = String(count);
+        // update internal selection
+        selectedPlayers = count;
+        // update temporary debug display
+        updateDebugSelectedPlayers();
     }
 
     buildPlayerBoxes();
-    // Initialize native range and size inputs from URL/defaults before highlighting the visual boxes
-    playersRange.value = String(urlPlayers);
-    updateSizeBoundsForPlayers(urlPlayers);
-    sizeNumber.value = String(urlSize);
-    highlightPlayerBoxes(parseInt(playersRange.value, 10));
+    // highlight using initial URL or default
+    const initialPlayersToShow = clampPlayers(urlPlayers);
+    highlightPlayerBoxes(initialPlayersToShow);
+    updateDebugSelectedPlayers();
 
     // Make the visual box slider draggable like a real slider
     let isDragging = false;
@@ -149,7 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         // clamp to minimum 2
         const mapped = Math.max(2, clampPlayers(parseInt(nearest.dataset.count, 10)));
-        playersRange.value = String(mapped);
+        selectedPlayers = mapped;
         updateSizeBoundsForPlayers(mapped);
         highlightPlayerBoxes(mapped);
     }
@@ -185,6 +207,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (parseInt(sizeNumber.value) > maxSz) sizeNumber.value = String(maxSz);
     }
 
+    // Start with URL or defaults
+    selectedPlayers = clampPlayers(urlPlayers);
+    updateSizeBoundsForPlayers(selectedPlayers);
+    sizeNumber.value = String(urlSize);
+
     // Decide initial menu visibility: only open menu if no players/size params OR preview param is present
     const initialParams = new URLSearchParams(window.location.search);
     const hasPlayersOrSize = initialParams.has('players') || initialParams.has('size');
@@ -202,11 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return v;
     }
 
-    playersRange.addEventListener('input', e => {
-        const val = clampPlayers(e.target.value);
-        updateSizeBoundsForPlayers(val);
-        highlightPlayerBoxes(val);
-    });
+    // removed playersRange input; visual slider handles player selection
 
     sizeNumber.addEventListener('input', e => {
         let val = Math.max(3, Math.floor(e.target.value) || 3);
@@ -218,7 +241,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     startBtn.addEventListener('click', () => {
-        const p = clampPlayers(playersRange.value);
+        const p = clampPlayers(selectedPlayers);
     let s = Math.max(3, Math.floor(sizeNumber.value) || 3);
         // enforce relationship: size must be >= 3 + players
         const minAllowed = 3 + p;
@@ -237,7 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Preview button: add preview=true and players/size to URL then reload
     previewBtn.addEventListener('click', () => {
-        const p = clampPlayers(playersRange.value);
+        const p = clampPlayers(selectedPlayers);
     let s = Math.max(3, Math.floor(sizeNumber.value) || 3);
         const minAllowed = 3 + p;
         if (s < minAllowed) s = minAllowed;

@@ -99,10 +99,6 @@ body {
 }
 
 /* Player box slider (visual) */
-.hidden-range {
-    position: absolute;
-    left: -9999px; /* keep for accessibility but hide visually */
-}
 
 .player-box-slider {
     display: flex;

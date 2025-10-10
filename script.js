@@ -27,12 +27,12 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // --- Main Menu wiring ---
     const menu = document.getElementById('mainMenu');
-    // removed hidden native range input; visual slider maintains selectedPlayers
-    let selectedPlayers = playerCount; // current selection from visual slider
+    // removed hidden native range input; visual slider maintains menuPlayerCount
+    let menuPlayerCount = playerCount; // current selection from visual slider
 
-    // Temporary debug display for the selectedPlayers variable
+    // Temporary debug display for the menuPlayerCount variable
     const debugDisplay = document.createElement('div');
-    debugDisplay.id = 'debugSelectedPlayers';
+    debugDisplay.id = 'debugMenuPlayerCount';
     // lightweight inline styling so no CSS edits are required
     debugDisplay.style.position = 'fixed';
     debugDisplay.style.right = '12px';
@@ -47,15 +47,13 @@ document.addEventListener('DOMContentLoaded', () => {
     debugDisplay.style.pointerEvents = 'none';
     document.body.appendChild(debugDisplay);
 
-    function updateDebugSelectedPlayers() {
-        debugDisplay.textContent = `selectedPlayers: ${selectedPlayers}`;
+    function updateDebugMenuPlayerCount() {
+        debugDisplay.textContent = `menuPlayerCount: ${menuPlayerCount}`;
     }
-    const sizeNumber = document.getElementById('sizeNumber');
+
+    const menuGridSize = document.getElementById('menuGridSize');
     const startBtn = document.getElementById('startBtn');
     const previewBtn = document.getElementById('previewBtn');
-
-    // Initialize menu controls based on URL params or defaults
-    const urlPlayers = parseInt(getQueryParam('players')) || playerCount;
 
     // set dynamic bounds
     const maxPlayers = playerColors.length;
@@ -119,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // clamp to minimum 2
                 const raw = parseInt(box.dataset.count, 10);
                 const val = Math.max(2, clampPlayers(raw));
-                selectedPlayers = val;
+                menuPlayerCount = val;
                 updateSizeBoundsForPlayers(val);
                 highlightPlayerBoxes(val);
             });
@@ -139,16 +137,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         playerBoxSlider.setAttribute('aria-valuenow', String(count));
         // update internal selection
-        selectedPlayers = count;
+        menuPlayerCount = count;
         // update temporary debug display
-        updateDebugSelectedPlayers();
+        updateDebugMenuPlayerCount();
     }
 
     buildPlayerBoxes();
     // highlight using initial URL or default
-    const initialPlayersToShow = clampPlayers(urlPlayers);
+    const initialPlayersToShow = clampPlayers(playerCount);
     highlightPlayerBoxes(initialPlayersToShow);
-    updateDebugSelectedPlayers();
+    updateDebugMenuPlayerCount();
 
     // Make the visual box slider draggable like a real slider
     let isDragging = false;
@@ -169,7 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         // clamp to minimum 2
         const mapped = Math.max(2, clampPlayers(parseInt(nearest.dataset.count, 10)));
-        selectedPlayers = mapped;
+        menuPlayerCount = mapped;
         updateSizeBoundsForPlayers(mapped);
         highlightPlayerBoxes(mapped);
     }
@@ -194,23 +192,14 @@ document.addEventListener('DOMContentLoaded', () => {
     playerBoxSlider.addEventListener('pointercancel', () => { isDragging = false; });
     playerBoxSlider.addEventListener('pointerleave', (e) => { if (isDragging) setPlayerCountFromPointer(e.clientX); });
 
-    // grid size range depends on player count: min = 3 + players, max = 2*(3 + players)
     function updateSizeBoundsForPlayers(pCount) {
-        // Fixed bounds independent of player count
-        const MIN_SZ = 3;
-        const MAX_SZ = 16;
-        sizeNumber.min = String(MIN_SZ);
-        sizeNumber.max = String(MAX_SZ);
-
-        // default size is players + 3, clamped to MIN..MAX
         const desired = pCount + 3;
-        const clamped = Math.max(MIN_SZ, Math.min(MAX_SZ, desired));
-        sizeNumber.value = String(clamped);
+        menuGridSize.value = String(desired);
     }
 
     // Start with URL or defaults
-    selectedPlayers = clampPlayers(urlPlayers);
-    updateSizeBoundsForPlayers(selectedPlayers);
+    menuPlayerCount = clampPlayers(playerCount);
+    updateSizeBoundsForPlayers(menuPlayerCount);
 
     // Decide initial menu visibility: only open menu if no players/size params OR preview param is present
     const initialParams = new URLSearchParams(window.location.search);
@@ -229,25 +218,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return v;
     }
 
-    // removed playersRange input; visual slider handles player selection
+    // --- Grid Size Input Handling ---
+    // default = players + 3 (already applied in updateSizeBoundsForPlayers)
 
-    sizeNumber.addEventListener('input', e => {
-        let val = Math.max(3, Math.floor(e.target.value) || 3);
-        const minSz = parseInt(sizeNumber.min);
-        const maxSz = parseInt(sizeNumber.max);
+    function validateGridSize() {
+        let val = parseInt(menuGridSize.value, 10);
+        const minSz = 3;
+        const maxSz = 16;
+
+        if (isNaN(val)) val = menuPlayerCount + 3; // reset to default if empty
         if (val < minSz) val = minSz;
         if (val > maxSz) val = maxSz;
-        sizeNumber.value = String(val);
+
+        menuGridSize.value = String(val);
+    }
+
+    // validate on unfocus or Enter
+    menuGridSize.addEventListener('blur', validateGridSize);
+    menuGridSize.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            validateGridSize();
+            menuGridSize.blur(); // optional: trigger blur to close keyboard on mobile
+        }
     });
 
     startBtn.addEventListener('click', () => {
-        const p = clampPlayers(selectedPlayers);
-    let s = Math.max(3, Math.floor(sizeNumber.value) || 3);
+        const p = clampPlayers(menuPlayerCount);
+    let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
         // enforce relationship: size must be >= 3 + players
         const minAllowed = 3 + p;
         if (s < minAllowed) s = minAllowed;
     // enforce upper bound from number input
-    const maxSz = parseInt(sizeNumber.max);
+    const maxSz = parseInt(menuGridSize.max);
     if (s > maxSz) s = maxSz;
         // set params and reload so existing initialization picks them up
         const params = new URLSearchParams(window.location.search);
@@ -260,11 +263,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Preview button: add preview=true and players/size to URL then reload
     previewBtn.addEventListener('click', () => {
-        const p = clampPlayers(selectedPlayers);
-    let s = Math.max(3, Math.floor(sizeNumber.value) || 3);
+        const p = clampPlayers(menuPlayerCount);
+    let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
         const minAllowed = 3 + p;
         if (s < minAllowed) s = minAllowed;
-    const maxSz = parseInt(sizeNumber.max);
+    const maxSz = parseInt(menuGridSize.max);
         if (s > maxSz) s = maxSz;
 
         const params = new URLSearchParams(window.location.search);
@@ -272,11 +275,6 @@ document.addEventListener('DOMContentLoaded', () => {
         params.set('size', String(s));
         params.set('preview', 'true');
         window.location.search = params.toString();
-    });
-
-    // Allow Esc to hide menu (doesn't change URL)
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && menu) menu.style.display = 'none';
     });
     
     let grid = [];

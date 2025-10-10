@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.documentElement.style.setProperty('--delay-animation', `${delayAnimation}ms`);
     document.documentElement.style.setProperty('--grid-size', gridSize);
     
-    // --- Main Menu wiring ---
+//#region Menu Stuff
     const menu = document.getElementById('mainMenu');
     // removed hidden native range input; visual slider maintains menuPlayerCount
     let menuPlayerCount = playerCount; // current selection from visual slider
@@ -276,7 +276,9 @@ document.addEventListener('DOMContentLoaded', () => {
         params.set('preview', 'true');
         window.location.search = params.toString();
     });
-    
+//#endregion
+
+//#region Actual Game Logic
     let grid = [];
     let isProcessing = false;
     let performanceMode = false;
@@ -682,4 +684,5 @@ document.addEventListener('DOMContentLoaded', () => {
         highlightInvalidInitialPositions();
         document.body.className = playerColors[currentPlayer];
     }
+//#endregion
 });

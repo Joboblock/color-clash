@@ -19,10 +19,12 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
     font-family: 'Nunito', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
 
-/* Main Menu Styles */
+/* Main Menu Overlay */
 .menu {
     position: fixed;
     inset: 0;
+    width: 100vw;
+    height: 100dvh; /* dynamic viewport height for modern browsers */
     display: flex;
     justify-content: center;
     align-items: center;
@@ -30,8 +32,29 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
     z-index: 10;
 }
 
+/* New flex column container holding header + menu */
+.menu-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 32px; /* distance between header and menu */
+}
+
+/* Header above the menu */
+.game-header-panel {
+    background: #e7eddb;
+    border-radius: 16px;
+    padding: 10px 22px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    font-weight: 800;
+    color: #222;
+    font-size: 2.5rem;
+}
+
+/* Menu panel */
 .menu-panel {
-    width: min(680px, calc(90vmin));
+    width: min(680px, 90vmin);
     background: #e7eddb;
     border-radius: 22px;
     padding: 24px;
@@ -42,29 +65,6 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
     align-items: stretch;
 }
 
-/* Header above the menu that displays the game name */
-.game-header {
-    position: fixed;
-    top: 50%; /* align vertically with menu center */
-    left: 50%;
-    transform: translate(-50%, calc(-50% - 220px)); /* move up above the menu */
-    z-index: 11;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-
-.game-header-panel {
-    background: #e7eddb; /* match menu panel */
-    border-radius: 16px;
-    padding: 10px 22px;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
-    font-weight: 800;
-    color: #222;
-    font-size: 2.5rem;
-}
-
-
 .menu-title {
     margin: 0;
     font-size: 2rem;
@@ -74,8 +74,10 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
 
 .control-row {
     display: flex;
+    flex-direction: column;
     align-items: center;
     gap: 10px;
+    align-items: flex-start;
 }
 
 .control-row label {
@@ -93,6 +95,11 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
     border-radius: 8px;
     border: 1px solid rgba(0,0,0,0.12);
     background: white;
+}
+
+/* Center only the player slider within its control row */
+#playerBoxSlider {
+    align-self: center;  /* overrides parent's flex alignment */
 }
 
 .menu-actions {

@@ -23,6 +23,8 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
 .menu {
     position: fixed;
     inset: 0;
+    width: 100vw;
+    height: 100dvh; /* dynamic viewport height for modern browsers */
     display: flex;
     justify-content: center;
     align-items: center;

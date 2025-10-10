@@ -13,29 +13,30 @@
 
     <!-- Main Menu Overlay -->
     <div class="menu" id="mainMenu" aria-hidden="false">
-        <div class="game-header">
+        <div class="menu-container">
             <div class="game-header-panel">Color Clash</div>
-        </div>
-        <div class="menu-panel">
-            <h1 class="menu-title">Settings</h1>
 
-            <div class="control-row">
-                <label for="playerBoxSlider">Players</label>
-                <div id="playerBoxSlider" class="player-box-slider" role="slider" aria-label="player count" aria-valuemin="2" aria-valuemax="8" aria-valuenow="2"></div>
+            <div class="menu-panel">
+                <h1 class="menu-title">Settings</h1>
+
+                <div class="control-row">
+                    <label for="playerBoxSlider">Players</label>
+                    <div id="playerBoxSlider" class="player-box-slider" role="slider"
+                        aria-label="player count" aria-valuemin="2" aria-valuemax="8" aria-valuenow="2"></div>
+                </div>
+
+                <div class="control-row">
+                    <label for="sizeNumber">Grid Size</label>
+                    <input id="sizeNumber" type="number" min="3" value="5">
+                </div>
+
+                <div class="menu-actions">
+                    <button id="startBtn" class="btn">Start</button>
+                    <button id="previewBtn" class="btn secondary">Preview</button>
+                </div>
+
+                <p class="menu-hint">Tip: you can also set <code>?players=&lt;n&gt;&amp;size=&lt;n&gt;</code> in the URL.</p>
             </div>
-
-            <div class="control-row">
-                <label for="sizeNumber">Grid Size</label>
-                <!-- simple number input for grid size -->
-                <input id="sizeNumber" type="number" min="3" value="5">
-            </div>
-
-            <div class="menu-actions">
-                <button id="startBtn" class="btn">Start</button>
-                <button id="previewBtn" class="btn secondary">Preview</button>
-            </div>
-
-            <p class="menu-hint">Tip: you can also set <code>?players=&lt;n&gt;&amp;size=&lt;n&gt;</code> in the URL.</p>
         </div>
     </div>
     <script src="script.js"></script>

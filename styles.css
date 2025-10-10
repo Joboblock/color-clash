@@ -55,15 +55,16 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
 }
 
 .game-header-panel {
-    background: #e7eddb; /* match menu panel */
+    background: #e7eddb;
     border-radius: 16px;
     padding: 10px 22px;
     box-shadow: 0 6px 20px rgba(0,0,0,0.25);
     font-weight: 800;
     color: #222;
     font-size: 2.5rem;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
-
 
 .menu-title {
     margin: 0;

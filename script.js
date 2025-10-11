@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
     Object.entries(innerCircleColors).forEach(([key, hex]) => {
         // inner circle strong color (hex)
         document.documentElement.style.setProperty(`--inner-${key}`, hex);
-        // cell color: pastel mix toward white (opaque), use 70% white by default
+        // cell color: pastel mix toward white (opaque), use 50% white by default
         const pastel = mixWithWhite(hex, 0.5);
         document.documentElement.style.setProperty(`--cell-${key}`, pastel);
         // body color: slightly darker by multiplying channels
@@ -85,8 +85,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (menu) menu.style.display = '';
     }
 
-    
-    
     playerBoxSlider.addEventListener('pointerdown', (e) => {
         isDragging = true;
         playerBoxSlider.setPointerCapture(e.pointerId);
@@ -107,12 +105,18 @@ document.addEventListener('DOMContentLoaded', () => {
     playerBoxSlider.addEventListener('pointercancel', () => { isDragging = false; });
     playerBoxSlider.addEventListener('pointerleave', (e) => { if (isDragging) setPlayerCountFromPointer(e.clientX); });
 
-    // validate on unfocus or Enter
-    menuGridSize.addEventListener('blur', validateGridSize);
+    // validate on unfocus or Enter — validate and recreate grid when value changes
+    menuGridSize.addEventListener('blur', () => {
+        validateGridSize();
+        const s = Math.max(3, parseInt(menuGridSize.value, 10) || (3 + menuPlayerCount));
+        if (s !== gridSize) recreateGrid(s, playerCount);
+    });
     menuGridSize.addEventListener('keydown', e => {
         if (e.key === 'Enter') {
             e.preventDefault();
             validateGridSize();
+            const s = Math.max(3, parseInt(menuGridSize.value, 10) || (3 + menuPlayerCount));
+            if (s !== gridSize) recreateGrid(s, playerCount);
             menuGridSize.blur(); // optional: trigger blur to close keyboard on mobile
         }
     });
@@ -185,9 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // clamp to minimum 2
                 const raw = parseInt(box.dataset.count, 10);
                 const val = Math.max(2, clampPlayers(raw));
-                menuPlayerCount = val;
-                updateSizeBoundsForPlayers(val);
-                highlightPlayerBoxes(val);
+                onMenuPlayerCountChanged(val);
             });
 
             // Disable native dragging/selection that can interfere with pointer interactions
@@ -206,6 +208,11 @@ document.addEventListener('DOMContentLoaded', () => {
         playerBoxSlider.setAttribute('aria-valuenow', String(count));
         // update internal selection
         menuPlayerCount = count;
+
+        if (count !== playerCount) {
+            const desiredSize = Math.max(3, count + 3);
+            recreateGrid(desiredSize, count);
+        }
     }
 
     function updateSizeBoundsForPlayers(pCount) {
@@ -250,9 +257,20 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         // clamp to minimum 2
         const mapped = Math.max(2, clampPlayers(parseInt(nearest.dataset.count, 10)));
-        menuPlayerCount = mapped;
-        updateSizeBoundsForPlayers(mapped);
-        highlightPlayerBoxes(mapped);
+        onMenuPlayerCountChanged(mapped);
+    }
+
+    // Centralized handler for menu player count changes
+    function onMenuPlayerCountChanged(newCount) {
+        menuPlayerCount = newCount;
+        const desiredSize = Math.max(3, newCount + 3);
+        if (menuGridSize) menuGridSize.value = String(desiredSize);
+        updateSizeBoundsForPlayers(newCount);
+        highlightPlayerBoxes(newCount);
+
+        if (newCount !== playerCount || desiredSize !== gridSize) {
+            recreateGrid(desiredSize, newCount);
+        }
     }
 //#endregion
 
@@ -265,42 +283,78 @@ document.addEventListener('DOMContentLoaded', () => {
     let gameWon = false;
     let invalidInitialPositions = [];
 
-    if (gridSize % 2 === 0) {
-        const middle = gridSize / 2;
-        invalidInitialPositions = [
-            { r: middle - 1, c: middle - 1 },
-            { r: middle - 1, c: middle },
-            { r: middle, c: middle - 1 },
-            { r: middle, c: middle }
-        ];
-    } else {
-        const middle = Math.floor(gridSize / 2);
-        invalidInitialPositions = [
-            { r: middle, c: middle },
-            { r: middle - 1, c: middle },
-            { r: middle + 1, c: middle },
-            { r: middle, c: middle - 1 },
-            { r: middle, c: middle + 1 }
-        ];
-    }
-
-    gridElement.style.gridTemplateColumns = `repeat(${gridSize}, 1fr)`;
-
-    for (let i = 0; i < gridSize; i++) {
-        grid[i] = [];
-        for (let j = 0; j < gridSize; j++) {
-            const cell = document.createElement('div');
-            cell.className = 'cell';
-            cell.dataset.row = i;
-            cell.dataset.col = j;
-            cell.addEventListener('click', () => handleClick(i, j));
-            grid[i][j] = { value: 0, player: '' };
-            gridElement.appendChild(cell);
+    function computeInvalidInitialPositions(size) {
+        const positions = [];
+        if (size % 2 === 0) {
+            const middle = size / 2;
+            positions.push({ r: middle - 1, c: middle - 1 });
+            positions.push({ r: middle - 1, c: middle });
+            positions.push({ r: middle, c: middle - 1 });
+            positions.push({ r: middle, c: middle });
+        } else {
+            const middle = Math.floor(size / 2);
+            positions.push({ r: middle, c: middle });
+            positions.push({ r: middle - 1, c: middle });
+            positions.push({ r: middle + 1, c: middle });
+            positions.push({ r: middle, c: middle - 1 });
+            positions.push({ r: middle, c: middle + 1 });
         }
+        return positions;
     }
 
-    highlightInvalidInitialPositions();
-    document.body.className = playerColors[currentPlayer];
+    function recreateGrid(newSize = gridSize, newPlayerCount = playerCount) {
+        // update globals
+        gridSize = newSize;
+        playerCount = newPlayerCount;
+
+        // update CSS variable and layout
+        document.documentElement.style.setProperty('--grid-size', gridSize);
+        gridElement.style.gridTemplateColumns = `repeat(${gridSize}, 1fr)`;
+
+        // clear previous DOM cells
+        while (gridElement.firstChild) gridElement.removeChild(gridElement.firstChild);
+
+        // reset game state arrays according to new sizes
+        grid = [];
+        initialPlacements = Array(playerCount).fill(false);
+        gameWon = false;
+        isProcessing = false;
+        performanceMode = false;
+        currentPlayer = Math.floor(Math.random() * playerCount);
+
+        // recompute invalid initial positions for new size
+        invalidInitialPositions = computeInvalidInitialPositions(gridSize);
+
+        // build new cells and attach listeners
+        for (let i = 0; i < gridSize; i++) {
+            grid[i] = [];
+            for (let j = 0; j < gridSize; j++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.dataset.row = i;
+                cell.dataset.col = j;
+                // Use a small wrapper to capture i/j values for event handler
+                cell.addEventListener('click', ((r, c) => () => handleClick(r, c))(i, j));
+                grid[i][j] = { value: 0, player: '' };
+                gridElement.appendChild(cell);
+            }
+        }
+
+        // highlight invalid positions with new layout
+        highlightInvalidInitialPositions();
+        document.body.className = playerColors[currentPlayer];
+
+        // If the menu's grid input doesn't match newSize, update it to reflect the actual grid
+        if (menuGridSize) {
+            menuGridSize.value = String(Math.max(3, newSize));
+        }
+
+        // Ensure the visual player boxes reflect new player count
+        highlightPlayerBoxes(clampPlayers(playerCount));
+    }
+
+    // create initial grid
+    recreateGrid(gridSize, playerCount);
 //#endregion
 
 //#region Game Logic Functions

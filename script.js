@@ -156,6 +156,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 //#endregion
 
+
 //#region Menu Functions
     function hexToRgb(hex) {
         const h = hex.replace('#', '');
@@ -274,6 +275,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 //#endregion
 
+
 //#region Actual Game Logic
     let grid = [];
     let isProcessing = false;
@@ -283,25 +285,12 @@ document.addEventListener('DOMContentLoaded', () => {
     let gameWon = false;
     let invalidInitialPositions = [];
 
-    function computeInvalidInitialPositions(size) {
-        const positions = [];
-        if (size % 2 === 0) {
-            const middle = size / 2;
-            positions.push({ r: middle - 1, c: middle - 1 });
-            positions.push({ r: middle - 1, c: middle });
-            positions.push({ r: middle, c: middle - 1 });
-            positions.push({ r: middle, c: middle });
-        } else {
-            const middle = Math.floor(size / 2);
-            positions.push({ r: middle, c: middle });
-            positions.push({ r: middle - 1, c: middle });
-            positions.push({ r: middle + 1, c: middle });
-            positions.push({ r: middle, c: middle - 1 });
-            positions.push({ r: middle, c: middle + 1 });
-        }
-        return positions;
-    }
+    // create initial grid
+    recreateGrid(gridSize, playerCount);
+//#endregion
 
+
+//#region Game Logic Functions
     function recreateGrid(newSize = gridSize, newPlayerCount = playerCount) {
         // update globals
         gridSize = newSize;
@@ -353,11 +342,6 @@ document.addEventListener('DOMContentLoaded', () => {
         highlightPlayerBoxes(clampPlayers(playerCount));
     }
 
-    // create initial grid
-    recreateGrid(gridSize, playerCount);
-//#endregion
-
-//#region Game Logic Functions
     function handleClick(row, col) {
         if (isProcessing || gameWon) return;
 
@@ -647,6 +631,25 @@ document.addEventListener('DOMContentLoaded', () => {
             pos.r >= 0 && pos.r < gridSize && pos.c >= 0 && pos.c < gridSize &&
             grid[pos.r][pos.c].player !== ''
         );
+    }
+
+    function computeInvalidInitialPositions(size) {
+        const positions = [];
+        if (size % 2 === 0) {
+            const middle = size / 2;
+            positions.push({ r: middle - 1, c: middle - 1 });
+            positions.push({ r: middle - 1, c: middle });
+            positions.push({ r: middle, c: middle - 1 });
+            positions.push({ r: middle, c: middle });
+        } else {
+            const middle = Math.floor(size / 2);
+            positions.push({ r: middle, c: middle });
+            positions.push({ r: middle - 1, c: middle });
+            positions.push({ r: middle + 1, c: middle });
+            positions.push({ r: middle, c: middle - 1 });
+            positions.push({ r: middle, c: middle + 1 });
+        }
+        return positions;
     }
 
     function highlightInvalidInitialPositions() {

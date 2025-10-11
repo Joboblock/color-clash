@@ -14,6 +14,7 @@ body {
     transition: background-color var(--delay-animation);
 }
 
+/* #region Menu Styles */
 /* Use Nunito for all text */
 body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
     font-family: 'Nunito', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
@@ -168,7 +169,10 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
     background: var(--box-inner, #999);
     box-shadow: 0 8px 20px rgba(0,0,0,0.18);
 }
+/* #endregion */
 
+
+/* #region Game Styles */
 /* grid-size slider track coloring using CSS variable */
 .grid-size { display: none; }
 
@@ -270,3 +274,4 @@ body.cyan { background-color: var(--body-cyan); }
 body.blue { background-color: var(--body-blue); }
 body.purple { background-color: var(--body-purple); }
 body.magenta { background-color: var(--body-magenta); }
+/* #endregion */

@@ -1,11 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
     const gridElement = document.querySelector('.grid');
-    
-    // Function to get URL parameters
-    function getQueryParam(param) {
-        const urlParams = new URLSearchParams(window.location.search);
-        return urlParams.get(param);
-    }
 
     // Define available player colors
     const playerColors = ['red', 'blue', 'yellow', 'green', 'cyan', 'orange', 'purple', 'magenta'];
@@ -17,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Get grid size from URL
     let gridSize = parseInt(getQueryParam('size')) || (3 + playerCount);
 
+    // Game Parameters
     const maxCellValue = 5;
     const delayExplosion = 500;
     const delayAnimation = 300;
@@ -24,32 +19,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.documentElement.style.setProperty('--delay-explosion', `${delayExplosion}ms`);
     document.documentElement.style.setProperty('--delay-animation', `${delayAnimation}ms`);
     document.documentElement.style.setProperty('--grid-size', gridSize);
-    
+
+    // Function to get URL parameters
+    function getQueryParam(param) {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(param);
+    }
+
 //#region Menu Stuff
     const menu = document.getElementById('mainMenu');
     // removed hidden native range input; visual slider maintains menuPlayerCount
     let menuPlayerCount = playerCount; // current selection from visual slider
-
-    // Temporary debug display for the menuPlayerCount variable
-    const debugDisplay = document.createElement('div');
-    debugDisplay.id = 'debugMenuPlayerCount';
-    // lightweight inline styling so no CSS edits are required
-    debugDisplay.style.position = 'fixed';
-    debugDisplay.style.right = '12px';
-    debugDisplay.style.bottom = '12px';
-    debugDisplay.style.padding = '8px 10px';
-    debugDisplay.style.background = 'rgba(0,0,0,0.72)';
-    debugDisplay.style.color = '#ffffff';
-    debugDisplay.style.fontFamily = 'monospace, monospace';
-    debugDisplay.style.fontSize = '13px';
-    debugDisplay.style.borderRadius = '8px';
-    debugDisplay.style.zIndex = '9999';
-    debugDisplay.style.pointerEvents = 'none';
-    document.body.appendChild(debugDisplay);
-
-    function updateDebugMenuPlayerCount() {
-        debugDisplay.textContent = `menuPlayerCount: ${menuPlayerCount}`;
-    }
 
     const menuGridSize = document.getElementById('menuGridSize');
     const startBtn = document.getElementById('startBtn');
@@ -73,6 +53,106 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Ensure CSS variables for colors are set on :root BEFORE building boxes
+    Object.entries(innerCircleColors).forEach(([key, hex]) => {
+        // inner circle strong color (hex)
+        document.documentElement.style.setProperty(`--inner-${key}`, hex);
+        // cell color: pastel mix toward white (opaque), use 70% white by default
+        const pastel = mixWithWhite(hex, 0.5);
+        document.documentElement.style.setProperty(`--cell-${key}`, pastel);
+        // body color: slightly darker by multiplying channels
+        const dark = (c) => Math.max(0, Math.min(255, Math.round(c * 0.88)));
+        const { r: rr, g: gg, b: bb } = hexToRgb(hex);
+        document.documentElement.style.setProperty(`--body-${key}`, `rgb(${dark(rr)}, ${dark(gg)}, ${dark(bb)})`);
+    });
+
+    buildPlayerBoxes();
+    // highlight using initial URL or default
+    const initialPlayersToShow = clampPlayers(playerCount);
+    highlightPlayerBoxes(initialPlayersToShow);
+
+    // Start with URL or defaults
+    menuPlayerCount = clampPlayers(playerCount);
+    updateSizeBoundsForPlayers(menuPlayerCount);
+
+    // Decide initial menu visibility: only open menu if no players/size params OR preview param is present
+    const initialParams = new URLSearchParams(window.location.search);
+    const hasPlayersOrSize = initialParams.has('players') || initialParams.has('size');
+    const isPreview = initialParams.has('preview');
+    if (hasPlayersOrSize && !isPreview) {
+        // hide menu when explicit game params provided (and not in preview mode)
+        if (menu) menu.style.display = 'none';
+    } else {
+        if (menu) menu.style.display = '';
+    }
+
+    
+    
+    playerBoxSlider.addEventListener('pointerdown', (e) => {
+        isDragging = true;
+        playerBoxSlider.setPointerCapture(e.pointerId);
+        setPlayerCountFromPointer(e.clientX);
+    });
+
+    playerBoxSlider.addEventListener('pointermove', (e) => {
+        if (!isDragging) return;
+        setPlayerCountFromPointer(e.clientX);
+    });
+
+    playerBoxSlider.addEventListener('pointerup', (e) => {
+        isDragging = false;
+        try { playerBoxSlider.releasePointerCapture(e.pointerId); } catch (err) {}
+    });
+
+    // Also handle pointercancel/leave
+    playerBoxSlider.addEventListener('pointercancel', () => { isDragging = false; });
+    playerBoxSlider.addEventListener('pointerleave', (e) => { if (isDragging) setPlayerCountFromPointer(e.clientX); });
+
+    // validate on unfocus or Enter
+    menuGridSize.addEventListener('blur', validateGridSize);
+    menuGridSize.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            validateGridSize();
+            menuGridSize.blur(); // optional: trigger blur to close keyboard on mobile
+        }
+    });
+
+    startBtn.addEventListener('click', () => {
+        const p = clampPlayers(menuPlayerCount);
+        let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
+        // enforce relationship: size must be >= 3 + players
+        const minAllowed = 3 + p;
+        if (s < minAllowed) s = minAllowed;
+        // enforce upper bound from number input
+        const maxSz = parseInt(menuGridSize.max);
+        if (s > maxSz) s = maxSz;
+        // set params and reload so existing initialization picks them up
+        const params = new URLSearchParams(window.location.search);
+        // remove preview when starting
+        params.delete('preview');
+        params.set('players', String(p));
+        params.set('size', String(s));
+        window.location.search = params.toString();
+    });
+
+    // Preview button: add preview=true and players/size to URL then reload
+    previewBtn.addEventListener('click', () => {
+        const p = clampPlayers(menuPlayerCount);
+        let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
+        const minAllowed = 3 + p;
+        if (s < minAllowed) s = minAllowed;
+        const maxSz = parseInt(menuGridSize.max);
+        if (s > maxSz) s = maxSz;
+
+        const params = new URLSearchParams(window.location.search);
+        params.set('players', String(p));
+        params.set('size', String(s));
+        params.set('preview', 'true');
+        window.location.search = params.toString();
+    });
+//#endregion
+
+//#region Menu Functions
     function hexToRgb(hex) {
         const h = hex.replace('#', '');
         const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
@@ -87,18 +167,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const mix = (c) => Math.round((1 - factor) * c + factor * 255);
         return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
     }
-
-    Object.entries(innerCircleColors).forEach(([key, hex]) => {
-        // inner circle strong color (hex)
-        document.documentElement.style.setProperty(`--inner-${key}`, hex);
-        // cell color: pastel mix toward white (opaque), use 70% white by default
-        const pastel = mixWithWhite(hex, 0.5);
-        document.documentElement.style.setProperty(`--cell-${key}`, pastel);
-        // body color: slightly darker by multiplying channels
-        const dark = (c) => Math.max(0, Math.min(255, Math.round(c * 0.88)));
-        const { r: rr, g: gg, b: bb } = hexToRgb(hex);
-        document.documentElement.style.setProperty(`--body-${key}`, `rgb(${dark(rr)}, ${dark(gg)}, ${dark(bb)})`);
-    });
 
     // Build boxes for counts 1..maxPlayers (we'll enforce a minimum selection of 2)
     function buildPlayerBoxes() {
@@ -138,15 +206,30 @@ document.addEventListener('DOMContentLoaded', () => {
         playerBoxSlider.setAttribute('aria-valuenow', String(count));
         // update internal selection
         menuPlayerCount = count;
-        // update temporary debug display
-        updateDebugMenuPlayerCount();
     }
 
-    buildPlayerBoxes();
-    // highlight using initial URL or default
-    const initialPlayersToShow = clampPlayers(playerCount);
-    highlightPlayerBoxes(initialPlayersToShow);
-    updateDebugMenuPlayerCount();
+    function updateSizeBoundsForPlayers(pCount) {
+        const desired = pCount + 3;
+        menuGridSize.value = String(desired);
+    }
+
+    // Sync functions
+    function clampPlayers(n) {
+        const v = Math.max(2, Math.min(maxPlayers, Math.floor(n) || 2));
+        return v;
+    }
+
+    function validateGridSize() {
+        let val = parseInt(menuGridSize.value, 10);
+        const minSz = 3;
+        const maxSz = 16;
+
+        if (isNaN(val)) val = menuPlayerCount + 3; // reset to default if empty
+        if (val < minSz) val = minSz;
+        if (val > maxSz) val = maxSz;
+
+        menuGridSize.value = String(val);
+    }
 
     // Make the visual box slider draggable like a real slider
     let isDragging = false;
@@ -171,111 +254,6 @@ document.addEventListener('DOMContentLoaded', () => {
         updateSizeBoundsForPlayers(mapped);
         highlightPlayerBoxes(mapped);
     }
-
-    playerBoxSlider.addEventListener('pointerdown', (e) => {
-        isDragging = true;
-        playerBoxSlider.setPointerCapture(e.pointerId);
-        setPlayerCountFromPointer(e.clientX);
-    });
-
-    playerBoxSlider.addEventListener('pointermove', (e) => {
-        if (!isDragging) return;
-        setPlayerCountFromPointer(e.clientX);
-    });
-
-    playerBoxSlider.addEventListener('pointerup', (e) => {
-        isDragging = false;
-        try { playerBoxSlider.releasePointerCapture(e.pointerId); } catch (err) {}
-    });
-
-    // Also handle pointercancel/leave
-    playerBoxSlider.addEventListener('pointercancel', () => { isDragging = false; });
-    playerBoxSlider.addEventListener('pointerleave', (e) => { if (isDragging) setPlayerCountFromPointer(e.clientX); });
-
-    function updateSizeBoundsForPlayers(pCount) {
-        const desired = pCount + 3;
-        menuGridSize.value = String(desired);
-    }
-
-    // Start with URL or defaults
-    menuPlayerCount = clampPlayers(playerCount);
-    updateSizeBoundsForPlayers(menuPlayerCount);
-
-    // Decide initial menu visibility: only open menu if no players/size params OR preview param is present
-    const initialParams = new URLSearchParams(window.location.search);
-    const hasPlayersOrSize = initialParams.has('players') || initialParams.has('size');
-    const isPreview = initialParams.has('preview');
-    if (hasPlayersOrSize && !isPreview) {
-        // hide menu when explicit game params provided (and not in preview mode)
-        if (menu) menu.style.display = 'none';
-    } else {
-        if (menu) menu.style.display = '';
-    }
-
-    // Sync functions
-    function clampPlayers(n) {
-        const v = Math.max(2, Math.min(maxPlayers, Math.floor(n) || 2));
-        return v;
-    }
-
-    // --- Grid Size Input Handling ---
-    // default = players + 3 (already applied in updateSizeBoundsForPlayers)
-
-    function validateGridSize() {
-        let val = parseInt(menuGridSize.value, 10);
-        const minSz = 3;
-        const maxSz = 16;
-
-        if (isNaN(val)) val = menuPlayerCount + 3; // reset to default if empty
-        if (val < minSz) val = minSz;
-        if (val > maxSz) val = maxSz;
-
-        menuGridSize.value = String(val);
-    }
-
-    // validate on unfocus or Enter
-    menuGridSize.addEventListener('blur', validateGridSize);
-    menuGridSize.addEventListener('keydown', e => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            validateGridSize();
-            menuGridSize.blur(); // optional: trigger blur to close keyboard on mobile
-        }
-    });
-
-    startBtn.addEventListener('click', () => {
-        const p = clampPlayers(menuPlayerCount);
-    let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
-        // enforce relationship: size must be >= 3 + players
-        const minAllowed = 3 + p;
-        if (s < minAllowed) s = minAllowed;
-    // enforce upper bound from number input
-    const maxSz = parseInt(menuGridSize.max);
-    if (s > maxSz) s = maxSz;
-        // set params and reload so existing initialization picks them up
-        const params = new URLSearchParams(window.location.search);
-        // remove preview when starting
-        params.delete('preview');
-        params.set('players', String(p));
-        params.set('size', String(s));
-        window.location.search = params.toString();
-    });
-
-    // Preview button: add preview=true and players/size to URL then reload
-    previewBtn.addEventListener('click', () => {
-        const p = clampPlayers(menuPlayerCount);
-    let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
-        const minAllowed = 3 + p;
-        if (s < minAllowed) s = minAllowed;
-    const maxSz = parseInt(menuGridSize.max);
-        if (s > maxSz) s = maxSz;
-
-        const params = new URLSearchParams(window.location.search);
-        params.set('players', String(p));
-        params.set('size', String(s));
-        params.set('preview', 'true');
-        window.location.search = params.toString();
-    });
 //#endregion
 
 //#region Actual Game Logic
@@ -323,7 +301,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     highlightInvalidInitialPositions();
     document.body.className = playerColors[currentPlayer];
+//#endregion
 
+//#region Game Logic Functions
     function handleClick(row, col) {
         if (isProcessing || gameWon) return;
 

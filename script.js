@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Game Parameters
     const maxCellValue = 5;
+    const cellExplodeThreshold = 4;
     const delayExplosion = 500;
     const delayAnimation = 300;
 
@@ -400,7 +401,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 grid[row][col].value++;
                 updateCell(row, col, 0, grid[row][col].player, true);
 
-                if (grid[row][col].value >= 4) {
+                if (grid[row][col].value >= cellExplodeThreshold) {
                     isProcessing = true;
                     setTimeout(processExplosions, delayExplosion); //DELAY Explosions
                 } else {
@@ -443,7 +444,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Identify cells that need to explode
         for (let i = 0; i < gridSize; i++) {
             for (let j = 0; j < gridSize; j++) {
-                if (grid[i][j].value >= 4) {
+                if (grid[i][j].value >= cellExplodeThreshold) {
                     cellsToExplode.push({ row: i, col: j, player: grid[i][j].player, value: grid[i][j].value });
                 }
             }
@@ -528,7 +529,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateCell(row, col, explosionValue = 0, player = grid[row][col].player, causedByExplosion = false) {
-        if (grid[row][col].value < maxCellValue) {
+        if (grid[row][col].value <= maxCellValue) {
             grid[row][col].value = Math.min(maxCellValue, grid[row][col].value + explosionValue);
             grid[row][col].player = player;
             const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);

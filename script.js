@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const menuGridSize = document.getElementById('menuGridSize');
     const startBtn = document.getElementById('startBtn');
-    const previewBtn = document.getElementById('previewBtn');
+    const trainBtn = document.getElementById('trainBtn');
 
     // set dynamic bounds
     const maxPlayers = playerColors.length;
@@ -146,12 +146,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Preview button is repurposed to "Train"
-    if (previewBtn) {
-        previewBtn.textContent = 'Train';
-        previewBtn.id = 'trainBtn';
-        previewBtn.setAttribute('aria-label', 'Train');
+    if (trainBtn) {
+        trainBtn.textContent = 'Train';
+        trainBtn.id = 'trainBtn';
+        trainBtn.setAttribute('aria-label', 'Train');
 
-        previewBtn.addEventListener('click', () => {
+        trainBtn.addEventListener('click', () => {
             const p = clampPlayers(menuPlayerCount);
             let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
             const minAllowed = 3 + p;

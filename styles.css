@@ -227,12 +227,16 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
 
 .value-circle {
     position: absolute;
-    width: 20%;  /* Adjust size as needed */
-    height: 20%; /* Adjust size as needed */
+    width: 20%;
+    height: 20%;
     background-color: #fff;
     border-radius: 50%;
     z-index: 3; /* Above inner circles */
-    transition: transform var(--delay-animation) ease, opacity var(--delay-animation) ease;
+    /* Use CSS variables for proportional translation */
+    transform: translate(calc(var(--tx, 0) * 1%), calc(var(--ty, 0) * 1%));
+    transition:
+        transform var(--delay-animation) ease,
+        opacity var(--delay-animation) ease;
     display: flex;
     justify-content: center;
     align-items: center;

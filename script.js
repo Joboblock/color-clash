@@ -547,13 +547,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateValueCircles(innerCircle, value, causedByExplosion) {
         if (performanceMode) {
-            // Remove any existing value circles when in performance mode
             innerCircle.querySelectorAll('.value-circle').forEach(circle => circle.remove());
             return;
         }
 
         const cellSize = innerCircle.parentElement.offsetWidth;
-        const radius = cellSize / 6 * (value === 1 ? 0 : (value === 2 ? 1 : (value === 3 ? 2 / Math.sqrt(3) : Math.sqrt(2))));
+        const radius =
+            (cellSize / 6) *
+            (value === 1
+                ? 0
+                : value === 2
+                ? 1
+                : value === 3
+                ? 2 / Math.sqrt(3)
+                : Math.sqrt(2));
         const angleStep = 360 / value;
 
         const existingCircles = Array.from(innerCircle.children);
@@ -567,33 +574,52 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         for (let i = 0; i < value; i++) {
-            const angle = angleStep * i + (value == 3 ? 30 : value == 4 ? 45 : 0);
+            const angle = angleStep * i + (value === 3 ? 30 : value === 4 ? 45 : 0);
             const x = radius * Math.cos((angle * Math.PI) / 180);
             const y = radius * Math.sin((angle * Math.PI) / 180);
 
-            let valueCircle;
+            // Keep same percentage calculation you already used
+            const xPercent = (x / cellSize) * 600;
+            const yPercent = (y / cellSize) * 600;
 
-            if (i < existingCount) {
-                valueCircle = existingCircles[i];
-            } else {
+            let valueCircle;
+            const isNew = i >= existingCount;
+
+            if (isNew) {
+                // create new element in *initial* state (centered + invisible)
                 valueCircle = document.createElement('div');
                 valueCircle.className = 'value-circle';
+                // Start invisible and at no translation (so there's an initial state)
+                valueCircle.style.setProperty('--tx', 0);
+                valueCircle.style.setProperty('--ty', 0);
                 valueCircle.style.opacity = '0';
                 innerCircle.appendChild(valueCircle);
-            }
 
-            requestAnimationFrame(() => {
-                valueCircle.style.transform = `translate(${x}px, ${y}px)`;
-                valueCircle.style.opacity = '1';
-            });
+                // Next frames: let the browser paint the initial state, then set the final state
+                requestAnimationFrame(() => {
+                    // second RAF ensures initial state has been rendered
+                    requestAnimationFrame(() => {
+                        valueCircle.style.setProperty('--tx', xPercent);
+                        valueCircle.style.setProperty('--ty', yPercent);
+                        valueCircle.style.opacity = '1';
+                    });
+                });
+            } else {
+                valueCircle = existingCircles[i];
+                // update target vars — transition will animate from current position
+                // do this inside RAF so the browser batches the change with paint
+                requestAnimationFrame(() => {
+                    valueCircle.style.setProperty('--tx', xPercent);
+                    valueCircle.style.setProperty('--ty', yPercent);
+                    valueCircle.style.opacity = '1';
+                });
+            }
         }
 
         for (let i = value; i < existingCount; i++) {
             const valueCircle = existingCircles[i];
             valueCircle.style.opacity = '0';
-            setTimeout(() => {
-                valueCircle.remove();
-            }, delayAnimation); //Remove exploded valueCircle
+            setTimeout(() => valueCircle.remove(), delayAnimation); //Remove exploded valueCircle
         }
     }
 

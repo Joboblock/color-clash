@@ -1,6 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
     const gridElement = document.querySelector('.grid');
 
+    // Detect train mode via URL param
+    const urlParams = new URLSearchParams(window.location.search);
+    const isTrainMode = urlParams.has('train');
+
     // Define available player colors
     const playerColors = ['red', 'blue', 'yellow', 'green', 'cyan', 'orange', 'purple', 'magenta'];
 
@@ -12,8 +16,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let gridSize = parseInt(getQueryParam('size')) || (3 + playerCount);
 
     // Game Parameters
-    const maxCellValue = 7;
-    const initialPlacementValue = 7;
+    const maxCellValue = 5;
+    const initialPlacementValue = 5;
+    const cellExplodeThreshold = 4;
     const delayExplosion = 500;
     const delayAnimation = 300;
 
@@ -140,21 +145,28 @@ document.addEventListener('DOMContentLoaded', () => {
         window.location.search = params.toString();
     });
 
-    // Preview button: add preview=true and players/size to URL then reload
-    previewBtn.addEventListener('click', () => {
-        const p = clampPlayers(menuPlayerCount);
-        let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
-        const minAllowed = 3 + p;
-        if (s < minAllowed) s = minAllowed;
-        const maxSz = parseInt(menuGridSize.max);
-        if (s > maxSz) s = maxSz;
+    // Preview button is repurposed to "Train"
+    if (previewBtn) {
+        previewBtn.textContent = 'Train';
+        previewBtn.id = 'trainBtn';
+        previewBtn.setAttribute('aria-label', 'Train');
 
-        const params = new URLSearchParams(window.location.search);
-        params.set('players', String(p));
-        params.set('size', String(s));
-        params.set('preview', 'true');
-        window.location.search = params.toString();
-    });
+        previewBtn.addEventListener('click', () => {
+            const p = clampPlayers(menuPlayerCount);
+            let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
+            const minAllowed = 3 + p;
+            if (s < minAllowed) s = minAllowed;
+            const maxSz = parseInt(menuGridSize.max);
+            if (s > maxSz) s = maxSz;
+
+            const params = new URLSearchParams(window.location.search);
+            params.set('players', String(p));
+            params.set('size', String(s));
+            // set train mode
+            params.set('train', 'true');
+            window.location.search = params.toString();
+        });
+    }
 //#endregion
 
 
@@ -286,6 +298,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let gameWon = false;
     let invalidInitialPositions = [];
 
+    // Train mode globals
+    let trainMode = isTrainMode;
+    const humanPlayer = 0; // first selected color is player index 0
+
     // create initial grid
     recreateGrid(gridSize, playerCount);
 //#endregion
@@ -341,6 +357,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Ensure the visual player boxes reflect new player count
         highlightPlayerBoxes(clampPlayers(playerCount));
+
+        // If train mode is enabled, force human to be first color and
+        // set the current player to the human (so they control the first color)
+        if (trainMode) {
+            // Ensure humanPlayer index is valid for current playerCount
+            // (humanPlayer is 0 by design; defensive check)
+            currentPlayer = Math.min(humanPlayer, playerCount - 1);
+            document.body.className = playerColors[currentPlayer];
+            updateGrid();
+            // Trigger AI if the first randomly chosen currentPlayer isn't the human
+            maybeTriggerAIMove();
+        }
     }
 
     function handleClick(row, col) {
@@ -374,7 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 grid[row][col].value++;
                 updateCell(row, col, 0, grid[row][col].player, true);
 
-                if (grid[row][col].value >= 4) {
+                if (grid[row][col].value >= cellExplodeThreshold) {
                     isProcessing = true;
                     setTimeout(processExplosions, delayExplosion); //DELAY Explosions
                 } else {
@@ -417,7 +445,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Identify cells that need to explode
         for (let i = 0; i < gridSize; i++) {
             for (let j = 0; j < gridSize; j++) {
-                if (grid[i][j].value >= 4) {
+                if (grid[i][j].value >= cellExplodeThreshold) {
                     cellsToExplode.push({ row: i, col: j, player: grid[i][j].player, value: grid[i][j].value });
                 }
             }
@@ -502,7 +530,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateCell(row, col, explosionValue = 0, player = grid[row][col].player, causedByExplosion = false) {
-        if (grid[row][col].value < maxCellValue) {
+        if (grid[row][col].value <= maxCellValue) {
             grid[row][col].value = Math.min(maxCellValue, grid[row][col].value + explosionValue);
             grid[row][col].player = player;
             const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
@@ -631,6 +659,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.body.className = playerColors[currentPlayer];
         updateGrid();
+
+        // If in train mode, possibly trigger AI move for non-human players
+        maybeTriggerAIMove();
     }
 
     function hasCells(playerIndex) {
@@ -747,6 +778,69 @@ document.addEventListener('DOMContentLoaded', () => {
 
         highlightInvalidInitialPositions();
         document.body.className = playerColors[currentPlayer];
+    }
+//#endregion
+
+//#region Training / AI helpers (new)
+    // Called after each turn change to possibly run AI moves
+    function maybeTriggerAIMove() {
+        if (!trainMode) return;
+        if (gameWon || isProcessing) return;
+        if (currentPlayer === humanPlayer) return;
+
+        // slight delay so UI/animations update before AI makes its move
+        setTimeout(() => {
+            if (isProcessing || gameWon || currentPlayer === humanPlayer) return;
+            aiMakeMoveFor(currentPlayer);
+        }, 350);
+    }
+
+    function aiMakeMoveFor(playerIndex) {
+        if (isProcessing || gameWon) return;
+
+        // If this player still needs to perform initial placement
+        if (!initialPlacements[playerIndex]) {
+            // gather all empty cells that are valid initial placements
+            const candidates = [];
+            for (let r = 0; r < gridSize; r++) {
+                for (let c = 0; c < gridSize; c++) {
+                    if (grid[r][c].value === 0 && !isInitialPlacementInvalid(r, c)) {
+                        candidates.push({ r, c });
+                    }
+                }
+            }
+
+            if (candidates.length === 0) {
+                // No valid initial placement found: mark as placed to avoid blocking
+                initialPlacements[playerIndex] = true;
+                switchPlayer();
+                return;
+            }
+
+            const choice = candidates[Math.floor(Math.random() * candidates.length)];
+            // simulate click (use direct call to avoid relying on DOM click event propagation)
+            handleClick(choice.r, choice.c);
+            return;
+        }
+
+        // After initial placements: pick a random cell that belongs to this player
+        const owned = [];
+        for (let r = 0; r < gridSize; r++) {
+            for (let c = 0; c < gridSize; c++) {
+                if (grid[r][c].player === playerColors[playerIndex]) {
+                    owned.push({ r, c });
+                }
+            }
+        }
+
+        if (owned.length === 0) {
+            // No owned cells: skip turn
+            switchPlayer();
+            return;
+        }
+
+        const pick = owned[Math.floor(Math.random() * owned.length)];
+        handleClick(pick.r, pick.c);
     }
 //#endregion
 });

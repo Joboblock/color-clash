@@ -781,66 +781,313 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 //#endregion
 
-//#region Training / AI helpers (new)
+//#region Training / AI helpers (with debug mode)
+    // AI debug mode if URL contains ai_debug=true
+    const aiDebug = true;
+
     // Called after each turn change to possibly run AI moves
     function maybeTriggerAIMove() {
         if (!trainMode) return;
         if (gameWon || isProcessing) return;
         if (currentPlayer === humanPlayer) return;
 
-        // slight delay so UI/animations update before AI makes its move
+        // small delay to allow UI updates
         setTimeout(() => {
             if (isProcessing || gameWon || currentPlayer === humanPlayer) return;
             aiMakeMoveFor(currentPlayer);
         }, 350);
     }
 
-    function aiMakeMoveFor(playerIndex) {
-        if (isProcessing || gameWon) return;
+    // Clone the grid for safe simulation
+    function cloneGridForSim() {
+        const sim = [];
+        for (let r = 0; r < gridSize; r++) {
+            sim[r] = [];
+            for (let c = 0; c < gridSize; c++) {
+                sim[r][c] = { value: grid[r][c].value, player: grid[r][c].player };
+            }
+        }
+        return sim;
+    }
 
-        // If this player still needs to perform initial placement
-        if (!initialPlacements[playerIndex]) {
-            // gather all empty cells that are valid initial placements
-            const candidates = [];
-            for (let r = 0; r < gridSize; r++) {
-                for (let c = 0; c < gridSize; c++) {
-                    if (grid[r][c].value === 0 && !isInitialPlacementInvalid(r, c)) {
-                        candidates.push({ r, c });
+    // Simulate chained explosions on a copied grid and count explosion events
+    // Returns { grid: simGrid, explosionCount: N }
+    function simulateExplosions(simGrid, simInitialPlacements) {
+        const maxCellValueLocal = maxCellValue;
+        let explosionCount = 0;
+
+        while (true) {
+            const cellsToExplode = [];
+            for (let i = 0; i < gridSize; i++) {
+                for (let j = 0; j < gridSize; j++) {
+                    if (simGrid[i][j].value >= 4) {
+                        cellsToExplode.push({ row: i, col: j, player: simGrid[i][j].player, value: simGrid[i][j].value });
                     }
                 }
             }
+            if (cellsToExplode.length === 0) break;
 
+            // Each cell in this list is one explosion event
+            explosionCount += cellsToExplode.length;
+
+            for (const cell of cellsToExplode) {
+                const { row, col, player, value } = cell;
+                const explosionValue = value - 3;
+
+                // clear origin
+                simGrid[row][col].value = 0;
+
+                // Determine whether this explosion occurs during the initial-placement phase
+                const isInitialPlacement = !simInitialPlacements.every(v => v);
+
+                let extraBackToOrigin = 0;
+                const targets = [];
+
+                if (row > 0) {
+                    targets.push({ r: row - 1, c: col });
+                } else if (isInitialPlacement) {
+                    extraBackToOrigin++;
+                }
+
+                if (row < gridSize - 1) {
+                    targets.push({ r: row + 1, c: col });
+                } else if (isInitialPlacement) {
+                    extraBackToOrigin++;
+                }
+
+                if (col > 0) {
+                    targets.push({ r: row, c: col - 1 });
+                } else if (isInitialPlacement) {
+                    extraBackToOrigin++;
+                }
+
+                if (col < gridSize - 1) {
+                    targets.push({ r: row, c: col + 1 });
+                } else if (isInitialPlacement) {
+                    extraBackToOrigin++;
+                }
+
+                // Apply explosionValue to targets and assign ownership
+                for (const t of targets) {
+                    const prev = simGrid[t.r][t.c].value;
+                    simGrid[t.r][t.c].value = Math.min(maxCellValueLocal, prev + explosionValue);
+                    simGrid[t.r][t.c].player = player;
+                }
+
+                // out-of-bounds fragments return to origin *only* during initial-placement explosions
+                if (extraBackToOrigin > 0 && isInitialPlacement) {
+                    const prev = simGrid[row][col].value;
+                    simGrid[row][col].value = Math.min(maxCellValueLocal, prev + extraBackToOrigin);
+                    simGrid[row][col].player = player;
+                }
+            }
+            // loop again to resolve new >=4 cells
+        }
+
+        return { grid: simGrid, explosionCount };
+    }
+
+    // Simulate applying a move and return { gain, explosions, resultGrid } FOR THE PLAYER
+    function simulateMoveGain(playerIndex, moveR, moveC, isInitialMove) {
+        // Copy state
+        const simGrid = cloneGridForSim();
+        const simInitialPlacements = initialPlacements.slice(); // copy of flags
+
+        // total for this player before
+        let beforePlayerTotal = 0;
+        for (let i = 0; i < gridSize; i++) {
+            for (let j = 0; j < gridSize; j++) {
+                if (simGrid[i][j].player === playerColors[playerIndex]) beforePlayerTotal += simGrid[i][j].value;
+            }
+        }
+
+        // Apply the candidate move in simulation
+        if (isInitialMove) {
+            simGrid[moveR][moveC].value = 5;
+            simGrid[moveR][moveC].player = playerColors[playerIndex];
+        } else {
+            const prev = simGrid[moveR][moveC].value;
+            simGrid[moveR][moveC].value = Math.min(maxCellValue, prev + 1);
+            simGrid[moveR][moveC].player = playerColors[playerIndex];
+        }
+
+        // Simulate full explosion resolution on the simulated grid
+        // simulateExplosions returns an object: { grid: simGrid, explosionCount }
+        const simResult = simulateExplosions(simGrid, simInitialPlacements);
+        const afterGrid = simResult.grid;
+        const explosionCount = simResult.explosionCount;
+
+        // total for this player after
+        let afterPlayerTotal = 0;
+        for (let i = 0; i < gridSize; i++) {
+            for (let j = 0; j < gridSize; j++) {
+                if (afterGrid[i][j].player === playerColors[playerIndex]) afterPlayerTotal += afterGrid[i][j].value;
+            }
+        }
+
+        return { gain: afterPlayerTotal - beforePlayerTotal, explosions: explosionCount, resultGrid: afterGrid };
+    }
+
+    // UI helper: ensure debug styles exist
+    function ensureAIDebugStyles() {
+        if (document.getElementById('aiDebugStyles')) return;
+        const style = document.createElement('style');
+        style.id = 'aiDebugStyles';
+        style.textContent = `
+            .ai-highlight {
+                outline: 4px solid rgba(255, 235, 59, 0.95) !important;
+                box-shadow: 0 0 18px rgba(255,235,59,0.6);
+                z-index: 50;
+            }
+            #aiDebugPanel {
+                position: fixed;
+                right: 12px;
+                bottom: 12px;
+                background: rgba(18,18,18,0.88);
+                color: #eaeaea;
+                padding: 10px 12px;
+                font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+                font-size: 13px;
+                border-radius: 8px;
+                box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+                max-width: 320px;
+                z-index: 1000;
+            }
+            #aiDebugPanel h4 { margin: 0 0 6px 0; font-size: 13px; }
+            #aiDebugPanel pre { margin: 6px 0 0 0; white-space: pre-wrap; font-family: monospace; font-size: 12px; }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // UI helper: show debug panel containing info and ordered candidate list
+    function showAIDebugPanel(info) {
+        ensureAIDebugStyles();
+        // Remove existing panel if present
+        const existing = document.getElementById('aiDebugPanel');
+        if (existing) existing.remove();
+
+        const panel = document.createElement('div');
+        panel.id = 'aiDebugPanel';
+
+        const title = document.createElement('h4');
+        title.textContent = `AI Debug — player ${currentPlayer} (${playerColors[currentPlayer]})`;
+        panel.appendChild(title);
+
+        const summary = document.createElement('div');
+        summary.innerHTML = `<strong>explosions:</strong> ${info.chosen.explosions} &nbsp; <strong>net value:</strong> ${info.chosen.gain}`;
+        panel.appendChild(summary);
+
+        const listTitle = document.createElement('div');
+        listTitle.style.marginTop = '6px';
+        listTitle.innerHTML = `<em>candidates (ordered by gain):</em>`;
+        panel.appendChild(listTitle);
+
+        const pre = document.createElement('pre');
+        pre.textContent = info.ordered.map((e, idx) => {
+            return `${idx + 1}. (${e.r},${e.c}) gain:${e.gain} expl:${e.explosions} srcVal:${e.srcVal}`;
+        }).join('\n');
+        panel.appendChild(pre);
+
+        document.body.appendChild(panel);
+    }
+
+    // UI helper: clear debug panel and highlights
+    function clearAIDebugUI() {
+        const existing = document.getElementById('aiDebugPanel');
+        if (existing) existing.remove();
+        document.querySelectorAll('.ai-highlight').forEach(el => el.classList.remove('ai-highlight'));
+    }
+
+    // AI: gather candidate moves, sort by cell value (0 for initial), evaluate gains and pick best.
+    // In debug mode, show chosen move and wait for a user click before executing.
+    function aiMakeMoveFor(playerIndex) {
+        if (isProcessing || gameWon) return;
+
+        const candidates = []; // {r,c,isInitial,sortKey,srcVal}
+
+        // If player still needs initial placement, candidates are empty valid cells
+        if (!initialPlacements[playerIndex]) {
+            for (let r = 0; r < gridSize; r++) {
+                for (let c = 0; c < gridSize; c++) {
+                    if (grid[r][c].value === 0 && !isInitialPlacementInvalid(r, c)) {
+                        candidates.push({ r, c, isInitial: true, sortKey: 0, srcVal: 0 });
+                    }
+                }
+            }
             if (candidates.length === 0) {
-                // No valid initial placement found: mark as placed to avoid blocking
+                // no valid initial placements: mark as placed to avoid blocking
                 initialPlacements[playerIndex] = true;
                 switchPlayer();
                 return;
             }
-
-            const choice = candidates[Math.floor(Math.random() * candidates.length)];
-            // simulate click (use direct call to avoid relying on DOM click event propagation)
-            handleClick(choice.r, choice.c);
-            return;
-        }
-
-        // After initial placements: pick a random cell that belongs to this player
-        const owned = [];
-        for (let r = 0; r < gridSize; r++) {
-            for (let c = 0; c < gridSize; c++) {
-                if (grid[r][c].player === playerColors[playerIndex]) {
-                    owned.push({ r, c });
+        } else {
+            // candidate moves are any cell owned by this player
+            for (let r = 0; r < gridSize; r++) {
+                for (let c = 0; c < gridSize; c++) {
+                    if (grid[r][c].player === playerColors[playerIndex]) {
+                        const key = Math.max(0, Math.min(3, grid[r][c].value));
+                        candidates.push({ r, c, isInitial: false, sortKey: key, srcVal: grid[r][c].value });
+                    }
                 }
+            }
+            if (candidates.length === 0) {
+                switchPlayer();
+                return;
             }
         }
 
-        if (owned.length === 0) {
-            // No owned cells: skip turn
-            switchPlayer();
+        // Sort by sortKey ascending (fewest circles first), per your instruction
+        candidates.sort((a, b) => a.sortKey - b.sortKey);
+
+        // Evaluate every candidate and gather results
+        const evaluated = []; // {r,c,isInitial,gain,explosions,srcVal}
+        for (const cand of candidates) {
+            const res = simulateMoveGain(playerIndex, cand.r, cand.c, cand.isInitial);
+            evaluated.push({
+                r: cand.r,
+                c: cand.c,
+                isInitial: cand.isInitial,
+                gain: res.gain,
+                explosions: res.explosions,
+                srcVal: cand.srcVal
+            });
+        }
+
+        // Order by gain descending for final selection and for display
+        evaluated.sort((a, b) => b.gain - a.gain || b.explosions - a.explosions);
+
+        // pick best gain(s)
+        let bestGain = evaluated[0].gain;
+        const bestMoves = evaluated.filter(e => e.gain === bestGain);
+        const chosen = bestMoves[Math.floor(Math.random() * bestMoves.length)];
+
+        if (aiDebug) {
+            // highlight chosen cell
+            clearAIDebugUI();
+            const cellEl = document.querySelector(`.cell[data-row="${chosen.r}"][data-col="${chosen.c}"]`);
+            if (cellEl) cellEl.classList.add('ai-highlight');
+
+            // prepare info object and show panel
+            const info = { chosen: chosen, ordered: evaluated.map(e => ({ r: e.r, c: e.c, gain: e.gain, explosions: e.explosions, srcVal: e.srcVal })) };
+            showAIDebugPanel(info);
+
+            // Wait for user confirmation (click anywhere) before executing the move
+            // Delay the attachment of the listener slightly so it doesn't immediately consume the event that triggered this flow
+            setTimeout(() => {
+                const onUserClick = (ev) => {
+                    // Remove panel and highlight
+                    clearAIDebugUI();
+                    // Execute chosen move
+                    handleClick(chosen.r, chosen.c);
+                };
+                document.addEventListener('click', onUserClick, { once: true });
+            }, 80);
+
             return;
         }
 
-        const pick = owned[Math.floor(Math.random() * owned.length)];
-        handleClick(pick.r, pick.c);
+        // Non-debug: execute chosen move immediately
+        handleClick(chosen.r, chosen.c);
     }
 //#endregion
 });

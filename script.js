@@ -12,7 +12,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let gridSize = parseInt(getQueryParam('size')) || (3 + playerCount);
 
     // Game Parameters
-    const maxCellValue = 5;
+    const maxCellValue = 7;
+    const initialPlacementValue = 7;
     const delayExplosion = 500;
     const delayAnimation = 300;
 
@@ -352,7 +353,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isInitialPlacementInvalid(row, col)) return;
 
             if (grid[row][col].value === 0) {
-                grid[row][col].value = 5;
+                grid[row][col].value = initialPlacementValue;
                 grid[row][col].player = playerColors[currentPlayer];
                 
                 cell.classList.add(playerColors[currentPlayer]);
@@ -551,76 +552,76 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // Layout reads: do these once
         const cellSize = innerCircle.parentElement.offsetWidth;
+        const innerWidth = innerCircle.clientWidth; // actual rendered width of inner circle
+        // .value-circle CSS sets width: 20% of the innerCircle, so compute the element width:
+        const valueCircleWidth = innerWidth * 0.20;
+
         const radius =
             (cellSize / 6) *
-            (value === 1
-                ? 0
-                : value === 2
-                ? 1
-                : value === 3
-                ? 2 / Math.sqrt(3)
+            (value === 1 ? 0
+                : value === 2 ? 1
+                : value === 3 ? 2 / Math.sqrt(3)
                 : Math.sqrt(2));
-        const angleStep = 360 / value;
+        const angleStep = 360 / Math.max(value, 1);
 
-        const existingCircles = Array.from(innerCircle.children);
+        const existingCircles = Array.from(innerCircle.querySelectorAll('.value-circle'));
         const existingCount = existingCircles.length;
 
         if (causedByExplosion) {
             innerCircle.style.transform = 'scale(1.05)';
-            setTimeout(() => {
-                innerCircle.style.transform = '';
-            }, delayAnimation); //DELAY schmol innerCircle
+            setTimeout(() => innerCircle.style.transform = '', delayAnimation); //DELAY schmol innerCircle
         }
 
+        // Collect elements we created so we can set final state for all of them in one RAF
+        const newElements = [];
         for (let i = 0; i < value; i++) {
             const angle = angleStep * i + (value === 3 ? 30 : value === 4 ? 45 : 0);
             const x = radius * Math.cos((angle * Math.PI) / 180);
             const y = radius * Math.sin((angle * Math.PI) / 180);
 
-            // Keep same percentage calculation you already used
-            const xPercent = (x / cellSize) * 600;
-            const yPercent = (y / cellSize) * 600;
-
             let valueCircle;
             const isNew = i >= existingCount;
 
-            if (isNew) {
-                // create new element in *initial* state (centered + invisible)
+            if (!isNew) {
+                valueCircle = existingCircles[i];
+                // For existing elements, we update in the batch below (no double RAF per element)
+                newElements.push({ el: valueCircle, x, y });
+            } else {
                 valueCircle = document.createElement('div');
                 valueCircle.className = 'value-circle';
-                // Start invisible and at no translation (so there's an initial state)
+                // initial state: centered inside innerCircle and invisible
                 valueCircle.style.setProperty('--tx', 0);
                 valueCircle.style.setProperty('--ty', 0);
                 valueCircle.style.opacity = '0';
                 innerCircle.appendChild(valueCircle);
-
-                // Next frames: let the browser paint the initial state, then set the final state
-                requestAnimationFrame(() => {
-                    // second RAF ensures initial state has been rendered
-                    requestAnimationFrame(() => {
-                        valueCircle.style.setProperty('--tx', xPercent);
-                        valueCircle.style.setProperty('--ty', yPercent);
-                        valueCircle.style.opacity = '1';
-                    });
-                });
-            } else {
-                valueCircle = existingCircles[i];
-                // update target vars — transition will animate from current position
-                // do this inside RAF so the browser batches the change with paint
-                requestAnimationFrame(() => {
-                    valueCircle.style.setProperty('--tx', xPercent);
-                    valueCircle.style.setProperty('--ty', yPercent);
-                    valueCircle.style.opacity = '1';
-                });
+                newElements.push({ el: valueCircle, x, y, newlyCreated: true });
             }
         }
 
+        // Remove any surplus circles (fade out then remove)
         for (let i = value; i < existingCount; i++) {
             const valueCircle = existingCircles[i];
             valueCircle.style.opacity = '0';
-            setTimeout(() => valueCircle.remove(), delayAnimation); //Remove exploded valueCircle
+            setTimeout(() => valueCircle.remove(), delayAnimation);
         }
+
+        // One RAF to trigger all transitions together
+        requestAnimationFrame(() => {
+            // Optionally one more RAF can be used on extremely picky browsers, but usually one is enough.
+            for (const item of newElements) {
+                const { el, x, y } = item;
+                // compute percent relative to the *element's own width*, as translate(%) uses the element box
+                // element width = valueCircleWidth
+                const xPercent = (x / valueCircleWidth) * 100;
+                const yPercent = (y / valueCircleWidth) * 100;
+                // set CSS vars -> CSS transform uses them; transition runs
+                el.style.setProperty('--tx', xPercent);
+                el.style.setProperty('--ty', yPercent);
+                el.style.opacity = '1';
+            }
+        });
     }
 
     function switchPlayer() {

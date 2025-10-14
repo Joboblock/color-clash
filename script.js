@@ -787,6 +787,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const aiDebug = true;
     // Configure dataRespect branching factor K via URL param ai_k, default 3
     const dataRespectK = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_k')) || 10);
+    
+    // === AI CONSTANTS (tunable) ===
+    const AI_CONSTANTS = {
+        /** Max explosion waves before assuming infinite chain */
+        MAX_EXPLOSION_WAVES: gridSize * 3,
+
+        /** Number of top candidate moves to analyze deeper (already configured above) */
+        LOOKAHEAD_K: dataRespectK
+    };
 
     // Called after each turn change to possibly run AI moves
     function maybeTriggerAIMove() {
@@ -825,6 +834,98 @@ document.addEventListener('DOMContentLoaded', () => {
         return total;
     }
 
+    // === Explosion simulation with infinity detection ===
+    // Returns { grid, explosionCount, runaway: boolean }
+    function simulateExplosions(simGrid, simInitialPlacements) {
+        const maxCellValueLocal = maxCellValue;
+        let explosionCount = 0;
+        let iteration = 0;
+
+        while (true) {
+            iteration++;
+            if (iteration > AI_CONSTANTS.MAX_EXPLOSION_WAVES) {
+                // runaway detected
+                return { grid: simGrid, explosionCount, runaway: true };
+            }
+
+            const cellsToExplode = [];
+            for (let i = 0; i < gridSize; i++) {
+                for (let j = 0; j < gridSize; j++) {
+                    if (simGrid[i][j].value >= 4) {
+                        cellsToExplode.push({
+                            row: i,
+                            col: j,
+                            player: simGrid[i][j].player,
+                            value: simGrid[i][j].value
+                        });
+                    }
+                }
+            }
+
+            if (cellsToExplode.length === 0) break;
+            explosionCount += cellsToExplode.length;
+
+            for (const cell of cellsToExplode) {
+                const { row, col, player, value } = cell;
+                const explosionValue = value - 3;
+                simGrid[row][col].value = 0;
+
+                const isInitialPlacement = !simInitialPlacements.every(v => v);
+                let extraBackToOrigin = 0;
+                const targets = [];
+
+                if (row > 0) targets.push({ r: row - 1, c: col });
+                else if (isInitialPlacement) extraBackToOrigin++;
+
+                if (row < gridSize - 1) targets.push({ r: row + 1, c: col });
+                else if (isInitialPlacement) extraBackToOrigin++;
+
+                if (col > 0) targets.push({ r: row, c: col - 1 });
+                else if (isInitialPlacement) extraBackToOrigin++;
+
+                if (col < gridSize - 1) targets.push({ r: row, c: col + 1 });
+                else if (isInitialPlacement) extraBackToOrigin++;
+
+                // Apply explosionValue to targets
+                for (const t of targets) {
+                    const prev = simGrid[t.r][t.c].value;
+                    simGrid[t.r][t.c].value = Math.min(maxCellValueLocal, prev + explosionValue);
+                    simGrid[t.r][t.c].player = player;
+                }
+
+                // edge return fragments during initial-placement phase
+                if (extraBackToOrigin > 0 && isInitialPlacement) {
+                    const prev = simGrid[row][col].value;
+                    simGrid[row][col].value = Math.min(maxCellValueLocal, prev + extraBackToOrigin);
+                    simGrid[row][col].player = player;
+                }
+            }
+        }
+
+        return { grid: simGrid, explosionCount, runaway: false };
+    }
+
+    // simulation-aware check for initial-placement invalidity
+    function isInitialPlacementInvalidOnSim(simGrid, simInitialPlacements, row, col) {
+        // respect the global static invalid center positions
+        if (invalidInitialPositions.some(pos => pos.r === row && pos.c === col)) {
+            return true;
+        }
+
+        // adjacency rule: illegal if any adjacent cell is already occupied in the simulated grid
+        const adjacentPositions = [
+            { r: row - 1, c: col },
+            { r: row + 1, c: col },
+            { r: row, c: col - 1 },
+            { r: row, c: col + 1 }
+        ];
+
+        return adjacentPositions.some(pos =>
+            pos.r >= 0 && pos.r < gridSize && pos.c >= 0 && pos.c < gridSize &&
+            simGrid[pos.r][pos.c].player !== ''
+        );
+    }
+
     // Generate legal candidate moves for a player on a given simulated grid & initialPlacements flags
     // returns array of { r, c, isInitial, srcVal, sortKey }
     function generateCandidatesOnSim(simGrid, simInitialPlacements, playerIndex) {
@@ -832,7 +933,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!simInitialPlacements[playerIndex]) {
             for (let r = 0; r < gridSize; r++) {
                 for (let c = 0; c < gridSize; c++) {
-                    if (simGrid[r][c].value === 0 && !isInitialPlacementInvalid(r, c)) {
+                    // use simulation-aware invalid check here
+                    if (simGrid[r][c].value === 0 && !isInitialPlacementInvalidOnSim(simGrid, simInitialPlacements, r, c)) {
                         candidates.push({ r, c, isInitial: true, srcVal: 0, sortKey: 0 });
                     }
                 }
@@ -850,97 +952,23 @@ document.addEventListener('DOMContentLoaded', () => {
         return candidates;
     }
 
-    // Simulate chained explosions on a copied grid and count explosion events
-    // Returns { grid: simGrid, explosionCount: N }
-    // Simulate chained explosions on a copied grid and count explosion events
-    // Returns { grid: simGrid, explosionCount, runaway: boolean }
-    function simulateExplosions(simGrid, simInitialPlacements) {
-        const maxCellValueLocal = maxCellValue;
-        let explosionCount = 0;
-        let iteration = 0;
-        const MAX_STEPS = 8; // explosion wave limit
-
-        while (true) {
-            iteration++;
-            if (iteration > MAX_STEPS) {
-                // runaway detected
-                return { grid: simGrid, explosionCount, runaway: true };
-            }
-
-            const cellsToExplode = [];
-            for (let i = 0; i < gridSize; i++) {
-                for (let j = 0; j < gridSize; j++) {
-                    if (simGrid[i][j].value >= 4) {
-                        cellsToExplode.push({
-                            row: i, col: j,
-                            player: simGrid[i][j].player,
-                            value: simGrid[i][j].value
-                        });
-                    }
-                }
-            }
-
-            if (cellsToExplode.length === 0) break;
-
-            explosionCount += cellsToExplode.length;
-
-            for (const cell of cellsToExplode) {
-                const { row, col, player, value } = cell;
-                const explosionValue = value - 3;
-
-                // clear origin
-                simGrid[row][col].value = 0;
-
-                // Determine whether this explosion occurs during the initial-placement phase
-                const isInitialPlacement = !simInitialPlacements.every(v => v);
-
-                let extraBackToOrigin = 0;
-                const targets = [];
-
-                if (row > 0) targets.push({ r: row - 1, c: col });
-                else if (isInitialPlacement) extraBackToOrigin++;
-
-                if (row < gridSize - 1) targets.push({ r: row + 1, c: col });
-                else if (isInitialPlacement) extraBackToOrigin++;
-
-                if (col > 0) targets.push({ r: row, c: col - 1 });
-                else if (isInitialPlacement) extraBackToOrigin++;
-
-                if (col < gridSize - 1) targets.push({ r: row, c: col + 1 });
-                else if (isInitialPlacement) extraBackToOrigin++;
-
-                // Apply explosionValue to targets and assign ownership
-                for (const t of targets) {
-                    const prev = simGrid[t.r][t.c].value;
-                    simGrid[t.r][t.c].value = Math.min(maxCellValueLocal, prev + explosionValue);
-                    simGrid[t.r][t.c].player = player;
-                }
-
-                // out-of-bounds fragments return to origin *only* during initial-placement explosions
-                if (extraBackToOrigin > 0 && isInitialPlacement) {
-                    const prev = simGrid[row][col].value;
-                    simGrid[row][col].value = Math.min(maxCellValueLocal, prev + extraBackToOrigin);
-                    simGrid[row][col].player = player;
-                }
-            }
-            // loop again to resolve new >=4 cells
-        }
-
-        return { grid: simGrid, explosionCount, runaway: false };
-    }
-
-    // Simulate applying a move on a supplied simGrid copy and return { gain, explosions, resultGrid }
-    // Adds runaway detection logic — assigns ±Infinity gain accordingly
+    // === Evaluate one simulated move (with runaway detection) ===
+    // Returns { gain, explosions, resultGrid }
     function evaluateMoveOnSim(simGridInput, simInitialPlacements, moverIndex, moveR, moveC, isInitialMove, focusPlayerIndex) {
         const simGrid = deepCloneGrid(simGridInput);
         const simInitial = simInitialPlacements.slice();
+
+        // If this is an initial move, mark that player's initial placement flag in the simulated state
+        if (isInitialMove) {
+            simInitial[moverIndex] = true;
+        }
 
         // before total for focus player
         const beforeFocus = totalOwnedOnGrid(simGrid, focusPlayerIndex);
 
         // Apply move
         if (isInitialMove) {
-            simGrid[moveR][moveC].value = 5;
+            simGrid[moveR][moveC].value = initialPlacementValue;
             simGrid[moveR][moveC].player = playerColors[moverIndex];
         } else {
             const prev = simGrid[moveR][moveC].value;
@@ -948,18 +976,18 @@ document.addEventListener('DOMContentLoaded', () => {
             simGrid[moveR][moveC].player = playerColors[moverIndex];
         }
 
-        // Run explosions with runaway detection
+        // Simulate explosion chain using the simulated initial-placement flags
         const simResult = simulateExplosions(simGrid, simInitial);
         const afterGrid = simResult.grid;
         const explosionCount = simResult.explosionCount;
 
-        // runaway => immediate ±Infinity rating
+        // runaway detection: immediate ±Infinity gain
         if (simResult.runaway) {
             const gain = (moverIndex === focusPlayerIndex) ? Infinity : -Infinity;
             return { gain, explosions: explosionCount, resultGrid: afterGrid };
         }
 
-        // normal evaluation path
+        // normal case
         const afterFocus = totalOwnedOnGrid(afterGrid, focusPlayerIndex);
         return {
             gain: afterFocus - beforeFocus,

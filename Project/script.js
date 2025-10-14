@@ -1039,12 +1039,12 @@ document.addEventListener('DOMContentLoaded', () => {
         panel.appendChild(title);
 
         const summary = document.createElement('div');
-        summary.innerHTML = `<strong>chosen gain:</strong> ${info.chosen.gain} &nbsp; <strong>explosions:</strong> ${info.chosen.explosions}`;
+        summary.innerHTML = `<strong>chosen gain:</strong> ${info.chosen ? info.chosen.gain : '—'} &nbsp; <strong>expl:</strong> ${info.chosen ? info.chosen.expl : '—'}`;
         panel.appendChild(summary);
 
         const resp = document.createElement('div');
         resp.style.marginTop = '6px';
-        resp.innerHTML = `<strong>predicted worst response:</strong> player ${info.response.playerIndex} (${playerColors[info.response.playerIndex]}) at (${info.response.r},${info.response.c}) -> <strong>AI change:</strong> ${info.response.aiChange} (expl:${info.response.explosions})`;
+        resp.innerHTML = `<strong>predicted worst response:</strong> player ${info.response.playerIndex} (${playerColors[info.response.playerIndex]}) at (${info.response.r},${info.response.c}) -> <strong>AI change:</strong> ${info.response.aiChange} (expl:${info.response.expl})`;
         panel.appendChild(resp);
 
         const listTitle = document.createElement('div');
@@ -1054,7 +1054,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const pre = document.createElement('pre');
         pre.textContent = info.ordered.map((e, idx) => {
-            return `${idx + 1}. (${e.r},${e.c}) src:${e.srcVal} gain:${e.gain} expl:${e.explosions} -> worstRespAIChange:${e.worstResponseAIChange}`;
+            return `${idx + 1}. (${e.r},${e.c}) src:${e.src} ` +
+                `expl:${e.expl} gain:${e.gain} ` +
+                `worstValueLoss:${e.worstValueLoss} ` +
+                `atk:${e.atk} def:${e.def}`;
         }).join('\n');
         panel.appendChild(pre);
 
@@ -1124,79 +1127,144 @@ document.addEventListener('DOMContentLoaded', () => {
             cand.bestResponse = worstResp;
         }
 
+        // === Compute positional ratings for each topK candidate ===
+        // nearExplodeCount is renamed into 'def' (defense rating)
+        // New metric 'atk' (attack rating) is also introduced.
         for (const cand of topK) {
             cand.netResult = cand.gain + (typeof cand.worstResponseAIChange === 'number' ? cand.worstResponseAIChange : 0);
 
             const aiColor = playerColors[playerIndex];
+            const playerColor = playerColors[humanPlayer];
             const nearVal = cellExplodeThreshold - 1;
-            let nearCount = 0;
+
+            let def = 0; // defensive rating: AI cells that are "ready to burst" (value = threshold - 1)
+            let atk = 0; // offensive rating: enemy cells adjacent to stronger AI cells
+
             const rg = cand.resultGrid;
             for (let r = 0; r < gridSize; r++) {
                 for (let c = 0; c < gridSize; c++) {
-                    if (rg[r][c].player === aiColor && rg[r][c].value === nearVal) nearCount++;
+                    const cell = rg[r][c];
+                    if (cell.player === aiColor) {
+                        if (cell.value === nearVal) def++;
+
+                        // check 4-neighborhood for possible attacks
+                        const adj = [
+                            [r - 1, c],
+                            [r + 1, c],
+                            [r, c - 1],
+                            [r, c + 1]
+                        ];
+                        for (const [ar, ac] of adj) {
+                            if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+                            const adjCell = rg[ar][ac];
+                            if (adjCell.player === playerColor && cell.value > adjCell.value) atk++;
+                        }
+                    }
                 }
             }
-            cand.nearExplodeCount = nearCount;
+
+            cand.def = def;
+            cand.atk = atk;
         }
 
+        // sort topK by netResult, then atk, then def (gain and explosions are only informational)
         topK.sort((a, b) =>
             b.netResult - a.netResult ||
-            b.nearExplodeCount - a.nearExplodeCount ||
-            b.gain - a.gain ||
-            b.explosions - a.explosions
+            b.atk - a.atk ||
+            b.def - a.def
         );
 
-        const bestNet = topK[0].netResult;
+        // pick best by netResult, break ties by atk then def, with safe fallbacks
+        const bestNet = topK[0] ? topK[0].netResult : -Infinity;
         const bestByNet = topK.filter(t => t.netResult === bestNet);
         let bestMoves;
         if (bestByNet.length === 1) {
             bestMoves = bestByNet;
         } else {
-            const maxNear = Math.max(...bestByNet.map(t => t.nearExplodeCount));
-            bestMoves = bestByNet.filter(t => t.nearExplodeCount === maxNear);
+            const maxAtk = Math.max(...bestByNet.map(t => (typeof t.atk === 'number' ? t.atk : -Infinity)));
+            const byAtk = bestByNet.filter(t => (typeof t.atk === 'number' ? t.atk : -Infinity) === maxAtk);
+            if (byAtk.length === 1) {
+                bestMoves = byAtk;
+            } else {
+                const maxDef = Math.max(...byAtk.map(t => (typeof t.def === 'number' ? t.def : -Infinity)));
+                bestMoves = byAtk.filter(t => (typeof t.def === 'number' ? t.def : -Infinity) === maxDef);
+            }
         }
 
-        const chosen = bestMoves[Math.floor(Math.random() * bestMoves.length)];
+        // Fallback: ensure we always have at least one candidate
+        if (!bestMoves || bestMoves.length === 0) bestMoves = topK.length ? [topK[0]] : [];
+
+        // choose move (or null if nothing)
+        const chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
 
         if (aiDebug) {
             clearAIDebugUI();
-            const aiCell = document.querySelector(`.cell[data-row="${chosen.r}"][data-col="${chosen.c}"]`);
-            if (aiCell) aiCell.classList.add('ai-highlight');
+            if (chosen) {
+                const aiCell = document.querySelector(`.cell[data-row="${chosen.r}"][data-col="${chosen.c}"]`);
+                if (aiCell) aiCell.classList.add('ai-highlight');
 
-            if (chosen.bestResponse) {
-                const respCell = document.querySelector(`.cell[data-row="${chosen.bestResponse.r}"][data-col="${chosen.bestResponse.c}"]`);
-                if (respCell) respCell.classList.add('ai-response-highlight');
+                if (chosen.bestResponse) {
+                    const respCell = document.querySelector(`.cell[data-row="${chosen.bestResponse.r}"][data-col="${chosen.bestResponse.c}"]`);
+                    if (respCell) respCell.classList.add('ai-response-highlight');
+                }
             }
 
             const info = {
-                chosen: { r: chosen.r, c: chosen.c, gain: chosen.gain, explosions: chosen.explosions },
-                response: chosen.bestResponse ? {
+                chosen: chosen ? {
+                    r: chosen.r,
+                    c: chosen.c,
+                    src: chosen.srcVal,
+                    expl: chosen.explosions,
+                    gain: chosen.gain,
+                    worstValueLoss: chosen.worstResponseAIChange,
+                    atk: chosen.atk,
+                    def: chosen.def
+                } : null,
+                response: chosen && chosen.bestResponse ? {
                     playerIndex: nextPlayer,
                     r: chosen.bestResponse.r,
                     c: chosen.bestResponse.c,
-                    explosions: chosen.bestResponse.explosions,
+                    expl: chosen.bestResponse.explosions,
                     aiChange: chosen.bestResponse.aiChange
-                } : { playerIndex: nextPlayer, r: null, c: null, explosions: 0, aiChange: 0 },
+                } : { playerIndex: nextPlayer, r: null, c: null, expl: 0, aiChange: 0 },
                 ordered: topK.map(e => ({
-                    r: e.r, c: e.c, srcVal: e.srcVal, gain: e.gain,
-                    explosions: e.explosions, worstResponseAIChange: e.worstResponseAIChange,
-                    nearExplodeCount: e.nearExplodeCount
+                    r: e.r,
+                    c: e.c,
+                    src: e.srcVal,
+                    expl: e.explosions,
+                    gain: e.gain,
+                    worstValueLoss: e.worstResponseAIChange,
+                    atk: e.atk,
+                    def: e.def
                 })),
                 topK: topK.length
             };
 
             showAIDebugPanelWithResponse(info);
 
-            const onUserClick = (ev) => {
-                ev.stopPropagation();
-                ev.preventDefault();
-                document.removeEventListener('pointerdown', onUserClick, true);
-                clearAIDebugUI();
-                handleClick(chosen.r, chosen.c);
-            };
+            if (chosen) {
+                const onUserClick = (ev) => {
+                    ev.stopPropagation();
+                    ev.preventDefault();
+                    document.removeEventListener('pointerdown', onUserClick, true);
+                    clearAIDebugUI();
+                    handleClick(chosen.r, chosen.c);
+                };
 
-            document.addEventListener('pointerdown', onUserClick, true);
+                document.addEventListener('pointerdown', onUserClick, true);
+            } else {
+                // No chosen move: advance gracefully
+                if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
+                switchPlayer();
+            }
             return;
+        }
+
+        if (!chosen) {
+            if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
+            switchPlayer();
+        } else {
+            handleClick(chosen.r, chosen.c);
         }
 
         handleClick(chosen.r, chosen.c);

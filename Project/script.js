@@ -787,6 +787,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const aiDebug = true;
     // Configure dataRespect branching factor K via URL param ai_k, default 3
     const dataRespectK = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_k')) || 25);
+    // number of plies (AI-perspective). Example: 3 (AI -> opp -> AI)
+    const aiDepth = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_depth')) || 3);
     const maxExplosionsToAssumeLoop = gridSize * 3;
 
 
@@ -801,8 +803,6 @@ document.addEventListener('DOMContentLoaded', () => {
             aiMakeMoveFor(currentPlayer);
         }, 350);
     }
-
-    // cloneGridForSim() already exists earlier in your script; reuse it
 
     // helper: clone an already-simulated grid (deep copy)
     function deepCloneGrid(simGrid) {
@@ -945,50 +945,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return candidates;
     }
 
-    // === Evaluate one simulated move (with runaway detection) ===
-    // Returns { gain, explosions, resultGrid }
-    function evaluateMoveOnSim(simGridInput, simInitialPlacements, moverIndex, moveR, moveC, isInitialMove, focusPlayerIndex) {
-        const simGrid = deepCloneGrid(simGridInput);
-        const simInitial = simInitialPlacements.slice();
-
-        // If this is an initial move, mark that player's initial placement flag in the simulated state
-        if (isInitialMove) {
-            simInitial[moverIndex] = true;
-        }
-
-        // before total for focus player
-        const beforeFocus = totalOwnedOnGrid(simGrid, focusPlayerIndex);
-
-        // Apply move
-        if (isInitialMove) {
-            simGrid[moveR][moveC].value = initialPlacementValue;
-            simGrid[moveR][moveC].player = playerColors[moverIndex];
-        } else {
-            const prev = simGrid[moveR][moveC].value;
-            simGrid[moveR][moveC].value = Math.min(maxCellValue, prev + 1);
-            simGrid[moveR][moveC].player = playerColors[moverIndex];
-        }
-
-        // Simulate explosion chain using the simulated initial-placement flags
-        const simResult = simulateExplosions(simGrid, simInitial);
-        const afterGrid = simResult.grid;
-        const explosionCount = simResult.explosionCount;
-
-        // runaway detection: immediate ±Infinity gain
-        if (simResult.runaway) {
-            const gain = (moverIndex === focusPlayerIndex) ? Infinity : -Infinity;
-            return { gain, explosions: explosionCount, resultGrid: afterGrid };
-        }
-
-        // normal case
-        const afterFocus = totalOwnedOnGrid(afterGrid, focusPlayerIndex);
-        return {
-            gain: afterFocus - beforeFocus,
-            explosions: explosionCount,
-            resultGrid: afterGrid
-        };
-    }
-
     // UI helper: ensure response highlight style exists and show/hide function
     function ensureAIDebugStyles() {
         if (document.getElementById('aiDebugStyles')) return;
@@ -998,11 +954,6 @@ document.addEventListener('DOMContentLoaded', () => {
             .ai-highlight {
                 outline: 4px solid rgba(255, 235, 59, 0.95) !important;
                 box-shadow: 0 0 18px rgba(255,235,59,0.6);
-                z-index: 50;
-            }
-            .ai-response-highlight {
-                outline: 4px solid rgba(255, 100, 100, 0.95) !important;
-                box-shadow: 0 0 18px rgba(255,100,100,0.45);
                 z-index: 50;
             }
             #aiDebugPanel {
@@ -1041,22 +992,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const summary = document.createElement('div');
         summary.innerHTML = `<strong>chosen gain:</strong> ${info.chosen ? info.chosen.gain : '—'} &nbsp; <strong>expl:</strong> ${info.chosen ? info.chosen.expl : '—'}`;
         panel.appendChild(summary);
-
-        const resp = document.createElement('div');
-        resp.style.marginTop = '6px';
-        resp.innerHTML = `<strong>predicted worst response:</strong> player ${info.response.playerIndex} (${playerColors[info.response.playerIndex]}) at (${info.response.r},${info.response.c}) -> <strong>AI change:</strong> ${info.response.aiChange} (expl:${info.response.expl})`;
-        panel.appendChild(resp);
-
         const listTitle = document.createElement('div');
         listTitle.style.marginTop = '8px';
-        listTitle.innerHTML = `<em>candidates (top ${info.topK}) ordered by immediate AI gain:</em>`;
+        listTitle.innerHTML = `<em>candidates (top ${info.topK}) ordered by AI gain:</em>`;
         panel.appendChild(listTitle);
 
         const pre = document.createElement('pre');
         pre.textContent = info.ordered.map((e, idx) => {
             return `${idx + 1}. (${e.r},${e.c}) src:${e.src} ` +
                 `expl:${e.expl} gain:${e.gain} ` +
-                `worstValueLoss:${e.worstValueLoss} ` +
                 `atk:${e.atk} def:${e.def}`;
         }).join('\n');
         panel.appendChild(pre);
@@ -1069,9 +1013,123 @@ document.addEventListener('DOMContentLoaded', () => {
         const existing = document.getElementById('aiDebugPanel');
         if (existing) existing.remove();
         document.querySelectorAll('.ai-highlight').forEach(el => el.classList.remove('ai-highlight'));
-        document.querySelectorAll('.ai-response-highlight').forEach(el => el.classList.remove('ai-response-highlight'));
+
     }
 
+    // Utility: apply a single move on a cloned grid and run explosion sim, returns { grid, explosionCount, runaway }
+    function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, moveR, moveC, isInitialMove) {
+        const simGrid = deepCloneGrid(simGridInput);
+        const simInitial = simInitialPlacementsInput.slice();
+
+        if (isInitialMove) simInitial[moverIndex] = true;
+
+        if (isInitialMove) {
+            simGrid[moveR][moveC].value = initialPlacementValue;
+            simGrid[moveR][moveC].player = playerColors[moverIndex];
+        } else {
+            const prev = simGrid[moveR][moveC].value;
+            simGrid[moveR][moveC].value = Math.min(maxCellValue, prev + 1);
+            simGrid[moveR][moveC].player = playerColors[moverIndex];
+        }
+
+        const result = simulateExplosions(simGrid, simInitial);
+        return { grid: result.grid, explosionCount: result.explosionCount, runaway: result.runaway, simInitial };
+    }
+
+    // Minimax with alpha-beta pruning returning evaluation for focusPlayer as numeric value (higher = better for focus)
+    function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex) {
+        // Terminal condition
+        // If depth == 0: return totalOwnedOnGrid after applying no further moves (use current simGridInput as leaf value)
+        // We'll evaluate by returning totalOwnedOnGrid(simGridInput, focusPlayerIndex)
+        if (depth === 0) {
+            return { value: totalOwnedOnGrid(simGridInput, focusPlayerIndex), runaway: false };
+        }
+
+        const simGrid = deepCloneGrid(simGridInput);
+        const simInitial = simInitialPlacementsInput.slice();
+
+        // Generate candidates for moverIndex
+        let candidates = generateCandidatesOnSim(simGrid, simInitial, moverIndex);
+
+        // If no legal move: simulate flagging initialPlacement done for that mover and continue to next player
+        if (candidates.length === 0) {
+            // If initial placement still pending, mark it done
+            if (!simInitial[moverIndex]) simInitial[moverIndex] = true;
+            const nextPlayer = (moverIndex + 1) % playerCount;
+            return minimaxEvaluate(simGrid, simInitial, nextPlayer, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex);
+        }
+
+        // Evaluate immediate gains for each candidate to sort and pick topK
+        const evaluatedCandidates = [];
+        for (const cand of candidates) {
+            const applied = applyMoveAndSim(simGrid, simInitial, moverIndex, cand.r, cand.c, cand.isInitial);
+            const val = totalOwnedOnGrid(applied.grid, focusPlayerIndex);
+
+            // runaway handling: encode infinite endpoint values
+            if (applied.runaway) {
+                const runawayVal = (moverIndex === focusPlayerIndex) ? Infinity : -Infinity;
+                evaluatedCandidates.push({ cand, value: runawayVal, resultGrid: applied.grid, simInitial: applied.simInitial });
+            } else {
+                evaluatedCandidates.push({ cand, value: val, resultGrid: applied.grid, simInitial: applied.simInitial });
+            }
+        }
+
+        // Sort descending by immediate value when mover is the focusPlayerIndex, otherwise ascending (opponent tries to minimize)
+        evaluatedCandidates.sort((a, b) => ( (moverIndex === focusPlayerIndex ? b.value - a.value : a.value - b.value) ));
+
+        // Truncate to top K to limit branching
+        const topCandidates = evaluatedCandidates.slice(0, Math.min(dataRespectK, evaluatedCandidates.length));
+
+        const nextPlayer = (moverIndex + 1) % playerCount;
+        let bestValue = (moverIndex === focusPlayerIndex) ? -Infinity : Infinity;
+
+        for (const entry of topCandidates) {
+            // If entry produced runaway, we can short-circuit
+            if (entry.value === Infinity) {
+                // If maximizing (favour runaway for focus), return Infinity
+                if (moverIndex === focusPlayerIndex) return { value: Infinity, runaway: true };
+                // else this runaway favours opponent -> treat as -Infinity for focus
+                if (moverIndex !== focusPlayerIndex) return { value: -Infinity, runaway: true };
+            }
+            if (entry.value === -Infinity) {
+                if (moverIndex !== focusPlayerIndex) return { value: -Infinity, runaway: true };
+                if (moverIndex === focusPlayerIndex) return { value: Infinity, runaway: true };
+            }
+
+            // Recurse on child node
+            const childEval = minimaxEvaluate(entry.resultGrid, entry.simInitial, nextPlayer, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex);
+
+            // If child runaways are reported, bubble as +/-Infinity accordingly
+            if (childEval.runaway) {
+                if (childEval.value === Infinity) {
+                    // opponent's move led to runaway *for focus*; minimize/maximize accordingly
+                    if (moverIndex === focusPlayerIndex) {
+                        // as mover we see opponent runaways later: that's bad if opponent gets Infinity; we must treat accordingly
+                    }
+                }
+            }
+
+            const value = childEval.value;
+
+            if (moverIndex === focusPlayerIndex) {
+                // maximizing
+                if (value > bestValue) bestValue = value;
+                alpha = Math.max(alpha, bestValue);
+                if (alpha >= beta) break; // beta cut-off
+            } else {
+                // minimizing
+                if (value < bestValue) bestValue = value;
+                beta = Math.min(beta, bestValue);
+                if (beta <= alpha) break; // alpha cut-off
+            }
+        }
+
+        return { value: bestValue, runaway: false };
+    }
+
+    // Top-level: replace current opponent one-step evaluation inside aiMakeMoveFor with deeper search
+    // We'll keep the existing evaluated array construction, but compute a searchScore for each candidate
+    // Then continue computing atk/def, netResult, sorting and selection as current logic.
     function aiMakeMoveFor(playerIndex) {
         if (isProcessing || gameWon) return;
 
@@ -1082,99 +1140,78 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // Evaluate immediate result grids first (as before) to get candidate.resultGrid
         const evaluated = [];
         for (const cand of candidates) {
-            const res = evaluateMoveOnSim(grid, initialPlacements, playerIndex, cand.r, cand.c, cand.isInitial, playerIndex);
+            const res = applyMoveAndSim(grid, initialPlacements, playerIndex, cand.r, cand.c, cand.isInitial);
             evaluated.push({
                 r: cand.r,
                 c: cand.c,
                 isInitial: cand.isInitial,
                 srcVal: cand.srcVal,
-                gain: res.gain,
-                explosions: res.explosions,
-                resultGrid: res.resultGrid
+                immediateGain: (res.runaway ? (playerIndex === playerIndex ? Infinity : -Infinity) : (totalOwnedOnGrid(res.grid, playerIndex) - totalOwnedOnGrid(grid, playerIndex))),
+                explosions: res.explosionCount,
+                resultGrid: res.grid,
+                resultInitial: res.simInitial,
+                runaway: res.runaway
             });
         }
 
-        evaluated.sort((a, b) => b.gain - a.gain || b.explosions - a.explosions);
+        // Sort and pick topK by immediateGain descending
+        evaluated.sort((a, b) => b.immediateGain - a.immediateGain || b.explosions - a.explosions);
         const topK = evaluated.slice(0, Math.min(dataRespectK, evaluated.length));
 
-        const nextPlayer = (playerIndex + 1) % playerCount;
-
-        for (const cand of topK) {
-            const gridAfterAI = cand.resultGrid;
-            const oppCandidates = generateCandidatesOnSim(gridAfterAI, initialPlacements, nextPlayer);
-
-            if (oppCandidates.length === 0) {
-                cand.worstResponseAIChange = 0;
-                cand.bestResponse = null;
-                continue;
+        // For each topK entry, run minimaxEvaluate to depth aiDepth (this returns absolute totalOwned estimate)
+        for (const e of topK) {
+            // If immediate result already runaway, we can set searchScore immediately
+            if (e.runaway) {
+                e.searchScore = (e.immediateGain === Infinity) ? Infinity : -Infinity;
+            } else {
+                // Start recursion on next player with depth = aiDepth * 2 - 1 is not necessary; simpler: use aiDepth as plies
+                const nextPlayer = (playerIndex + 1) % playerCount;
+                const depth = aiDepth; // number of plies to look ahead
+                const evalRes = minimaxEvaluate(e.resultGrid, e.resultInitial, nextPlayer, depth - 1, -Infinity, Infinity, playerIndex, playerIndex);
+                // minimaxEvaluate returns absolute totalOwned for focus; convert to gain relative to current
+                const before = totalOwnedOnGrid(grid, playerIndex);
+                e.searchScore = (evalRes.value === Infinity || evalRes.value === -Infinity) ? evalRes.value : (evalRes.value - before);
             }
-
-            let worstAIChange = Infinity;
-            let worstResp = null;
-
-            for (const oc of oppCandidates) {
-                const resOpp = evaluateMoveOnSim(gridAfterAI, initialPlacements, nextPlayer, oc.r, oc.c, oc.isInitial, playerIndex);
-                const aiChange = resOpp.gain;
-                if (aiChange < worstAIChange) {
-                    worstAIChange = aiChange;
-                    worstResp = { r: oc.r, c: oc.c, isInitial: oc.isInitial, explosions: resOpp.explosions, aiChange };
-                }
-            }
-
-            cand.worstResponseAIChange = worstAIChange;
-            cand.bestResponse = worstResp;
         }
 
-        // === Compute positional ratings for each topK candidate ===
-        // nearExplodeCount is renamed into 'def' (defense rating)
-        // New metric 'atk' (attack rating) is also introduced.
+        // Use searchScore in place of immediate gain when computing netResult and ordering
+        // Compute atk/def for topK as before on each e.resultGrid
         for (const cand of topK) {
-            cand.netResult = cand.gain + (typeof cand.worstResponseAIChange === 'number' ? cand.worstResponseAIChange : 0);
-
+            const rg = cand.resultGrid;
             const aiColor = playerColors[playerIndex];
             const playerColor = playerColors[humanPlayer];
             const nearVal = cellExplodeThreshold - 1;
-
-            let def = 0; // defensive rating: AI cells that are "ready to burst" (value = threshold - 1)
-            let atk = 0; // offensive rating: enemy cells adjacent to stronger AI cells
-
-            const rg = cand.resultGrid;
+            let def = 0, atk = 0;
             for (let r = 0; r < gridSize; r++) {
                 for (let c = 0; c < gridSize; c++) {
                     const cell = rg[r][c];
                     if (cell.player === aiColor) {
                         if (cell.value === nearVal) def++;
-
-                        // check 4-neighborhood for possible attacks
-                        const adj = [
-                            [r - 1, c],
-                            [r + 1, c],
-                            [r, c - 1],
-                            [r, c + 1]
-                        ];
-                        for (const [ar, ac] of adj) {
-                            if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+                        const adj = [[r-1,c],[r+1,c],[r,c-1],[r,c+1]];
+                        for (const [ar,ac] of adj) {
+                            if (ar<0||ar>=gridSize||ac<0||ac>=gridSize) continue;
                             const adjCell = rg[ar][ac];
                             if (adjCell.player === playerColor && cell.value > adjCell.value) atk++;
                         }
                     }
                 }
             }
-
             cand.def = def;
             cand.atk = atk;
+            cand.netResult = (typeof cand.searchScore === 'number' ? cand.searchScore : cand.immediateGain) + (typeof cand.worstResponseAIChange === 'number' ? cand.worstResponseAIChange : 0);
         }
 
-        // sort topK by netResult, then atk, then def (gain and explosions are only informational)
+        // Continue with the same selection logic as before but prefer searchScore/netResult instead of immediateGain
         topK.sort((a, b) =>
-            b.netResult - a.netResult ||
-            b.atk - a.atk ||
-            b.def - a.def
+            (b.netResult - a.netResult) ||
+            (b.atk - a.atk) ||
+            (b.def - a.def)
         );
 
-        // pick best by netResult, break ties by atk then def, with safe fallbacks
+        // select bestMoves as original logic
         const bestNet = topK[0] ? topK[0].netResult : -Infinity;
         const bestByNet = topK.filter(t => t.netResult === bestNet);
         let bestMoves;
@@ -1190,56 +1227,34 @@ document.addEventListener('DOMContentLoaded', () => {
                 bestMoves = byAtk.filter(t => (typeof t.def === 'number' ? t.def : -Infinity) === maxDef);
             }
         }
-
-        // Fallback: ensure we always have at least one candidate
         if (!bestMoves || bestMoves.length === 0) bestMoves = topK.length ? [topK[0]] : [];
 
-        // choose move (or null if nothing)
         const chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
 
         if (aiDebug) {
+            // reuse existing debug UI code paths: clearAIDebugUI + show highlights + panel info
             clearAIDebugUI();
             if (chosen) {
                 const aiCell = document.querySelector(`.cell[data-row="${chosen.r}"][data-col="${chosen.c}"]`);
                 if (aiCell) aiCell.classList.add('ai-highlight');
-
-                if (chosen.bestResponse) {
-                    const respCell = document.querySelector(`.cell[data-row="${chosen.bestResponse.r}"][data-col="${chosen.bestResponse.c}"]`);
-                    if (respCell) respCell.classList.add('ai-response-highlight');
-                }
+                // no immediate bestResponse available with deep search, keep response highlight removed or estimate via single-step
             }
-
             const info = {
                 chosen: chosen ? {
-                    r: chosen.r,
-                    c: chosen.c,
-                    src: chosen.srcVal,
-                    expl: chosen.explosions,
-                    gain: chosen.gain,
-                    worstValueLoss: chosen.worstResponseAIChange,
-                    atk: chosen.atk,
-                    def: chosen.def
+                    r: chosen.r,                // Placement coordinates
+                    c: chosen.c,                // Placement coordinates
+                    src: chosen.srcVal,         // Value of chosen Cell
+                    expl: chosen.explosions,    // Number of caused Explosions
+                    gain: chosen.searchScore,   // Worst net gain from chosen cell
+                    atk: chosen.atk,            // Number of strong ai cells next to weak enemy cells
+                    def: chosen.def             // Number of ai cells 1 away from exploding
                 } : null,
-                response: chosen && chosen.bestResponse ? {
-                    playerIndex: nextPlayer,
-                    r: chosen.bestResponse.r,
-                    c: chosen.bestResponse.c,
-                    expl: chosen.bestResponse.explosions,
-                    aiChange: chosen.bestResponse.aiChange
-                } : { playerIndex: nextPlayer, r: null, c: null, expl: 0, aiChange: 0 },
                 ordered: topK.map(e => ({
-                    r: e.r,
-                    c: e.c,
-                    src: e.srcVal,
-                    expl: e.explosions,
-                    gain: e.gain,
-                    worstValueLoss: e.worstResponseAIChange,
-                    atk: e.atk,
-                    def: e.def
+                    r: e.r, c: e.c, src: e.srcVal, expl: e.explosions,
+                    gain: e.searchScore, atk: e.atk, def: e.def
                 })),
                 topK: topK.length
             };
-
             showAIDebugPanelWithResponse(info);
 
             if (chosen) {
@@ -1250,10 +1265,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     clearAIDebugUI();
                     handleClick(chosen.r, chosen.c);
                 };
-
                 document.addEventListener('pointerdown', onUserClick, true);
             } else {
-                // No chosen move: advance gracefully
                 if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
                 switchPlayer();
             }
@@ -1266,8 +1279,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             handleClick(chosen.r, chosen.c);
         }
-
-        handleClick(chosen.r, chosen.c);
     }
 
 //#endregion

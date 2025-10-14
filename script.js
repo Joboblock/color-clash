@@ -786,16 +786,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // AI debug mode if URL contains ai_debug=true
     const aiDebug = true;
     // Configure dataRespect branching factor K via URL param ai_k, default 3
-    const dataRespectK = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_k')) || 10);
-    
-    // === AI CONSTANTS (tunable) ===
-    const AI_CONSTANTS = {
-        /** Max explosion waves before assuming infinite chain */
-        MAX_EXPLOSION_WAVES: gridSize * 3,
+    const dataRespectK = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_k')) || 25);
+    const maxExplosionsToAssumeLoop = gridSize * 3;
 
-        /** Number of top candidate moves to analyze deeper (already configured above) */
-        LOOKAHEAD_K: dataRespectK
-    };
 
     // Called after each turn change to possibly run AI moves
     function maybeTriggerAIMove() {
@@ -843,7 +836,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         while (true) {
             iteration++;
-            if (iteration > AI_CONSTANTS.MAX_EXPLOSION_WAVES) {
+            if (iteration > maxExplosionsToAssumeLoop) {
                 // runaway detected
                 return { grid: simGrid, explosionCount, runaway: true };
             }
@@ -1076,23 +1069,17 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.ai-response-highlight').forEach(el => el.classList.remove('ai-response-highlight'));
     }
 
-    // Main AI with dataRespect against next player
     function aiMakeMoveFor(playerIndex) {
         if (isProcessing || gameWon) return;
 
-        // generate candidates on the real grid
         const candidates = generateCandidatesOnSim(grid, initialPlacements, playerIndex);
         if (candidates.length === 0) {
-            // nothing to do
-            if (!initialPlacements[playerIndex]) {
-                initialPlacements[playerIndex] = true;
-            }
+            if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
             switchPlayer();
             return;
         }
 
-        // Evaluate immediate gain and explosions for every candidate (focus on AI player)
-        const evaluated = []; // { r,c,isInitial,srcVal,gain,explosions, resultGrid }
+        const evaluated = [];
         for (const cand of candidates) {
             const res = evaluateMoveOnSim(grid, initialPlacements, playerIndex, cand.r, cand.c, cand.isInitial, playerIndex);
             evaluated.push({
@@ -1106,44 +1093,26 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Sort by immediate gain descending, take top K
         evaluated.sort((a, b) => b.gain - a.gain || b.explosions - a.explosions);
         const topK = evaluated.slice(0, Math.min(dataRespectK, evaluated.length));
 
-        // Determine next player (the one who will move after AI)
-        const nextPlayer = (() => {
-            let np = playerIndex;
-            // find the next player index that would be chosen by switchPlayer() logic
-            // simulate the do-while used in switchPlayer(): advance until a player with cells exists OR until all have initial placements
-            // Simpler: next in cyclic order
-            np = (playerIndex + 1) % playerCount;
-            return np;
-        })();
+        const nextPlayer = (playerIndex + 1) % playerCount;
 
-        // For each top candidate, evaluate opponent's worst response (the move that produces lowest AI total after the opponent move)
         for (const cand of topK) {
-            // AI's grid after candidate
             const gridAfterAI = cand.resultGrid;
-            
-
-            // Generate opponent candidates on simulated grid; use current initialPlacements (not flipping AI's flags)
             const oppCandidates = generateCandidatesOnSim(gridAfterAI, initialPlacements, nextPlayer);
 
-            // If opponent has no candidates, then worst response effect = 0
             if (oppCandidates.length === 0) {
                 cand.worstResponseAIChange = 0;
                 cand.bestResponse = null;
                 continue;
             }
 
-            // For each opponent candidate, evaluate AI total change after opponent move
-            let worstAIChange = Infinity; // we look for the move that minimizes AI total -> smallest after - aiAfter
+            let worstAIChange = Infinity;
             let worstResp = null;
 
             for (const oc of oppCandidates) {
                 const resOpp = evaluateMoveOnSim(gridAfterAI, initialPlacements, nextPlayer, oc.r, oc.c, oc.isInitial, playerIndex);
-                // resOpp.gain is change to AI's total (focus player) — note evaluateMoveOnSim was called with focusPlayerIndex = AI index
-                // compute ai change relative to aiAfter: resOpp.gain = AI_after_afterOpp - aiAfter
                 const aiChange = resOpp.gain;
                 if (aiChange < worstAIChange) {
                     worstAIChange = aiChange;
@@ -1151,29 +1120,49 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
 
-            // store the worst-response effect (negative or zero usually)
             cand.worstResponseAIChange = worstAIChange;
             cand.bestResponse = worstResp;
         }
 
-        // Now compute net_result for each candidate: immediate gain + worstResponseAIChange
         for (const cand of topK) {
             cand.netResult = cand.gain + (typeof cand.worstResponseAIChange === 'number' ? cand.worstResponseAIChange : 0);
+
+            const aiColor = playerColors[playerIndex];
+            const nearVal = cellExplodeThreshold - 1;
+            let nearCount = 0;
+            const rg = cand.resultGrid;
+            for (let r = 0; r < gridSize; r++) {
+                for (let c = 0; c < gridSize; c++) {
+                    if (rg[r][c].player === aiColor && rg[r][c].value === nearVal) nearCount++;
+                }
+            }
+            cand.nearExplodeCount = nearCount;
         }
 
-        // Choose candidate with maximum netResult; tie-break randomly
-        topK.sort((a, b) => b.netResult - a.netResult || b.gain - a.gain || b.explosions - a.explosions);
-        let bestNet = topK[0].netResult;
-        const bestMoves = topK.filter(t => t.netResult === bestNet);
+        topK.sort((a, b) =>
+            b.netResult - a.netResult ||
+            b.nearExplodeCount - a.nearExplodeCount ||
+            b.gain - a.gain ||
+            b.explosions - a.explosions
+        );
+
+        const bestNet = topK[0].netResult;
+        const bestByNet = topK.filter(t => t.netResult === bestNet);
+        let bestMoves;
+        if (bestByNet.length === 1) {
+            bestMoves = bestByNet;
+        } else {
+            const maxNear = Math.max(...bestByNet.map(t => t.nearExplodeCount));
+            bestMoves = bestByNet.filter(t => t.nearExplodeCount === maxNear);
+        }
+
         const chosen = bestMoves[Math.floor(Math.random() * bestMoves.length)];
 
-        // For debug mode: highlight chosen and its predicted opponent response, show panel
         if (aiDebug) {
             clearAIDebugUI();
             const aiCell = document.querySelector(`.cell[data-row="${chosen.r}"][data-col="${chosen.c}"]`);
             if (aiCell) aiCell.classList.add('ai-highlight');
 
-            // highlight opponent response if exists
             if (chosen.bestResponse) {
                 const respCell = document.querySelector(`.cell[data-row="${chosen.bestResponse.r}"][data-col="${chosen.bestResponse.c}"]`);
                 if (respCell) respCell.classList.add('ai-response-highlight');
@@ -1190,29 +1179,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 } : { playerIndex: nextPlayer, r: null, c: null, explosions: 0, aiChange: 0 },
                 ordered: topK.map(e => ({
                     r: e.r, c: e.c, srcVal: e.srcVal, gain: e.gain,
-                    explosions: e.explosions, worstResponseAIChange: e.worstResponseAIChange
+                    explosions: e.explosions, worstResponseAIChange: e.worstResponseAIChange,
+                    nearExplodeCount: e.nearExplodeCount
                 })),
                 topK: topK.length
             };
 
             showAIDebugPanelWithResponse(info);
 
-            // Wait for user confirmation click (on any part of the document)
             const onUserClick = (ev) => {
-                ev.stopPropagation(); // prevent cell handlers from firing first
+                ev.stopPropagation();
                 ev.preventDefault();
                 document.removeEventListener('pointerdown', onUserClick, true);
                 clearAIDebugUI();
                 handleClick(chosen.r, chosen.c);
             };
 
-            // capture phase so it runs before anything else
             document.addEventListener('pointerdown', onUserClick, true);
             return;
         }
 
-        // Non-debug: execute chosen move immediately
         handleClick(chosen.r, chosen.c);
     }
+
 //#endregion
 });

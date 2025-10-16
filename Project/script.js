@@ -1099,16 +1099,6 @@ document.addEventListener('DOMContentLoaded', () => {
             // Recurse on child node
             const childEval = minimaxEvaluate(entry.resultGrid, entry.simInitial, nextPlayer, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex);
 
-            // If child runaways are reported, bubble as +/-Infinity accordingly
-            if (childEval.runaway) {
-                if (childEval.value === Infinity) {
-                    // opponent's move led to runaway *for focus*; minimize/maximize accordingly
-                    if (moverIndex === focusPlayerIndex) {
-                        // as mover we see opponent runaways later: that's bad if opponent gets Infinity; we must treat accordingly
-                    }
-                }
-            }
-
             const value = childEval.value;
 
             if (moverIndex === focusPlayerIndex) {

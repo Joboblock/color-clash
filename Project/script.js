@@ -1,5 +1,23 @@
 document.addEventListener('DOMContentLoaded', () => {
     const gridElement = document.querySelector('.grid');
+    
+    /**
+     * Delegated grid click handler. Uses event.target.closest('.cell') to
+     * resolve the clicked cell and routes to handleClick(row, col).
+     * @param {MouseEvent|PointerEvent} ev - the click/pointer event.
+     * @returns {void}
+     */
+    function onGridClick(ev) {
+        const el = ev.target.closest('.cell');
+        if (!el || !gridElement.contains(el)) return;
+        const row = parseInt(el.dataset.row, 10);
+        const col = parseInt(el.dataset.col, 10);
+        if (Number.isInteger(row) && Number.isInteger(col)) {
+            handleClick(row, col);
+        }
+    }
+    // Attach once; per-cell listeners are removed.
+    gridElement.addEventListener('click', onGridClick, { passive: true });
 
     // Detect train mode via URL param
     const urlParams = new URLSearchParams(window.location.search);
@@ -387,7 +405,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // recompute invalid initial positions for new size
         invalidInitialPositions = computeInvalidInitialPositions(gridSize);
 
-        // build new cells and attach listeners
+        // build new cells (no per-cell listeners; delegation handles clicks)
         for (let i = 0; i < gridSize; i++) {
             grid[i] = [];
             for (let j = 0; j < gridSize; j++) {
@@ -395,8 +413,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 cell.className = 'cell';
                 cell.dataset.row = i;
                 cell.dataset.col = j;
-                // Use a small wrapper to capture i/j values for event handler
-                cell.addEventListener('click', ((r, c) => () => handleClick(r, c))(i, j));
                 grid[i][j] = { value: 0, player: '' };
                 gridElement.appendChild(cell);
             }

@@ -21,13 +21,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const cellExplodeThreshold = 4;
     const delayExplosion = 500;
     const delayAnimation = 300;
-    const performanceModeCutoff = 8;
+    const performanceModeCutoff = 16;
 
     document.documentElement.style.setProperty('--delay-explosion', `${delayExplosion}ms`);
     document.documentElement.style.setProperty('--delay-animation', `${delayAnimation}ms`);
     document.documentElement.style.setProperty('--grid-size', gridSize);
 
     // Function to get URL parameters
+    /**
+     * Fetch a query parameter value from the current page URL.
+     * @param {string} param - the query key to retrieve.
+     * @returns {string|null} the parameter value or null if missing.
+     */
     function getQueryParam(param) {
         const urlParams = new URLSearchParams(window.location.search);
         return urlParams.get(param);
@@ -172,6 +177,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 //#region Menu Functions
+    /**
+     * Convert hex color string (#rgb or #rrggbb) to RGB components.
+     * @param {string} hex - color in hex form.
+     * @returns {{r:number,g:number,b:number}} RGB channels 0..255.
+     */
     function hexToRgb(hex) {
         const h = hex.replace('#', '');
         const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
@@ -180,6 +190,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // cell color: pastel mix toward white (opaque), use 50% white by default
+    /**
+     * Mix a hex color with white to produce a pastel RGB color.
+     * @param {string} hex - base hex color.
+     * @param {number} [factor=0.5] - portion of white (0..1).
+     * @returns {string} css rgb(r,g,b) color string.
+     */
     function mixWithWhite(hex, factor = 0.5) {
         // factor = portion of white (0..1)
         const { r, g, b } = hexToRgb(hex);
@@ -188,6 +204,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Build boxes for counts 1..maxPlayers (we'll enforce a minimum selection of 2)
+    /**
+     * Build the visual player "box slider" (1..maxPlayers) and attach handlers.
+     * @returns {void} updates DOM under #playerBoxSlider.
+     */
     function buildPlayerBoxes() {
         playerBoxSlider.innerHTML = '';
         for (let count = 1; count <= maxPlayers; count++) {
@@ -215,6 +235,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Toggle active state for player boxes up to the selected count and sync UI/state.
+     * @param {number} count - selected player count.
+     * @returns {void} updates aria attributes, internal selection, and grid if needed.
+     */
     function highlightPlayerBoxes(count) {
         Array.from(playerBoxSlider.children).forEach((child) => {
             const boxCount = parseInt(child.dataset.count, 10);
@@ -230,17 +255,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Update grid-size input to match the recommended size for a player count.
+     * @param {number} pCount - selected player count.
+     * @returns {void} sets menuGridSize.value.
+     */
     function updateSizeBoundsForPlayers(pCount) {
         const desired = pCount + 3;
         menuGridSize.value = String(desired);
     }
 
     // Sync functions
+    /**
+     * Clamp a numeric player count to valid limits [2..maxPlayers].
+     * @param {number} n - requested player count.
+     * @returns {number} clamped integer within bounds.
+     */
     function clampPlayers(n) {
         const v = Math.max(2, Math.min(maxPlayers, Math.floor(n) || 2));
         return v;
     }
 
+    /**
+     * Validate and normalize the grid size input to [3..16].
+     * @returns {void} adjusts input to a valid number.
+     */
     function validateGridSize() {
         let val = parseInt(menuGridSize.value, 10);
         const minSz = 3;
@@ -255,6 +294,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Make the visual box slider draggable like a real slider
     let isDragging = false;
+    /**
+     * Map a pointer x-position to the nearest player box and update selection.
+     * @param {number} clientX - pointer x-coordinate in viewport space.
+     * @returns {void} updates selected player count via onMenuPlayerCountChanged.
+     */
     function setPlayerCountFromPointer(clientX) {
         const children = Array.from(playerBoxSlider.children);
         if (children.length === 0) return;
@@ -276,6 +320,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Centralized handler for menu player count changes
+    /**
+     * Central handler when menu player count changes; syncs size, UI, and grid.
+     * @param {number} newCount - selected player count.
+     * @returns {void} may recreate the grid to reflect new settings.
+     */
     function onMenuPlayerCountChanged(newCount) {
         menuPlayerCount = newCount;
         const desiredSize = Math.max(3, newCount + 3);
@@ -309,6 +358,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 //#region Game Logic Functions
+    /**
+     * Rebuild the grid and reset game state for a given size and player count.
+     * @param {number} newSize - grid dimension.
+     * @param {number} newPlayerCount - number of players.
+     * @returns {void} updates DOM grid, CSS vars, and game state.
+     */
     function recreateGrid(newSize = gridSize, newPlayerCount = playerCount) {
         // update globals
         gridSize = newSize;
@@ -372,6 +427,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Handle a user/AI click to place or increment
+     * Params: row (number), col (number) – cell coordinates.
+     * Returns: void – mutates grid state and schedules explosion processing.
+     */
     function handleClick(row, col) {
         if (isProcessing || gameWon) return;
 
@@ -413,6 +473,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Animate inner-circle fragments moving to neighboring cells during an explosion.
+     * @param {Element} cell - origin DOM cell.
+     * @param {Array<{row:number,col:number,value:number}>} targetCells - neighboring cells to receive fragments.
+     * @param {string} player - color key.
+     * @param {number} explosionValue - fragment value.
+     * @returns {void} creates temporary DOM elements for animation.
+     */
     function animateInnerCircles(cell, targetCells, player, explosionValue) {
 
         targetCells.forEach(target => {
@@ -440,6 +508,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    /**
+     * Process all cells at/above threshold, propagate values, and chain until stable.
+     * @returns {void} updates grid state, schedules chained processing.
+     */
     function processExplosions() {
         let cellsToExplode = [];
 
@@ -530,6 +602,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }, delayExplosion);  // DELAY for chained explosions
     }
 
+    /**
+     * Apply value and ownership to a cell, then update its visuals.
+     * @param {number} row - cell row.
+     * @param {number} col - cell column.
+     * @param {number} explosionValue - value to add.
+     * @param {string} player - owner color key.
+     * @param {boolean} causedByExplosion - for FX.
+     * @returns {void} mutates grid cell and updates DOM.
+     */
     function updateCell(row, col, explosionValue = 0, player = grid[row][col].player, causedByExplosion = false) {
         if (grid[row][col].value <= maxCellValue) {
             grid[row][col].value = Math.min(maxCellValue, grid[row][col].value + explosionValue);
@@ -540,6 +621,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Refresh DOM for all cells based on current grid state and turn phase.
+     * @returns {void} updates classes and value-circle visuals.
+     */
     function updateGrid() {
         for (let i = 0; i < gridSize; i++) {
             for (let j = 0; j < gridSize; j++) {
@@ -563,6 +648,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Ensure the cell has an inner-circle element and set its owner color class.
+     * @param {Element} cell - DOM cell.
+     * @param {string} player - owner color key.
+     * @returns {Element} the inner-circle DOM element.
+     */
     function updateInnerCircle(cell, player) {
         let innerCircle = cell.querySelector('.inner-circle');
         if (!innerCircle) {
@@ -575,6 +666,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return innerCircle;
     }
 
+    /**
+     * Create/update positioned value-circles within inner-circle to represent cell value.
+     * @param {Element} innerCircle - the inner-circle element.
+     * @param {number} value - cell value 0..maxCellValue.
+     * @param {boolean} causedByExplosion - for animation.
+     * @returns {void} animates and positions child dots.
+     */
     function updateValueCircles(innerCircle, value, causedByExplosion) {
         if (performanceMode) {
             innerCircle.querySelectorAll('.value-circle').forEach(circle => circle.remove());
@@ -653,6 +751,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    /**
+     * Advance to the next active player and update body color; trigger AI in train mode.
+     * @returns {void} updates currentPlayer and grid visuals.
+     */
     function switchPlayer() {
         do {
             currentPlayer = (currentPlayer + 1) % playerCount;
@@ -665,15 +767,32 @@ document.addEventListener('DOMContentLoaded', () => {
         maybeTriggerAIMove();
     }
 
+    /**
+     * Check if the player owns at least one visible cell on the board.
+     * @param {number} playerIndex - index within playerColors.
+     * @returns {boolean} true if any cell has the player's class.
+     */
     function hasCells(playerIndex) {
         return Array.from(document.querySelectorAll('.cell'))
             .some(cell => cell.classList.contains(playerColors[playerIndex]));
     }
 
+    /**
+     * Get the current owning color of a grid cell.
+     * @param {number} row - cell row.
+     * @param {number} col - cell column.
+     * @returns {string} owner color key or '' for none.
+     */
     function getPlayerColor(row, col) {
         return grid[row][col].player;
     }
 
+    /**
+     * Validate if an initial placement at (row,col) violates center/adjacency rules.
+     * @param {number} row - cell row.
+     * @param {number} col - cell column.
+     * @returns {boolean} true if placement is invalid.
+     */
     function isInitialPlacementInvalid(row, col) {
         if (invalidInitialPositions.some(pos => pos.r === row && pos.c === col)) {
             return true;
@@ -692,6 +811,11 @@ document.addEventListener('DOMContentLoaded', () => {
         );
     }
 
+    /**
+     * Compute static invalid center positions based on odd/even grid size.
+     * @param {number} size - grid dimension.
+     * @returns {Array<{r:number,c:number}>} disallowed initial placement cells.
+     */
     function computeInvalidInitialPositions(size) {
         const positions = [];
         if (size % 2 === 0) {
@@ -711,6 +835,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return positions;
     }
 
+    /**
+     * Highlight cells that are invalid for initial placement in the current phase.
+     * @returns {void} toggles .invalid on affected cells.
+     */
     function highlightInvalidInitialPositions() {
         clearInvalidHighlights();
         
@@ -729,12 +857,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Remove all invalid placement highlighting from the grid.
+     * @returns {void}
+     */
     function clearInvalidHighlights() {
         document.querySelectorAll('.cell.invalid').forEach(cell => {
             cell.classList.remove('invalid');
         });
     }
 
+    /**
+     * Check if only one player still owns cells; if so, end game and reset after delay.
+     * @returns {void} sets gameWon and schedules resetGame.
+     */
     function checkWinCondition() {
         const playerCells = Array(playerCount).fill(0);
         for (let i = 0; i < gridSize; i++) {
@@ -757,6 +893,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Reset all grid cells and game flags, preserving current size and player count.
+     * @returns {void} clears DOM cell contents and classes.
+     */
     function resetGame() {
         grid = [];
         isProcessing = false;
@@ -793,6 +933,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // Called after each turn change to possibly run AI moves
+    /**
+     * In train mode, trigger AI move if it's currently an AI player's turn.
+     * @returns {void} may schedule aiMakeMoveFor with a short delay.
+     */
     function maybeTriggerAIMove() {
         if (!trainMode) return;
         if (gameWon || isProcessing) return;
@@ -804,7 +948,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 350);
     }
 
-    // helper: clone an already-simulated grid (deep copy)
+    /**
+     * Deep-copy a simulated grid structure to avoid mutation across branches.
+     * @param {Array<Array<{value:number,player:string}>>} simGrid - the grid to copy.
+     * @returns {Array<Array<{value:number,player:string}>>} same-shaped deep copy of simGrid.
+     */
     function deepCloneGrid(simGrid) {
         const out = [];
         for (let r = 0; r < gridSize; r++) {
@@ -816,7 +964,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return out;
     }
 
-    // helper: compute total owned value for a given player on a provided grid
+    /**
+     * Evaluate a grid by summing values of cells owned by a given player.
+     * @param {Array<Array<{value:number,player:string}>>} simGrid - the grid to evaluate.
+     * @param {number} playerIndex - player index.
+     * @returns {number} total owned cell value of given player.
+     */
     function totalOwnedOnGrid(simGrid, playerIndex) {
         let total = 0;
         for (let r = 0; r < gridSize; r++) {
@@ -827,8 +980,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return total;
     }
 
-    // === Explosion simulation with infinity detection ===
-    // Returns { grid, explosionCount, runaway: boolean }
+    /**
+     * Run explosion propagation on a simulated grid until stable or runaway detected.
+     * @param {Array<Array<{value:number,player:string}>>} simGrid - simulated grid.
+     * @param {boolean[]} simInitialPlacements - initial placement flags.
+     * @returns {{grid: Array<Array<{value:number,player:string}>>, explosionCount: number, runaway: boolean}} updated grid, number of explosions, runaway flag.
+     */
     function simulateExplosions(simGrid, simInitialPlacements) {
         const maxCellValueLocal = maxCellValue;
         let explosionCount = 0;
@@ -898,8 +1055,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return { grid: simGrid, explosionCount, runaway: false };
     }
 
-    // simulation-aware check for initial-placement invalidity
-    function isInitialPlacementInvalidOnSim(simGrid, simInitialPlacements, row, col) {
+    /**
+     * Validate simulated initial placement using current size and simulated occupancy.
+     * @param {Array<Array<{value:number,player:string}>>} simGrid - simulated grid.
+     * @param {number} row - cell row.
+     * @param {number} col - cell column.
+     * @returns {boolean} true if invalid due to center or adjacency.
+     */
+    function isInitialPlacementInvalidOnSim(simGrid, row, col) {
         // respect the global static invalid center positions
         if (invalidInitialPositions.some(pos => pos.r === row && pos.c === col)) {
             return true;
@@ -919,15 +1082,20 @@ document.addEventListener('DOMContentLoaded', () => {
         );
     }
 
-    // Generate legal candidate moves for a player on a given simulated grid & initialPlacements flags
-    // returns array of { r, c, isInitial, srcVal, sortKey }
+    /**
+     * Generate legal moves (initial or increment) for a player on a sim grid.
+     * @param {Array<Array<{value:number,player:string}>>} simGrid - simulated grid.
+     * @param {boolean[]} simInitialPlacements - initial placement flags.
+     * @param {number} playerIndex - player index.
+     * @returns {Array<{r:number,c:number,isInitial:boolean,srcVal:number,sortKey:number}>} candidate moves annotated for ordering.
+     */
     function generateCandidatesOnSim(simGrid, simInitialPlacements, playerIndex) {
         const candidates = [];
         if (!simInitialPlacements[playerIndex]) {
             for (let r = 0; r < gridSize; r++) {
                 for (let c = 0; c < gridSize; c++) {
                     // use simulation-aware invalid check here
-                    if (simGrid[r][c].value === 0 && !isInitialPlacementInvalidOnSim(simGrid, simInitialPlacements, r, c)) {
+                    if (simGrid[r][c].value === 0 && !isInitialPlacementInvalidOnSim(simGrid, r, c)) {
                         candidates.push({ r, c, isInitial: true, srcVal: 0, sortKey: 0 });
                     }
                 }
@@ -945,7 +1113,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return candidates;
     }
 
-    // UI helper: ensure response highlight style exists and show/hide function
+    /**
+     * Inject debug CSS styles used by AI visualization if not already present.
+     * @returns {void}
+     */
     function ensureAIDebugStyles() {
         if (document.getElementById('aiDebugStyles')) return;
         const style = document.createElement('style');
@@ -976,7 +1147,11 @@ document.addEventListener('DOMContentLoaded', () => {
         document.head.appendChild(style);
     }
 
-    // UI helper: show debug panel containing info and ordered candidate list plus opponent response
+    /**
+     * Render an AI debug panel summarizing chosen move and ordered candidates.
+     * @param {object} info - contains chosen move and ordered candidates meta.
+     * @returns {void} updates/creates a floating panel in the DOM.
+     */
     function showAIDebugPanelWithResponse(info) {
         ensureAIDebugStyles();
         const existing = document.getElementById('aiDebugPanel');
@@ -1008,7 +1183,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.appendChild(panel);
     }
 
-    // UI helper: clear debug panel and highlights
+    /**
+     * Remove AI debug UI components and any highlighted cells.
+     * @returns {void}
+     */
     function clearAIDebugUI() {
         const existing = document.getElementById('aiDebugPanel');
         if (existing) existing.remove();
@@ -1016,7 +1194,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     }
 
-    // Utility: apply a single move on a cloned grid and run explosion sim, returns { grid, explosionCount, runaway }
+    /**
+     * Apply a move on a cloned grid (initial or increment) and simulate explosions.
+     * @param {Array<Array<{value:number,player:string}>>} simGridInput - input simulated grid.
+     * @param {boolean[]} simInitialPlacementsInput - initial placement flags.
+     * @param {number} moverIndex - player making the move.
+     * @param {number} moveR - move row.
+     * @param {number} moveC - move column.
+     * @param {boolean} isInitialMove - whether it's an initial placement.
+     * @returns {{grid: Array<Array<{value:number,player:string}>>, explosionCount: number, runaway: boolean, simInitial: boolean[]}} post-move state.
+     */
     function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, moveR, moveC, isInitialMove) {
         const simGrid = deepCloneGrid(simGridInput);
         const simInitial = simInitialPlacementsInput.slice();
@@ -1036,7 +1223,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return { grid: result.grid, explosionCount: result.explosionCount, runaway: result.runaway, simInitial };
     }
 
-    // Minimax with alpha-beta pruning returning evaluation for focusPlayer as numeric value (higher = better for focus)
+    /**
+     * Evaluate future plies using minimax with alpha-beta pruning for a focus player.
+     * @param {Array<Array<{value:number,player:string}>>} simGridInput - simulated grid.
+     * @param {boolean[]} simInitialPlacementsInput - initial placement flags.
+     * @param {number} moverIndex - current mover.
+     * @param {number} depth - search depth.
+     * @param {number} alpha - alpha value.
+     * @param {number} beta - beta value.
+     * @param {number} maximizingPlayerIndex - maximizing player.
+     * @param {number} focusPlayerIndex - player to evaluate for.
+     * @returns {{value:number, runaway:boolean}} evaluation score for focus player.
+     */
     function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex) {
         // Terminal condition
         // If depth == 0: return totalOwnedOnGrid after applying no further moves (use current simGridInput as leaf value)
@@ -1127,9 +1325,19 @@ document.addEventListener('DOMContentLoaded', () => {
         return { value: bestValue, runaway: false };
     }
 
-    // Top-level: replace current opponent one-step evaluation inside aiMakeMoveFor with deeper search
-    // We'll keep the existing evaluated array construction, but compute a searchScore for each candidate
-    // Then continue computing atk/def, netResult, sorting and selection as current logic.
+    /**
+     * Choose and execute an AI move for the given player using heuristic + search.
+     *
+     * Selection criteria (in order):
+     * - Main: netResult for each candidate, where netResult uses deep-search `searchScore` if available
+     *   (minimax up to `aiDepth`, relative to current total) or falls back to `immediateGain`.
+     * - Tiebreaker 1: higher atk (AI cells next to weaker enemy cells).
+     * - Tiebreaker 2: higher def (AI cells one away from exploding).
+     * - Final: random among exact ties.
+     *
+     * @param {number} playerIndex - AI player index in playerColors.
+     * @returns {void} either performs a move (handleClick) or advances turn.
+     */
     function aiMakeMoveFor(playerIndex) {
         if (isProcessing || gameWon) return;
 
@@ -1149,7 +1357,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 c: cand.c,
                 isInitial: cand.isInitial,
                 srcVal: cand.srcVal,
-                immediateGain: (res.runaway ? (playerIndex === playerIndex ? Infinity : -Infinity) : (totalOwnedOnGrid(res.grid, playerIndex) - totalOwnedOnGrid(grid, playerIndex))),
+                // If simulation runaways are detected for this immediate result, treat as overwhelmingly good for the mover.
+                immediateGain: (res.runaway ? Infinity : (totalOwnedOnGrid(res.grid, playerIndex) - totalOwnedOnGrid(grid, playerIndex))),
                 explosions: res.explosionCount,
                 resultGrid: res.grid,
                 resultInitial: res.simInitial,
@@ -1162,18 +1371,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const topK = evaluated.slice(0, Math.min(dataRespectK, evaluated.length));
 
         // For each topK entry, run minimaxEvaluate to depth aiDepth (this returns absolute totalOwned estimate)
-        for (const e of topK) {
+        for (const cand of topK) {
             // If immediate result already runaway, we can set searchScore immediately
-            if (e.runaway) {
-                e.searchScore = (e.immediateGain === Infinity) ? Infinity : -Infinity;
+            if (cand.runaway) {
+                cand.searchScore = (cand.immediateGain === Infinity) ? Infinity : -Infinity;
             } else {
                 // Start recursion on next player with depth = aiDepth * 2 - 1 is not necessary; simpler: use aiDepth as plies
                 const nextPlayer = (playerIndex + 1) % playerCount;
                 const depth = aiDepth; // number of plies to look ahead
-                const evalRes = minimaxEvaluate(e.resultGrid, e.resultInitial, nextPlayer, depth - 1, -Infinity, Infinity, playerIndex, playerIndex);
+                const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextPlayer, depth - 1, -Infinity, Infinity, playerIndex, playerIndex);
                 // minimaxEvaluate returns absolute totalOwned for focus; convert to gain relative to current
                 const before = totalOwnedOnGrid(grid, playerIndex);
-                e.searchScore = (evalRes.value === Infinity || evalRes.value === -Infinity) ? evalRes.value : (evalRes.value - before);
+                cand.searchScore = (evalRes.value === Infinity || evalRes.value === -Infinity) ? evalRes.value : (evalRes.value - before);
             }
         }
 
@@ -1229,7 +1438,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!bestMoves || bestMoves.length === 0) bestMoves = topK.length ? [topK[0]] : [];
 
-        const chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
+    const chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
 
         if (aiDebug) {
             // reuse existing debug UI code paths: clearAIDebugUI + show highlights + panel info
@@ -1249,9 +1458,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     atk: chosen.atk,            // Number of strong ai cells next to weak enemy cells
                     def: chosen.def             // Number of ai cells 1 away from exploding
                 } : null,
-                ordered: topK.map(e => ({
-                    r: e.r, c: e.c, src: e.srcVal, expl: e.explosions,
-                    gain: e.searchScore, atk: e.atk, def: e.def
+                ordered: topK.map(cand => ({
+                    r: cand.r, c: cand.c, src: cand.srcVal, expl: cand.explosions,
+                    gain: cand.searchScore, atk: cand.atk, def: cand.def
                 })),
                 topK: topK.length
             };

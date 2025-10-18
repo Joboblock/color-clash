@@ -163,7 +163,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { text: 'Tip: Double-tap outside the grid to toggle fullscreen on mobile devices.', weight: 3 },
         { text: 'Tip: Grid size defaults to a recommended value but can be adjusted manually.', weight: 2 },
         { text: 'Tip: Use Train mode to observe AI behavior and learn effective strategies.', weight: 1 },
-        { text: 'Tip: <a href="https://joboblock.github.io" target="_blank">joboblock.github.io</a> redirects to this game.', weight: 2, html: true  },
+        { text: 'Tip: <a href="https://joboblock.github.io" target="_blank">joboblock.github.io</a> redirects to this game.', weight: 2, html: true },
+        { text: 'Tip: Give this project a <a href="https://github.com/Joboblock/color-clash" target="_blank">Star</a>, to support its development!', weight: 2, html: true },
         { text: 'Tip: This is a rare message.', weight: 0.1 }
     ];
 
@@ -1076,7 +1077,7 @@ document.addEventListener('DOMContentLoaded', () => {
 //#endregion
 
 //#region Training / AI helpers (dataRespect + debug)
-    // AI debug mode if URL contains ai_debug=true
+    // AI debug mode
     const aiDebug = true;
     // Configure dataRespect branching factor K via URL param ai_k, default 3
     const dataRespectK = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_k')) || 25);
@@ -1269,6 +1270,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return candidates;
     }
 
+    // Coalition helper: union of all opponents' legal moves, each tagged with its real owner
+    function generateCoalitionCandidatesOnSim(simGrid, simInitialPlacements, focusPlayerIndex) {
+        const out = [];
+        for (let idx = 0; idx < playerCount; idx++) {
+            if (idx === focusPlayerIndex) continue;
+            const moves = generateCandidatesOnSim(simGrid, simInitialPlacements, idx);
+            for (const m of moves) out.push({ ...m, owner: idx });
+        }
+        return out;
+    }
+
     /**
      * Inject debug CSS styles used by AI visualization if not already present.
      * @returns {void}
@@ -1392,13 +1404,15 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {{value:number, runaway:boolean, stepsToInfinity?:number}} evaluation score for focus player and plies to +/-Infinity if detected.
      */
     function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex) {
+        // Coalition mode always ON: all non-focus players act as a single minimizing opponent.
+
         // Terminal checks: detect actual game-over (only one player has any cells)
         // IMPORTANT: Do NOT consider this a terminal state during the initial placement phase,
         // because early in the game the current mover may be the only player with any cells
         // simply due to others not having placed yet. That would falsely yield +/-Infinity.
         const inInitialPlacementPhase = !simInitialPlacementsInput.every(v => v);
         if (!inInitialPlacementPhase) {
-        // Count owned cells per player; if exactly one player owns >0 cells, game is over.
+            // Count owned cells per player; if exactly one player owns >0 cells, game is over.
             let hasAnyCells = false;
             let activePlayers = 0;
             let solePlayerIdx = -1;
@@ -1439,60 +1453,64 @@ document.addEventListener('DOMContentLoaded', () => {
         const simGrid = deepCloneGrid(simGridInput);
         const simInitial = simInitialPlacementsInput.slice();
 
-        // Generate candidates for moverIndex
-        let candidates = generateCandidatesOnSim(simGrid, simInitial, moverIndex);
+        const isFocusTurn = (moverIndex === focusPlayerIndex);
 
-        // If no legal move: simulate flagging initialPlacement done for that mover and continue to next player
-        if (candidates.length === 0) {
-            // If initial placement still pending, mark it done
-            if (!simInitial[moverIndex]) simInitial[moverIndex] = true;
-            const nextPlayer = (moverIndex + 1) % playerCount;
-            return minimaxEvaluate(simGrid, simInitial, nextPlayer, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex);
+        // Generate candidates: focus player's legal moves, or coalition union of all opponents
+        let candidates;
+        if (isFocusTurn) {
+            candidates = generateCandidatesOnSim(simGrid, simInitial, focusPlayerIndex).map(c => ({ ...c, owner: focusPlayerIndex }));
+        } else {
+            candidates = generateCoalitionCandidatesOnSim(simGrid, simInitial, focusPlayerIndex);
         }
 
-        // Evaluate immediate gains for each candidate to sort and pick topK
+        // If no legal move: pass turn (toggle sides) and consume a ply
+        if (candidates.length === 0) {
+            const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
+            return minimaxEvaluate(simGrid, simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex);
+        }
+
+        // Evaluate immediate outcomes for ordering and branch truncation
         const evaluatedCandidates = [];
         for (const cand of candidates) {
-            const applied = applyMoveAndSim(simGrid, simInitial, moverIndex, cand.r, cand.c, cand.isInitial);
+            const owner = cand.owner; // must be a real player index
+            const applied = applyMoveAndSim(simGrid, simInitial, owner, cand.r, cand.c, cand.isInitial);
             const val = totalOwnedOnGrid(applied.grid, focusPlayerIndex);
 
-            // runaway handling: encode infinite endpoint values
             if (applied.runaway) {
-                const runawayVal = (moverIndex === focusPlayerIndex) ? Infinity : -Infinity;
-                evaluatedCandidates.push({ cand, value: runawayVal, resultGrid: applied.grid, simInitial: applied.simInitial });
+                const runawayVal = (owner === focusPlayerIndex) ? Infinity : -Infinity;
+                evaluatedCandidates.push({ cand, owner, value: runawayVal, resultGrid: applied.grid, simInitial: applied.simInitial });
             } else {
-                evaluatedCandidates.push({ cand, value: val, resultGrid: applied.grid, simInitial: applied.simInitial });
+                evaluatedCandidates.push({ cand, owner, value: val, resultGrid: applied.grid, simInitial: applied.simInitial });
             }
         }
 
-        // Sort descending by immediate value when mover is the focusPlayerIndex, otherwise ascending (opponent tries to minimize)
-        evaluatedCandidates.sort((a, b) => ( (moverIndex === focusPlayerIndex ? b.value - a.value : a.value - b.value) ));
+        // Order: maximizing for focus turn, minimizing for coalition turn
+        evaluatedCandidates.sort((a, b) => ( isFocusTurn ? (b.value - a.value) : (a.value - b.value) ));
 
         // Truncate to top K to limit branching
         const topCandidates = evaluatedCandidates.slice(0, Math.min(dataRespectK, evaluatedCandidates.length));
 
-        const nextPlayer = (moverIndex + 1) % playerCount;
-        let bestValue = (moverIndex === focusPlayerIndex) ? -Infinity : Infinity;
-
+        const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
+        let bestValue = isFocusTurn ? -Infinity : Infinity;
         let bestSteps = undefined;
+
         for (const entry of topCandidates) {
-            // If entry produced immediate runaway, short-circuit with stepsToInfinity = 1
+            // Immediate runaway short-circuit
             if (entry.value === Infinity) {
-                if (moverIndex === focusPlayerIndex) return { value: Infinity, runaway: true, stepsToInfinity: 1 };
-                if (moverIndex !== focusPlayerIndex) return { value: -Infinity, runaway: true, stepsToInfinity: 1 };
+                if (isFocusTurn) return { value: Infinity, runaway: true, stepsToInfinity: 1 };
+                else return { value: -Infinity, runaway: true, stepsToInfinity: 1 };
             }
             if (entry.value === -Infinity) {
-                if (moverIndex !== focusPlayerIndex) return { value: -Infinity, runaway: true, stepsToInfinity: 1 };
-                if (moverIndex === focusPlayerIndex) return { value: Infinity, runaway: true, stepsToInfinity: 1 };
+                if (!isFocusTurn) return { value: -Infinity, runaway: true, stepsToInfinity: 1 };
+                else return { value: Infinity, runaway: true, stepsToInfinity: 1 };
             }
 
-            // Recurse on child node
-            const childEval = minimaxEvaluate(entry.resultGrid, entry.simInitial, nextPlayer, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex);
-
+            // Recurse on child node (toggle sides)
+            const childEval = minimaxEvaluate(entry.resultGrid, entry.simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex);
             const value = childEval.value;
             const childSteps = typeof childEval.stepsToInfinity === 'number' ? childEval.stepsToInfinity + 1 : undefined;
 
-            if (moverIndex === focusPlayerIndex) {
+            if (isFocusTurn) {
                 // maximizing: prefer larger value; if both Infinity, prefer fewer steps
                 if (value > bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (typeof childSteps === 'number' && childSteps < bestSteps)))) {
                     bestValue = value;
@@ -1569,10 +1587,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 cand.searchScore = (cand.immediateGain === Infinity) ? Infinity : -Infinity;
                 if (cand.searchScore === Infinity) cand.winPlies = 1;
             } else {
-                // Start recursion on next player with depth = aiDepth * 2 - 1 is not necessary; simpler: use aiDepth as plies
-                const nextPlayer = (playerIndex + 1) % playerCount;
+                // Start recursion with coalition opponent as next mover; use aiDepth as plies
+                const nextMover = -1; // coalition pseudo-player
                 const depth = aiDepth; // number of plies to look ahead
-                const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextPlayer, depth - 1, -Infinity, Infinity, playerIndex, playerIndex);
+                const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextMover, depth - 1, -Infinity, Infinity, playerIndex, playerIndex);
                 // minimaxEvaluate returns absolute totalOwned for focus; convert to gain relative to current
                 const before = totalOwnedOnGrid(grid, playerIndex);
                 cand.searchScore = (evalRes.value === Infinity || evalRes.value === -Infinity) ? evalRes.value : (evalRes.value - before);

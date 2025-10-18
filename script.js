@@ -104,12 +104,12 @@ document.addEventListener('DOMContentLoaded', () => {
     menuPlayerCount = clampPlayers(playerCount);
     updateSizeBoundsForPlayers(menuPlayerCount);
 
-    // Decide initial menu visibility: only open menu if no players/size params OR preview param is present
+    // Decide initial menu visibility: only open menu if no players/size params OR menu param is present
     const initialParams = new URLSearchParams(window.location.search);
     const hasPlayersOrSize = initialParams.has('players') || initialParams.has('size');
-    const isPreview = initialParams.has('preview');
-    if (hasPlayersOrSize && !isPreview) {
-        // hide menu when explicit game params provided (and not in preview mode)
+    const isMenu = initialParams.has('menu');
+    if (hasPlayersOrSize && !isMenu) {
+        // hide menu when explicit game params provided (and not in menu mode)
         if (menu) menu.style.display = 'none';
     } else {
         if (menu) menu.style.display = '';
@@ -162,14 +162,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (s > maxSz) s = maxSz;
         // set params and reload so existing initialization picks them up
         const params = new URLSearchParams(window.location.search);
-        // remove preview when starting
-        params.delete('preview');
+        // remove menu flag when starting
+        params.delete('menu');
+        // also clear train mode when starting a normal game
+        params.delete('train');
         params.set('players', String(p));
         params.set('size', String(s));
         window.location.search = params.toString();
     });
 
-    // Preview button is repurposed to "Train"
+    // Train button handler
     if (trainBtn) {
         trainBtn.textContent = 'Train';
         trainBtn.id = 'trainBtn';
@@ -184,6 +186,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (s > maxSz) s = maxSz;
 
             const params = new URLSearchParams(window.location.search);
+            // remove menu flag when training starts
+            params.delete('menu');
             params.set('players', String(p));
             params.set('size', String(s));
             // set train mode
@@ -436,7 +440,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Ensure humanPlayer index is valid for current playerCount
             // (humanPlayer is 0 by design; defensive check)
             // DEBUG: make ai first player
-            currentPlayer = 1 //Math.min(humanPlayer, playerCount - 1);
+            currentPlayer = Math.min(humanPlayer, playerCount - 1);
             document.body.className = playerColors[currentPlayer];
             updateGrid();
             // Trigger AI if the first randomly chosen currentPlayer isn't the human
@@ -885,8 +889,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * Check if only one player still owns cells; if so, end game and reset after delay.
-     * @returns {void} sets gameWon and schedules resetGame.
+     * Check if only one player still owns cells; if so, end game and reopen menu after delay.
+     * @returns {void} sets gameWon and then reopens the menu via URL param.
      */
     function checkWinCondition() {
         const playerCells = Array(playerCount).fill(0);
@@ -905,37 +909,16 @@ document.addEventListener('DOMContentLoaded', () => {
             gameWon = true;
             setTimeout(() => {
                 if (!gameWon) return;
-                resetGame();
+                // Instead of restarting, open the menu by adding menu=true to the URL
+                const params = new URLSearchParams(window.location.search);
+                params.set('menu', 'true');
+                const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+                // Update the URL without reloading the page
+                window.history.replaceState(null, '', newUrl);
+                // Show the menu overlay
+                if (menu) menu.style.display = '';
             }, 2000); //DELAY Game End
         }
-    }
-
-    /**
-     * Reset all grid cells and game flags, preserving current size and player count.
-     * @returns {void} clears DOM cell contents and classes.
-     */
-    function resetGame() {
-        grid = [];
-        isProcessing = false;
-        currentPlayer = Math.floor(Math.random() * playerCount);
-        initialPlacements = Array(playerCount).fill(false);
-        gameWon = false;
-
-        for (let i = 0; i < gridSize; i++) {
-            grid[i] = [];
-            for (let j = 0; j < gridSize; j++) {
-                grid[i][j] = { value: 0, player: '' };
-                const cell = document.querySelector(`.cell[data-row="${i}"][data-col="${j}"]`);
-                cell.className = 'cell';
-                cell.textContent = '';
-                while (cell.firstChild) {
-                    cell.removeChild(cell.firstChild);
-                }
-            }
-        }
-
-        highlightInvalidInitialPositions();
-        document.body.className = playerColors[currentPlayer];
     }
 //#endregion
 
@@ -945,7 +928,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Configure dataRespect branching factor K via URL param ai_k, default 3
     const dataRespectK = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_k')) || 25);
     // number of plies (AI-perspective). Example: 3 (AI -> opp -> AI)
-    const aiDepth = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_depth')) || 3);
+    const aiDepth = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_depth')) || 4);
     const maxExplosionsToAssumeLoop = gridSize * 3;
 
 
@@ -958,9 +941,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!trainMode) return;
         if (gameWon || isProcessing) return;
         if (currentPlayer === humanPlayer) return;
+        // If the menu is open/visible, do not run AI moves
+        if (menu && menu.style.display !== 'none') return;
 
         setTimeout(() => {
             if (isProcessing || gameWon || currentPlayer === humanPlayer) return;
+            if (menu && menu.style.display !== 'none') return;
             aiMakeMoveFor(currentPlayer);
         }, 350);
     }

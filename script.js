@@ -113,6 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const cellExplodeThreshold = 4;
     const delayExplosion = 500;
     const delayAnimation = 300;
+    const delayGameEnd = 2000;
     const performanceModeCutoff = 16;
 
     document.documentElement.style.setProperty('--delay-explosion', `${delayExplosion}ms`);
@@ -165,7 +166,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { text: 'Tip: Use Train mode to observe AI behavior and learn effective strategies.', weight: 1 },
         { text: 'Tip: <a href="https://joboblock.github.io" target="_blank">joboblock.github.io</a> redirects to this game.', weight: 2, html: true },
         { text: 'Tip: Give this project a <a href="https://github.com/Joboblock/color-clash" target="_blank">Star</a>, to support its development!', weight: 2, html: true },
-        { text: 'Tip: This is a rare message.', weight: 0.1 }
+        { text: 'Tip: This is a rare message.', weight: 0.1 },
+        { text: 'Tip: Praise the Raute, embrace the Raute!', weight: 0.1 }
     ];
 
     function pickWeightedTip(list) {
@@ -520,6 +522,16 @@ document.addEventListener('DOMContentLoaded', () => {
     let initialPlacements = Array(playerCount).fill(false);
     let gameWon = false;
     let invalidInitialPositions = [];
+    let menuShownAfterWin = false; // guard to avoid repeated menu reopen scheduling
+    let explosionTimerId = null;   // track explosion timeout for cancellation
+
+    function stopExplosionLoop() {
+        if (explosionTimerId !== null) {
+            try { clearTimeout(explosionTimerId); } catch { /* ignore */ }
+            explosionTimerId = null;
+        }
+        isProcessing = false;
+    }
 
     // Train mode globals
     let trainMode = isTrainMode;
@@ -552,7 +564,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // reset game state arrays according to new sizes
         grid = [];
         initialPlacements = Array(playerCount).fill(false);
-        gameWon = false;
+    gameWon = false;
+    menuShownAfterWin = false;
+    stopExplosionLoop();
         isProcessing = false;
         performanceMode = false;
         currentPlayer = Math.floor(Math.random() * playerCount);
@@ -685,6 +699,11 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} updates grid state, schedules chained processing.
      */
     function processExplosions() {
+        // If the menu is visible, stop looping (prevents background chains while in menu)
+        if (menu && menu.style.display !== 'none') {
+            stopExplosionLoop();
+            return;
+        }
         let cellsToExplode = [];
 
         // Identify cells that need to explode
@@ -766,7 +785,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateGrid();
 
-        setTimeout(() => {
+        explosionTimerId = setTimeout(() => {
+            // Stop if the menu is visible
+            if (menu && menu.style.display !== 'none') {
+                stopExplosionLoop();
+                return;
+            }
             if (initialPlacements.every(placement => placement)) {
                 checkWinCondition();
             }
@@ -1058,9 +1082,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const activePlayers = playerCells.filter(count => count > 0).length;
         if (activePlayers === 1) {
             gameWon = true;
+            if (menuShownAfterWin) return; // schedule only once
+            menuShownAfterWin = true;
             setTimeout(() => {
                 if (!gameWon) return;
-                // Instead of restarting, open the menu by adding menu=true to the URL
+                // First, stop the chain; then immediately open the menu (no extra delay)
+                stopExplosionLoop();
+                // Open the menu by adding menu=true to the URL
                 const params = new URLSearchParams(window.location.search);
                 params.set('menu', 'true');
                 const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
@@ -1071,7 +1099,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateRandomTip();
                 // When showing the menu, exit fullscreen to restore browser UI if needed
                 exitFullscreenIfPossible();
-            }, 2000); //DELAY Game End
+            }, delayGameEnd); //DELAY Game End
         }
     }
 //#endregion

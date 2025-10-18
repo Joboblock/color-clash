@@ -1254,35 +1254,41 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex) {
         // Terminal checks: detect actual game-over (only one player has any cells)
+        // IMPORTANT: Do NOT consider this a terminal state during the initial placement phase,
+        // because early in the game the current mover may be the only player with any cells
+        // simply due to others not having placed yet. That would falsely yield +/-Infinity.
+        const inInitialPlacementPhase = !simInitialPlacementsInput.every(v => v);
+        if (!inInitialPlacementPhase) {
         // Count owned cells per player; if exactly one player owns >0 cells, game is over.
-        let hasAnyCells = false;
-        let activePlayers = 0;
-        let solePlayerIdx = -1;
-        for (let r = 0; r < gridSize; r++) {
-            for (let c = 0; c < gridSize; c++) {
-                const owner = simGridInput[r][c].player;
-                if (owner !== '') {
-                    hasAnyCells = true;
-                    const idx = playerColors.indexOf(owner);
-                    if (idx !== -1) {
-                        if (solePlayerIdx === -1) {
-                            solePlayerIdx = idx;
-                            activePlayers = 1;
-                        } else if (idx !== solePlayerIdx) {
-                            activePlayers = 2; // we can early exit once >1
-                            r = gridSize; // break outer loops
-                            break;
+            let hasAnyCells = false;
+            let activePlayers = 0;
+            let solePlayerIdx = -1;
+            for (let r = 0; r < gridSize; r++) {
+                for (let c = 0; c < gridSize; c++) {
+                    const owner = simGridInput[r][c].player;
+                    if (owner !== '') {
+                        hasAnyCells = true;
+                        const idx = playerColors.indexOf(owner);
+                        if (idx !== -1) {
+                            if (solePlayerIdx === -1) {
+                                solePlayerIdx = idx;
+                                activePlayers = 1;
+                            } else if (idx !== solePlayerIdx) {
+                                activePlayers = 2; // we can early exit once >1
+                                r = gridSize; // break outer loops
+                                break;
+                            }
                         }
                     }
                 }
             }
-        }
-        if (hasAnyCells && activePlayers === 1) {
-            // Terminal: if the sole active player is the focus, it's a win, else a loss.
-            if (solePlayerIdx === focusPlayerIndex) {
-                return { value: Infinity, runaway: true, stepsToInfinity: 0 };
-            } else {
-                return { value: -Infinity, runaway: true, stepsToInfinity: 0 };
+            if (hasAnyCells && activePlayers === 1) {
+                // Terminal: if the sole active player is the focus, it's a win, else a loss.
+                if (solePlayerIdx === focusPlayerIndex) {
+                    return { value: Infinity, runaway: true, stepsToInfinity: 0 };
+                } else {
+                    return { value: -Infinity, runaway: true, stepsToInfinity: 0 };
+                }
             }
         }
 

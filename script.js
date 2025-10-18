@@ -132,6 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 //#region Menu Stuff
     const menu = document.getElementById('mainMenu');
+    const menuHint = document.querySelector('.menu-hint');
     // removed hidden native range input; visual slider maintains menuPlayerCount
     let menuPlayerCount = playerCount; // current selection from visual slider
 
@@ -155,6 +156,33 @@ document.addEventListener('DOMContentLoaded', () => {
         purple: '#8f5fd5',
         magenta: '#d35fd3'
     };
+
+    // Weighted tips list (some with HTML)
+    const tips = [
+        { text: 'Tip: You can also set <code>?players=&lt;n&gt;&amp;size=&lt;n&gt;</code> in the URL.', weight: 1, html: true },
+        { text: 'Tip: Double-tap outside the grid to toggle fullscreen on mobile devices.', weight: 3 },
+        { text: 'Tip: Grid size defaults to a recommended value but can be adjusted manually.', weight: 2 },
+        { text: 'Tip: Use Train mode to observe AI behavior and learn effective strategies.', weight: 1 },
+        { text: 'Tip: <a href="https://joboblock.github.io" target="_blank">joboblock.github.io</a> redirects to this game.', weight: 2, html: true  },
+        { text: 'Tip: This is a rare message.', weight: 0.1 }
+    ];
+
+    function pickWeightedTip(list) {
+        let total = 0;
+        for (const t of list) total += (typeof t.weight === 'number' ? t.weight : 1);
+        let roll = Math.random() * total;
+        for (const t of list) {
+            roll -= (typeof t.weight === 'number' ? t.weight : 1);
+            if (roll <= 0) return t;
+        }
+        return list[list.length - 1];
+    }
+
+    function updateRandomTip() {
+        if (!menuHint) return;
+        const tip = pickWeightedTip(tips);
+        if (tip && tip.html) menuHint.innerHTML = tip.text; else menuHint.textContent = tip ? tip.text : '';
+    }
 
     // Ensure CSS variables for colors are set on :root BEFORE building boxes
     Object.entries(innerCircleColors).forEach(([key, hex]) => {
@@ -187,6 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (menu) menu.style.display = 'none';
     } else {
         if (menu) menu.style.display = '';
+        updateRandomTip();
         // Ensure the URL reflects menu state so back-button can navigate in-app
         if (!isMenu) {
             const params = new URLSearchParams(window.location.search);
@@ -301,6 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const showMenu = params.has('menu') || !hasPS;
         if (showMenu) {
             if (menu) menu.style.display = '';
+            updateRandomTip();
             exitFullscreenIfPossible();
             return;
         }
@@ -1037,6 +1067,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.history.replaceState(null, '', newUrl);
                 // Show the menu overlay
                 if (menu) menu.style.display = '';
+                updateRandomTip();
                 // When showing the menu, exit fullscreen to restore browser UI if needed
                 exitFullscreenIfPossible();
             }, 2000); //DELAY Game End

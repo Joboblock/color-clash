@@ -435,7 +435,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (trainMode) {
             // Ensure humanPlayer index is valid for current playerCount
             // (humanPlayer is 0 by design; defensive check)
-            currentPlayer = Math.min(humanPlayer, playerCount - 1);
+            // DEBUG: make ai first player
+            currentPlayer = 1 //Math.min(humanPlayer, playerCount - 1);
             document.body.className = playerColors[currentPlayer];
             updateGrid();
             // Trigger AI if the first randomly chosen currentPlayer isn't the human
@@ -1249,12 +1250,43 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {number} beta - beta value.
      * @param {number} maximizingPlayerIndex - maximizing player.
      * @param {number} focusPlayerIndex - player to evaluate for.
-     * @returns {{value:number, runaway:boolean}} evaluation score for focus player.
+     * @returns {{value:number, runaway:boolean, stepsToInfinity?:number}} evaluation score for focus player and plies to +/-Infinity if detected.
      */
     function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex) {
-        // Terminal condition
-        // If depth == 0: return totalOwnedOnGrid after applying no further moves (use current simGridInput as leaf value)
-        // We'll evaluate by returning totalOwnedOnGrid(simGridInput, focusPlayerIndex)
+        // Terminal checks: detect actual game-over (only one player has any cells)
+        // Count owned cells per player; if exactly one player owns >0 cells, game is over.
+        let hasAnyCells = false;
+        let activePlayers = 0;
+        let solePlayerIdx = -1;
+        for (let r = 0; r < gridSize; r++) {
+            for (let c = 0; c < gridSize; c++) {
+                const owner = simGridInput[r][c].player;
+                if (owner !== '') {
+                    hasAnyCells = true;
+                    const idx = playerColors.indexOf(owner);
+                    if (idx !== -1) {
+                        if (solePlayerIdx === -1) {
+                            solePlayerIdx = idx;
+                            activePlayers = 1;
+                        } else if (idx !== solePlayerIdx) {
+                            activePlayers = 2; // we can early exit once >1
+                            r = gridSize; // break outer loops
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (hasAnyCells && activePlayers === 1) {
+            // Terminal: if the sole active player is the focus, it's a win, else a loss.
+            if (solePlayerIdx === focusPlayerIndex) {
+                return { value: Infinity, runaway: true, stepsToInfinity: 0 };
+            } else {
+                return { value: -Infinity, runaway: true, stepsToInfinity: 0 };
+            }
+        }
+
+        // Depth terminal: evaluate static score if depth exhausted
         if (depth === 0) {
             return { value: totalOwnedOnGrid(simGridInput, focusPlayerIndex), runaway: false };
         }
@@ -1297,55 +1329,54 @@ document.addEventListener('DOMContentLoaded', () => {
         const nextPlayer = (moverIndex + 1) % playerCount;
         let bestValue = (moverIndex === focusPlayerIndex) ? -Infinity : Infinity;
 
+        let bestSteps = undefined;
         for (const entry of topCandidates) {
-            // If entry produced runaway, we can short-circuit
+            // If entry produced immediate runaway, short-circuit with stepsToInfinity = 1
             if (entry.value === Infinity) {
-                // If maximizing (favour runaway for focus), return Infinity
-                if (moverIndex === focusPlayerIndex) return { value: Infinity, runaway: true };
-                // else this runaway favours opponent -> treat as -Infinity for focus
-                if (moverIndex !== focusPlayerIndex) return { value: -Infinity, runaway: true };
+                if (moverIndex === focusPlayerIndex) return { value: Infinity, runaway: true, stepsToInfinity: 1 };
+                if (moverIndex !== focusPlayerIndex) return { value: -Infinity, runaway: true, stepsToInfinity: 1 };
             }
             if (entry.value === -Infinity) {
-                if (moverIndex !== focusPlayerIndex) return { value: -Infinity, runaway: true };
-                if (moverIndex === focusPlayerIndex) return { value: Infinity, runaway: true };
+                if (moverIndex !== focusPlayerIndex) return { value: -Infinity, runaway: true, stepsToInfinity: 1 };
+                if (moverIndex === focusPlayerIndex) return { value: Infinity, runaway: true, stepsToInfinity: 1 };
             }
 
             // Recurse on child node
             const childEval = minimaxEvaluate(entry.resultGrid, entry.simInitial, nextPlayer, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex);
 
-            // If child runaways are reported, bubble as +/-Infinity accordingly
-            if (childEval.runaway) {
-                if (childEval.value === Infinity) {
-                    // opponent's move led to runaway *for focus*; minimize/maximize accordingly
-                    if (moverIndex === focusPlayerIndex) {
-                        // as mover we see opponent runaways later: that's bad if opponent gets Infinity; we must treat accordingly
-                    }
-                }
-            }
-
             const value = childEval.value;
+            const childSteps = typeof childEval.stepsToInfinity === 'number' ? childEval.stepsToInfinity + 1 : undefined;
 
             if (moverIndex === focusPlayerIndex) {
-                // maximizing
-                if (value > bestValue) bestValue = value;
+                // maximizing: prefer larger value; if both Infinity, prefer fewer steps
+                if (value > bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (typeof childSteps === 'number' && childSteps < bestSteps)))) {
+                    bestValue = value;
+                    bestSteps = childSteps;
+                }
                 alpha = Math.max(alpha, bestValue);
                 if (alpha >= beta) break; // beta cut-off
             } else {
-                // minimizing
-                if (value < bestValue) bestValue = value;
+                // minimizing: prefer smaller value; if both Infinity (forced), prefer more steps (delay)
+                if (value < bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (typeof childSteps === 'number' && childSteps > bestSteps)))) {
+                    bestValue = value;
+                    bestSteps = childSteps;
+                }
                 beta = Math.min(beta, bestValue);
                 if (beta <= alpha) break; // alpha cut-off
             }
         }
 
-        return { value: bestValue, runaway: false };
+        const isInf = (bestValue === Infinity || bestValue === -Infinity);
+        return { value: bestValue, runaway: isInf, stepsToInfinity: isInf ? bestSteps : undefined };
     }
 
     /**
      * Choose and execute an AI move for the given player using heuristic + search.
      *
-     * Selection criteria (in order):
-     * - Main: netResult for each candidate, where netResult uses deep-search `searchScore` if available
+    * Selection criteria (in order):
+    * - If any candidate yields +Infinity (guaranteed win chain OR detected terminal state \(AI captures all opponent cells\)),
+    *   ignore atk/def and pick the move with the smallest plies-to-win (fastest finish). If multiple, pick randomly among them.
+     * - Otherwise, Main: netResult for each candidate, where netResult uses deep-search `searchScore` if available
      *   (minimax up to `aiDepth`, relative to current total) or falls back to `immediateGain`.
      * - Tiebreaker 1: higher atk (AI cells next to weaker enemy cells).
      * - Tiebreaker 2: higher def (AI cells one away from exploding).
@@ -1391,6 +1422,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // If immediate result already runaway, we can set searchScore immediately
             if (cand.runaway) {
                 cand.searchScore = (cand.immediateGain === Infinity) ? Infinity : -Infinity;
+                if (cand.searchScore === Infinity) cand.winPlies = 1;
             } else {
                 // Start recursion on next player with depth = aiDepth * 2 - 1 is not necessary; simpler: use aiDepth as plies
                 const nextPlayer = (playerIndex + 1) % playerCount;
@@ -1399,7 +1431,64 @@ document.addEventListener('DOMContentLoaded', () => {
                 // minimaxEvaluate returns absolute totalOwned for focus; convert to gain relative to current
                 const before = totalOwnedOnGrid(grid, playerIndex);
                 cand.searchScore = (evalRes.value === Infinity || evalRes.value === -Infinity) ? evalRes.value : (evalRes.value - before);
+                if (evalRes.value === Infinity && typeof evalRes.stepsToInfinity === 'number') {
+                    cand.winPlies = evalRes.stepsToInfinity;
+                }
             }
+        }
+
+        // Fast path: if any +Infinity candidate exists, choose the fastest win and skip atk/def tiebreakers
+        const winning = topK.filter(c => c.searchScore === Infinity);
+        if (winning.length > 0) {
+            const minPlies = Math.min(...winning.map(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY)));
+            const fastest = winning.filter(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY) === minPlies);
+            const chosenFast = fastest.length ? fastest[Math.floor(Math.random() * fastest.length)] : winning[0];
+
+            if (aiDebug) {
+                clearAIDebugUI();
+                if (chosenFast) {
+                    const aiCell = document.querySelector(`.cell[data-row="${chosenFast.r}"][data-col="${chosenFast.c}"]`);
+                    if (aiCell) aiCell.classList.add('ai-highlight');
+                }
+                const info = {
+                    chosen: chosenFast ? {
+                        r: chosenFast.r,
+                        c: chosenFast.c,
+                        src: chosenFast.srcVal,
+                        expl: chosenFast.explosions,
+                        gain: chosenFast.searchScore,
+                        atk: chosenFast.atk,
+                        def: chosenFast.def,
+                        winPlies: chosenFast.winPlies
+                    } : null,
+                    ordered: winning.map(c => ({ r: c.r, c: c.c, src: c.srcVal, expl: c.explosions, gain: c.searchScore, atk: c.atk, def: c.def, winPlies: c.winPlies })),
+                    topK: winning.length
+                };
+                showAIDebugPanelWithResponse(info);
+
+                if (chosenFast) {
+                    const onUserClick = (ev) => {
+                        ev.stopPropagation();
+                        ev.preventDefault();
+                        document.removeEventListener('pointerdown', onUserClick, true);
+                        clearAIDebugUI();
+                        handleClick(chosenFast.r, chosenFast.c);
+                    };
+                    document.addEventListener('pointerdown', onUserClick, true);
+                } else {
+                    if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
+                    switchPlayer();
+                }
+                return;
+            }
+
+            if (!chosenFast) {
+                if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
+                switchPlayer();
+            } else {
+                handleClick(chosenFast.r, chosenFast.c);
+            }
+            return;
         }
 
         // Use searchScore in place of immediate gain when computing netResult and ordering

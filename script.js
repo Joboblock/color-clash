@@ -23,6 +23,42 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     const isTrainMode = urlParams.has('train');
 
+    // Broad mobile detection using feature hints (less brittle than UA regex)
+    function isMobileDevice() {
+        // 1) UA Client Hints (Chromium): navigator.userAgentData?.mobile
+        if (navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean') {
+            if (navigator.userAgentData.mobile) return true;
+        }
+        // 2) Coarse pointer (touch-centric devices)
+        if (typeof window.matchMedia === 'function') {
+            try {
+                if (window.matchMedia('(pointer: coarse)').matches) return true;
+            } catch { /* ignore */ }
+        }
+        // 3) Multiple touch points (covers iPadOS that reports as Mac)
+        if (typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1) {
+            return true;
+        }
+        return false;
+    }
+
+    // Request fullscreen on mobile devices; ignore failures silently
+    async function requestFullscreenIfMobile() {
+        if (!isMobileDevice()) return;
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen || el.mozRequestFullScreen;
+        if (typeof req === 'function') {
+            try { await req.call(el); } catch { /* no-op */ }
+        }
+    }
+
+    async function exitFullscreenIfPossible() {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen || document.mozCancelFullScreen;
+        if (typeof exit === 'function') {
+            try { await exit.call(document); } catch { /* ignore */ }
+        }
+    }
+
     // Define available player colors
     const playerColors = ['red', 'blue', 'yellow', 'green', 'cyan', 'orange', 'purple', 'magenta'];
 
@@ -113,6 +149,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (menu) menu.style.display = 'none';
     } else {
         if (menu) menu.style.display = '';
+        // Ensure the URL reflects menu state so back-button can navigate in-app
+        if (!isMenu) {
+            const params = new URLSearchParams(window.location.search);
+            params.set('menu', 'true');
+            const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+            window.history.replaceState(null, '', newUrl);
+        }
     }
 
     playerBoxSlider.addEventListener('pointerdown', (e) => {
@@ -151,24 +194,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    startBtn.addEventListener('click', () => {
+    startBtn.addEventListener('click', async () => {
         const p = clampPlayers(menuPlayerCount);
         let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
-        // enforce relationship: size must be >= 3 + players
         const minAllowed = 3 + p;
         if (s < minAllowed) s = minAllowed;
-        // enforce upper bound from number input
         const maxSz = parseInt(menuGridSize.max);
         if (s > maxSz) s = maxSz;
-        // set params and reload so existing initialization picks them up
+
+        // Enter fullscreen on mobile from the same user gesture
+        await requestFullscreenIfMobile();
+
+        // Update URL without reloading (keep behavior discoverable/shareable)
         const params = new URLSearchParams(window.location.search);
-        // remove menu flag when starting
         params.delete('menu');
-        // also clear train mode when starting a normal game
         params.delete('train');
         params.set('players', String(p));
         params.set('size', String(s));
-        window.location.search = params.toString();
+        const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+        // push a new history entry so Back returns to the menu instead of previous/blank
+        window.history.pushState({ mode: 'play', players: p, size: s }, '', newUrl);
+
+        // Hide menu and start a fresh game with the chosen settings
+        if (menu) menu.style.display = 'none';
+        trainMode = false;
+        recreateGrid(s, p);
     });
 
     // Train button handler
@@ -177,7 +227,7 @@ document.addEventListener('DOMContentLoaded', () => {
         trainBtn.id = 'trainBtn';
         trainBtn.setAttribute('aria-label', 'Train');
 
-        trainBtn.addEventListener('click', () => {
+        trainBtn.addEventListener('click', async () => {
             const p = clampPlayers(menuPlayerCount);
             let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
             const minAllowed = 3 + p;
@@ -185,17 +235,49 @@ document.addEventListener('DOMContentLoaded', () => {
             const maxSz = parseInt(menuGridSize.max);
             if (s > maxSz) s = maxSz;
 
+            // Enter fullscreen on mobile from the same user gesture
+            await requestFullscreenIfMobile();
+
+            // Update URL without reloading (reflect train mode)
             const params = new URLSearchParams(window.location.search);
-            // remove menu flag when training starts
             params.delete('menu');
             params.set('players', String(p));
             params.set('size', String(s));
-            // set train mode
             params.set('train', 'true');
-            window.location.search = params.toString();
+            const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+            // push a new history entry so Back returns to the menu instead of previous/blank
+            window.history.pushState({ mode: 'train', players: p, size: s }, '', newUrl);
+
+            // Hide menu and start train mode immediately
+            if (menu) menu.style.display = 'none';
+            trainMode = true;
+            recreateGrid(s, p);
         });
     }
 //#endregion
+
+    // Sync UI with current URL (called on back/forward navigation)
+    function applyStateFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        const hasPS = params.has('players') || params.has('size');
+        const showMenu = params.has('menu') || !hasPS;
+        if (showMenu) {
+            if (menu) menu.style.display = '';
+            exitFullscreenIfPossible();
+            return;
+        }
+
+        const p = clampPlayers(parseInt(params.get('players') || '', 10) || 2);
+        let s = parseInt(params.get('size') || '', 10);
+        if (!Number.isInteger(s)) s = Math.max(3, 3 + p);
+        const isTrain = params.has('train');
+        if (menu) menu.style.display = 'none';
+        trainMode = isTrain;
+        recreateGrid(Math.max(3, s), p);
+    }
+
+    // Handle browser navigation to toggle between menu and game instead of leaving the app
+    window.addEventListener('popstate', applyStateFromUrl);
 
 
 //#region Menu Functions
@@ -917,6 +999,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.history.replaceState(null, '', newUrl);
                 // Show the menu overlay
                 if (menu) menu.style.display = '';
+                // When showing the menu, exit fullscreen to restore browser UI if needed
+                exitFullscreenIfPossible();
             }, 2000); //DELAY Game End
         }
     }

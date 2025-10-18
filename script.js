@@ -19,6 +19,29 @@ document.addEventListener('DOMContentLoaded', () => {
     // Attach once; per-cell listeners are removed.
     gridElement.addEventListener('click', onGridClick, { passive: true });
 
+    // Double-tap fullscreen toggle outside the game grid (mobile only)
+    let lastTapTime = 0;
+    const doubleTapThreshold = 300; // ms
+    function onBodyPointerDown(ev) {
+        if (!isMobileDevice()) return;
+        // Only active during gameplay (menu hidden)
+        if (menu && menu.style.display !== 'none') return;
+        // Ignore taps inside the grid
+        const target = ev.target;
+        if (target && (target === gridElement || target.closest('.grid'))) return;
+        const now = Date.now();
+        if (now - lastTapTime <= doubleTapThreshold) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            toggleFullscreenMobile();
+            lastTapTime = 0; // reset
+        } else {
+            lastTapTime = now;
+        }
+    }
+    // Use pointer events for broad device support; passive false so we can preventDefault
+    document.body.addEventListener('pointerdown', onBodyPointerDown, { passive: false });
+
     // Detect train mode via URL param
     const urlParams = new URLSearchParams(window.location.search);
     const isTrainMode = urlParams.has('train');
@@ -56,6 +79,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen || document.mozCancelFullScreen;
         if (typeof exit === 'function') {
             try { await exit.call(document); } catch { /* ignore */ }
+        }
+    }
+
+    // Check current fullscreen state
+    function isFullscreenActive() {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || document.mozFullScreenElement);
+    }
+
+    // Toggle fullscreen on mobile devices only
+    async function toggleFullscreenMobile() {
+        if (!isMobileDevice()) return;
+        if (isFullscreenActive()) {
+            await exitFullscreenIfPossible();
+        } else {
+            await requestFullscreenIfMobile();
         }
     }
 

@@ -98,8 +98,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Define available player colors
-    const playerColors = ['red', 'blue', 'yellow', 'green', 'cyan', 'orange', 'purple', 'magenta'];
-
+    // Start at green, move 5 colors forwards per step (Most contrasting colors)
+    const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'orange', 'purple'];
+    
     // Get and cap player count at the number of available colors
     let playerCount = parseInt(getQueryParam('players')) || 2;
     playerCount = Math.min(playerCount, playerColors.length);  // Cap at available colors
@@ -140,6 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const menuGridSize = document.getElementById('menuGridSize');
     const startBtn = document.getElementById('startBtn');
     const trainBtn = document.getElementById('trainBtn');
+    const menuColorCycle = document.getElementById('menuColorCycle');
 
     // set dynamic bounds
     const maxPlayers = playerColors.length;
@@ -208,6 +210,39 @@ document.addEventListener('DOMContentLoaded', () => {
     // Start with URL or defaults
     menuPlayerCount = clampPlayers(playerCount);
     updateSizeBoundsForPlayers(menuPlayerCount);
+
+    // Starting color cycler: init to green and cycle through playerColors on click
+    let startingColorIndex = playerColors.indexOf('green');
+    if (startingColorIndex < 0) startingColorIndex = 0;
+
+    function applyMenuColorBox(colorKey) {
+        if (!menuColorCycle) return;
+        const outer = getComputedStyle(document.documentElement).getPropertyValue(`--cell-${colorKey}`) || '';
+        const inner = getComputedStyle(document.documentElement).getPropertyValue(`--inner-${colorKey}`) || '';
+        // Use element-scoped CSS variables for consistency
+        menuColorCycle.style.setProperty('--menu-outer-color', outer.trim());
+        menuColorCycle.style.setProperty('--menu-inner-color', inner.trim());
+    }
+
+    // No global dynamic style needed; element-scoped CSS vars control colors
+
+    function cycleStartingColor() {
+        startingColorIndex = (startingColorIndex + 1) % playerColors.length;
+        applyMenuColorBox(playerColors[startingColorIndex]);
+    }
+
+    // Initialize and bind
+    applyMenuColorBox(playerColors[startingColorIndex]);
+    if (menuColorCycle) {
+        menuColorCycle.tabIndex = 0; // focusable for accessibility
+        menuColorCycle.addEventListener('click', cycleStartingColor);
+        menuColorCycle.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                cycleStartingColor();
+            }
+        });
+    }
 
     // Decide initial menu visibility: only open menu if no players/size params OR menu param is present
     const initialParams = new URLSearchParams(window.location.search);
@@ -424,6 +459,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // update internal selection
         menuPlayerCount = count;
 
+    // Sizing/alignment handled purely via CSS
+
         if (count !== playerCount) {
             const desiredSize = Math.max(3, count + 3);
             recreateGrid(desiredSize, count);
@@ -506,6 +543,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (menuGridSize) menuGridSize.value = String(desiredSize);
         updateSizeBoundsForPlayers(newCount);
         highlightPlayerBoxes(newCount);
+
+    // Sizing/alignment handled purely via CSS
 
         if (newCount !== playerCount || desiredSize !== gridSize) {
             recreateGrid(desiredSize, newCount);

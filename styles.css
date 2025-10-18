@@ -97,6 +97,63 @@ body {
     background: white;
 }
 
+/* Arrange the Grid Size row horizontally and push color box to the right */
+.grid-size-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+}
+
+.grid-size-row label {
+    flex: 0 0 auto;
+    margin-left: auto; /* push label+input group to right */
+}
+
+.grid-size-row #menuGridSize {
+    flex: 0 0 auto;
+}
+
+/* Ensure the color cycler is leftmost */
+.grid-size-row .menu-color-box { order: 0; }
+.grid-size-row label { order: 1; }
+.grid-size-row #menuGridSize { order: 2; }
+
+/* Align the color cycler horizontally with the first player slider box */
+.grid-size-row .menu-color-box {
+    /* left offset equals slider's left border (1px) + padding-left (8px) */
+    margin-left: calc(1px + 8px);
+}
+
+.menu-color-box {
+    /* Match a single slider box width: (100% - slider border*2 - slider padding*2 - gap*(n-1)) / n */
+    /* Here n=8, gap=8px, padding=8px, border=1px */
+    width: calc((100% - 2px - 16px - 56px) / 8);
+    aspect-ratio: 1 / 1; /* always square */
+    border-radius: 25%;
+    border: 2px solid rgba(255,255,255,0.6);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+    background-color: var(--menu-outer-color, var(--cell-green)); /* default (green) */
+    transition: background-color var(--delay-animation);
+    cursor: pointer;
+    position: relative;
+    box-sizing: border-box;
+}
+
+.menu-color-box:focus-visible {
+    outline: 3px solid rgba(0,0,0,0.25);
+    outline-offset: 2px;
+}
+
+.menu-color-box::after {
+    content: '';
+    position: absolute;
+    /* Inner circle inset proportional to box size to keep ring thickness consistent */
+    inset: 18%;
+    border-radius: 50%;
+    background: var(--menu-inner-color, var(--inner-green)); /* updated from JS */
+    transition: transform var(--delay-animation), background-color var(--delay-animation);
+}
+
 /* Center only the player slider within its control row */
 #playerBoxSlider {
     align-self: center;  /* overrides parent's flex alignment */

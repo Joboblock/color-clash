@@ -1,25 +1,24 @@
 html, body {
-    overflow: hidden;
     height: 100%;
     margin: 0;
-    overflow: hidden;
 }
 
+:root {
+    /* Neutral board color used by cells and UI chrome */
+    --cell-bg: #e7eddb;
+}
+
+/* Base body layout and font */
 body {
+    font-family: 'Nunito', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
     display: flex;
     justify-content: center;
     align-items: center;
-    height: 85h;
     background-color: #333;
     transition: background-color var(--delay-animation);
 }
 
 /* #region Menu Styles */
-/* Use Nunito for all text */
-body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
-    font-family: 'Nunito', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
-}
-
 /* Main Menu Overlay */
 .menu {
     position: fixed;
@@ -44,7 +43,7 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
 
 /* Header above the menu */
 .game-header-panel {
-    background: rgba(231, 237, 219, 0.5); /* previously #e7eddb */
+    background: rgba(231, 237, 219, 0.5);
     border-radius: 16px;
     padding: 10px 22px;
     box-shadow: 0 6px 20px rgba(0,0,0,0.25);
@@ -77,7 +76,6 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
 .control-row {
     display: flex;
     flex-direction: column;
-    align-items: center;
     gap: 10px;
     align-items: flex-start;
 }
@@ -136,13 +134,12 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
 }
 
 /* Player box slider (visual) */
-
 .player-box-slider {
     display: flex;
     gap: 8px; /* small distance between elements */
     align-items: center;
     padding: 8px;
-    background: #f0f2e8;
+    background: var(--cell-bg);
     border-radius: 12px;
     border: 1px solid rgba(0,0,0,0.06);
     width: 100%;
@@ -153,7 +150,6 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
     aspect-ratio: 1 / 1; /* keep squares */
     border-radius: 25%; /* proportional rounding that scales with box size */
     box-shadow: 0 4px 10px rgba(0,0,0,0.12);
-    opacity: 1;
     /* default background is the lighter 'cell' color for this box */
     background: var(--box-cell, #ccc);
     transition: transform .12s ease, opacity .12s ease, box-shadow .12s ease;
@@ -162,9 +158,9 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
     user-select: none;
     touch-action: none; /* allow pointer events without default gestures */
 }
+
 .player-box-slider .box.active {
     transform: translateY(-18%) scale(1.06); /* lift proportional to height */
-    opacity: 1;
     /* active boxes use the inner circle (strong) color */
     background: var(--box-inner, #999);
     box-shadow: 0 8px 20px rgba(0,0,0,0.18);
@@ -180,7 +176,7 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
 .grid {
     display: grid;
     grid-template-columns: repeat(var(--grid-size), 1fr);
-    grid-gap: calc(50vmin / (var(--grid-size) * 8));
+    gap: calc(50vmin / (var(--grid-size) * 8));
     margin: auto;
 }
 
@@ -191,7 +187,7 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
     align-items: center;
     width: calc((95vmin - (var(--grid-size) - 1) * (100vmin / (var(--grid-size) * 8))) / var(--grid-size));
     height: calc((95vmin - (var(--grid-size) - 1) * (100vmin / (var(--grid-size) * 8))) / var(--grid-size));
-    background-color: #e7eddb;
+    background-color: var(--cell-bg);
     border-radius: 25%;
     transition: background-color var(--delay-animation);
 }
@@ -206,7 +202,6 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
     align-items: center;
     z-index: 1;
     transition: transform var(--delay-animation) ease-in-out, background-color var(--delay-animation) ease-in-out, opacity var(--delay-explosion) ease-out;
-    opacity: 1; /* Default to fully visible */
 }
 
 .inner-circle.fade-out {
@@ -214,9 +209,6 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
 }
 
 .inner-circle.animated {
-    position: absolute;
-    z-index: 1; /* Ensure it's above static inner circles */
-    opacity: 1;
     transition: transform var(--delay-explosion) ease-out, opacity var(--delay-explosion) ease-out; /* Add opacity transition */
 }
 
@@ -242,10 +234,6 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
     align-items: center;
 }
 
-.value-circle.animated {
-    z-index: 3; /* Above static inner circles but below value circles */
-}
-
 /* Player Colors for Cells (Pastel) (use JS-set CSS variables) */
 .cell.red { background-color: var(--cell-red) !important; }
 .cell.orange { background-color: var(--cell-orange) !important; }
@@ -257,7 +245,7 @@ body, button, input, label, .menu-title, .menu-hint, .game-header-panel {
 .cell.magenta { background-color: var(--cell-magenta) !important; }
 
 .cell.invalid { background-color: #b8beac; }
-.cell.hidden { background-color: #e7eddb !important;}
+.cell.hidden { background-color: var(--cell-bg) !important;}
 
 /* Player Colors for Inner Circles (Strong) (use JS-set CSS variables) */
 .inner-circle.red { background-color: var(--inner-red); }

@@ -264,6 +264,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     playerBoxSlider.addEventListener('pointerdown', (e) => {
+        // Ignore pointer events that originate on the color cycler
+        const target = e.target.closest('.menu-color-box');
+        if (target) return;
         isDragging = true;
         playerBoxSlider.setPointerCapture(e.pointerId);
         setPlayerCountFromPointer(e.clientX);
@@ -419,7 +422,15 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} updates DOM under #playerBoxSlider.
      */
     function buildPlayerBoxes() {
-        playerBoxSlider.innerHTML = '';
+        // Preserve the color cycler if it's inside the slider
+        const cycler = playerBoxSlider.querySelector('#menuColorCycle');
+        if (cycler && cycler.parentElement === playerBoxSlider) {
+            playerBoxSlider.removeChild(cycler);
+        }
+
+        // Remove existing player boxes only
+        Array.from(playerBoxSlider.querySelectorAll('.box')).forEach(n => n.remove());
+
         for (let count = 1; count <= maxPlayers; count++) {
             const box = document.createElement('div');
             box.className = 'box';
@@ -443,6 +454,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             playerBoxSlider.appendChild(box);
         }
+
+        // Re-append the cycler; CSS grid places it to row 2, col 1
+        if (cycler) playerBoxSlider.appendChild(cycler);
     }
 
     /**
@@ -451,7 +465,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} updates aria attributes, internal selection, and grid if needed.
      */
     function highlightPlayerBoxes(count) {
-        Array.from(playerBoxSlider.children).forEach((child) => {
+        playerBoxSlider.querySelectorAll('.box').forEach((child) => {
             const boxCount = parseInt(child.dataset.count, 10);
             if (boxCount <= count) child.classList.add('active'); else child.classList.remove('active');
         });
@@ -512,7 +526,8 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} updates selected player count via onMenuPlayerCountChanged.
      */
     function setPlayerCountFromPointer(clientX) {
-        const children = Array.from(playerBoxSlider.children);
+    // Only consider player boxes for mapping, skip the color cycler
+    const children = Array.from(playerBoxSlider.querySelectorAll('.box'));
         if (children.length === 0) return;
         // find nearest box center to clientX
         let nearest = children[0];

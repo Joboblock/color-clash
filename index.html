@@ -22,13 +22,15 @@
                 <div class="control-row">
                     <label for="playerBoxSlider">Players</label>
                     <div id="playerBoxSlider" class="player-box-slider" role="slider"
-                        aria-label="player count" aria-valuemin="2" aria-valuemax="8" aria-valuenow="2"></div>
+                        aria-label="player count" aria-valuemin="2" aria-valuemax="8" aria-valuenow="2">
+                        <!-- Color cycler moved here so it shares the same grid as the player boxes -->
+                        <div id="menuColorCycle" class="menu-color-box" role="button" aria-label="Cycle starting color" title="starting color"></div>
+                    </div>
                 </div>
 
                 <div class="control-row grid-size-row">
                     <label for="menuGridSize">Grid Size</label>
                     <input id="menuGridSize" type="number" min="0" value="5">
-                    <div id="menuColorCycle" class="menu-color-box" role="button" aria-label="Cycle starting color" title="starting color"></div>
                 </div>
 
                 <div class="menu-actions">

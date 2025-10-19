@@ -126,9 +126,7 @@ body {
 /* Grid handles alignment; no extra margin needed for the color cycler */
 
 .menu-color-box {
-    /* Match a single slider box width: (100% - slider border*2 - slider padding*2 - gap*(n-1)) / n */
-    /* Here n=8, gap=8px, padding=8px, border=1px */
-        width: 100%; /* fill grid column */
+    width: 100%; /* fill grid column */
     aspect-ratio: 1 / 1; /* always square */
     border-radius: 25%;
     border: 2px solid rgba(255,255,255,0.6);
@@ -155,15 +153,36 @@ body {
     content: '';
     position: absolute;
     /* Inner circle inset proportional to box size to keep ring thickness consistent */
-    inset: 18%;
+    inset: 12.5%; /* 75% inner circle (matches .inner-circle width/height) */
     border-radius: 50%;
     background: var(--menu-inner-color, var(--inner-green)); /* updated from JS */
     transition: transform var(--delay-animation), background-color var(--delay-animation);
 }
 
-/* Center only the player slider within its control row */
-#playerBoxSlider {
-    align-self: center;  /* overrides parent's flex alignment */
+/* Grid wrapper to align slider (row 1) and cycler (row 2) on the same column rhythm */
+.player-grid-wrapper {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    column-gap: 8px;
+    row-gap: 16px;
+    padding: 8px;
+    border: 1px solid transparent; /* match grid-size-row left offset */
+    align-self: center; /* center within control row */
+    width: 100%;
+    box-sizing: border-box;
+    /* keep wrapper visually transparent */
+}
+
+/* Place slider to span full first row; keep its own chrome contained */
+.player-grid-wrapper .player-box-slider {
+    grid-column: 1 / -1;
+    grid-row: 1;
+}
+
+/* Place cycler under first column, second row */
+.player-grid-wrapper .menu-color-box {
+    grid-column: 1;
+    grid-row: 2;
 }
 
 .menu-actions {
@@ -199,26 +218,50 @@ body {
 
 /* Player box slider (visual) */
 .player-box-slider {
-    display: grid; /* grid to create equal-width columns */
-    grid-template-columns: repeat(8, 1fr);
-    gap: 8px; /* small distance between elements */
+    display: grid; /* align children to wrapper columns via subgrid */
+    grid-template-columns: subgrid;
+    gap: 8;
     align-items: center;
-    padding: 8px;
+    width: 100%;
+    position: relative;
+    box-sizing: border-box; /* ensure padding stays inside width */
+    /* Keep container transparent; chrome applied via ::before limited to first row */
+}
+
+/* Fallback for browsers without subgrid support */
+@supports not (grid-template-columns: subgrid) {
+    .player-grid-wrapper { grid-template-columns: repeat(8, 1fr); }
+    .player-box-slider { grid-template-columns: repeat(8, 1fr); }
+}
+
+/* Limit background/border to the first row area only */
+.player-box-slider::before {
+    content: '';
+    position: absolute;
+    /* Extend beyond the first row a little (vertical and horizontal bleed) */
+    inset: -8px;
+    /* Compute height of first row: we use the tallest box plus vertical padding. Since boxes are square with aspect-ratio in grid columns, the row height equals a column width. We approximate with 1fr track height using grid metrics by stretching behind the first row only. */
+    /* Use padding box to sit under boxes */
     background: var(--cell-bg);
     border-radius: 12px;
     border: 1px solid rgba(0,0,0,0.06);
-    width: 100%;
+    z-index: 0;
+    pointer-events: none; /* never block interactions with neighboring elements */
 }
 
-.player-box-slider .menu-color-box {
-    grid-column: 1; /* align with first player box column */
-    grid-row: 2;    /* sit below the boxes to keep 8 columns on row 1 */
+/* Ensure grid content appears above the background */
+.player-box-slider > * {
+    position: relative;
+    z-index: 1;
 }
+
+/* cycler is no longer a child of .player-box-slider; placed by wrapper */
 
 .player-box-slider .box {
     width: 100%; /* fill its grid column */
     aspect-ratio: 1 / 1; /* keep squares */
     border-radius: 25%; /* proportional rounding that scales with box size */
+    box-sizing: border-box; /* include the 2px border in the grid column width */
     box-shadow: 0 4px 10px rgba(0,0,0,0.12);
     /* default background is the lighter 'cell' color for this box */
     background: var(--box-cell, #ccc);
@@ -231,6 +274,7 @@ body {
 
 .player-box-slider .box.active {
     transform: translateY(-18%) scale(1.06); /* lift proportional to height */
+    transform-origin: center center;
     /* active boxes use the inner circle (strong) color */
     background: var(--box-inner, #999);
     box-shadow: 0 8px 20px rgba(0,0,0,0.18);

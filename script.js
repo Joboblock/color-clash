@@ -242,14 +242,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return els.map(el => getComputedStyle(el).backgroundColor);
     }
 
-    /**
-     * Measure computed box-shadows for a list of elements.
-     * @param {HTMLElement[]} els
-     * @returns {string[]} CSS box-shadow strings
-     */
-    function measureBoxShadows(els) {
-        return els.map(el => getComputedStyle(el).boxShadow);
-    }
     // Probe to retrieve canonical slider box-shadow values for inactive/active
     let sliderShadowCache = null; // { inactive: string, active: string }
     function getSliderShadows() {
@@ -303,183 +295,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
 
-    /**
-     * Animate elements so each one appears to move from the previous (left-neighbor) element's
-     * previous rect to its own final rect, including size changes.
-     * Does not change DOM order.
-     * @param {HTMLElement[]} els - ordered list of .box elements in the slider
-     * @param {DOMRect[]} first - rects before a layout/style change
-     * @param {DOMRect[]} last - rects after the change
-     * @param {number} durationMs - animation duration in ms
-     */
-    function flipShiftLeftAnimate(els, first, last, firstBg, lastBg, firstShadow, lastShadow, durationMs, options = {}) {
-        const { direction = 'left', wrap = false, fadeEdges = true } = options;
-        const n = els.length;
-        if (n === 0) return;
-        const edgeOutRatio = 0.4; // fraction of duration used to fade out the exiting edge
-
-        // Determine which destination index is the entering edge for given direction
-        const enteringIndex = (direction === 'left') ? (n - 1) : 0;
-
-        for (let i = 0; i < n; i++) {
-            const dst = last[i];
-            if (!dst) continue;
-
-            // Determine source rect index based on direction
-            let srcIdx;
-            if (direction === 'left') srcIdx = i + 1; else srcIdx = i - 1; // left means shift R->L
-            let useFlip = true;
-
-            // Edge handling when no wrap
-            if (!wrap) {
-                if (direction === 'left' && i === n - 1) useFlip = false; // rightmost: fade-in
-                if (direction === 'right' && i === 0) useFlip = false;    // leftmost: fade-in in opposite direction
-            }
-
-            // Cancel in-flight animations on this element
-            try { els[i].getAnimations().forEach(a => a.cancel()); } catch (e) { /* ignore */ void e; }
-
-            // Baseline transform from CSS state (compose with FLIP so active lift/scale is respected)
-            const hasActive = els[i].classList.contains('active');
-            const baseline = hasActive ? ' translateY(-18%) scale(1.06)' : '';
-
-            if (useFlip) {
-                // clamp srcIdx with or without wrap
-                if (wrap) srcIdx = (srcIdx + n) % n;
-                if (srcIdx < 0 || srcIdx >= n) continue;
-                const src = first[srcIdx];
-                if (!src) continue;
-
-                // Compute center deltas and scale
-                const srcCx = src.left + src.width / 2;
-                const srcCy = src.top + src.height / 2;
-                const dstCx = dst.left + dst.width / 2;
-                const dstCy = dst.top + dst.height / 2;
-
-                const dx = srcCx - dstCx;
-                const dy = srcCy - dstCy;
-                const sx = src.width / (dst.width || 1);
-                const sy = src.height / (dst.height || 1);
-
-                const endTransform = baseline ? baseline : 'none';
-                els[i].animate(
-                    [
-                        { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})${baseline}` },
-                        { transform: endTransform }
-                    ],
-                    {
-                        duration: durationMs,
-                        easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)',
-                        fill: 'none'
-                    }
-                );
-
-                // Background color animation: adopt right neighbor's previous color, then return to own final color
-                try {
-                    const colorSrcIdx = (direction === 'left') ? (i + 1) : (i - 1);
-                    const normalized = (colorSrcIdx + n) % n;
-                    if (normalized >= 0 && normalized < n) {
-                        const fromColor = firstBg[normalized];
-                        const toColor = lastBg[i];
-                        if (fromColor && toColor && fromColor !== toColor) {
-                            els[i].animate(
-                                [ { backgroundColor: fromColor }, { backgroundColor: toColor } ],
-                                { duration: durationMs, easing: 'ease', fill: 'none' }
-                            );
-                        }
-                    }
-                } catch (e) { /* ignore */ void e; }
-
-                // Box-shadow animation: interpolate from old to new to avoid flicker when toggling active
-                try {
-                    const fromShadow = firstShadow[i];
-                    const toShadow = lastShadow[i];
-                    if (fromShadow && toShadow && fromShadow !== toShadow) {
-                        els[i].animate(
-                            [ { boxShadow: fromShadow }, { boxShadow: toShadow } ],
-                            { duration: durationMs, easing: 'ease', fill: 'none' }
-                        );
-                    }
-                } catch (e) { /* ignore */ void e; }
-            } else {
-                // Entering edge: first fade out at original position, then fade in on the opposite edge
-                if (fadeEdges && i === enteringIndex) {
-                    const outDur = durationMs * edgeOutRatio;
-                    const inDur = durationMs - outDur;
-                    const offset = dst.width * 0.35;
-                    const tx = (direction === 'left') ? offset : -offset; // small nudge from entering side
-
-                    // Phase 1: fade out at original position (no movement)
-                    const baseTransform = baseline ? baseline : 'none';
-                    els[i].animate(
-                        [
-                            { transform: baseTransform, opacity: 1 },
-                            { transform: baseTransform, opacity: 0 }
-                        ],
-                        { duration: outDur, easing: 'linear', fill: 'none' }
-                    );
-
-                    // Phase 2: fade in at new position with slight offset, starting after fade-out completes
-                    els[i].animate(
-                        [
-                            { transform: `translate(${tx}px, 0) scale(0.98)${baseline}`, opacity: 0 },
-                            { transform: baseTransform, opacity: 1 }
-                        ],
-                        { duration: inDur, delay: outDur, easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)', fill: 'none' }
-                    );
-                }
-
-                // Background color animation for entering element: adopt from exiting leftmost to final color
-                try {
-                    const fromColor = firstBg[0];
-                    const toColor = lastBg[i];
-                    if (fromColor && toColor && fromColor !== toColor) {
-                        els[i].animate(
-                            [ { backgroundColor: fromColor }, { backgroundColor: toColor } ],
-                            { duration: durationMs, easing: 'ease', fill: 'none' }
-                        );
-                    }
-                } catch (e) { /* ignore */ void e; }
-
-                // Box-shadow for entering element: from leftmost's previous to this element's final
-                try {
-                    const fromShadow = firstShadow[0];
-                    const toShadow = lastShadow[i];
-                    if (fromShadow && toShadow && fromShadow !== toShadow) {
-                        els[i].animate(
-                            [ { boxShadow: fromShadow }, { boxShadow: toShadow } ],
-                            { duration: durationMs, easing: 'ease', fill: 'none' }
-                        );
-                    }
-                } catch (e) { /* ignore */ void e; }
-            }
-        }
-    }
-
-    /**
-     * Run a FLIP shift-left animation around a synchronous DOM/style update.
-     * @param {() => void} mutateFn - function that applies the intended state change
-     */
-    function runFlipShiftLeftAround(mutateFn) {
-        const container = playerBoxSlider;
-        if (!container) { mutateFn && mutateFn(); return; }
-        const els = Array.from(container.querySelectorAll('.box'));
-        if (els.length === 0) { mutateFn && mutateFn(); return; }
-
-        const releaseLock = beginSliderAnimation(delayAnimation);
-
-        const first = measureRects(els);
-        const firstBg = measureBackgroundColors(els);
-        const firstShadow = measureBoxShadows(els);
-        // Apply mutation (e.g., toggling .active)
-        mutateFn && mutateFn();
-        const last = measureRects(els);
-        const lastBg = measureBackgroundColors(els);
-        const lastShadow = measureBoxShadows(els);
-        // Shift visually right-to-left with edge fade, and color/shadow adoption
-        flipShiftLeftAnimate(els, first, last, firstBg, lastBg, firstShadow, lastShadow, delayAnimation, { direction: 'left', wrap: false, fadeEdges: true });
-        setTimeout(releaseLock, Math.max(2, delayAnimation + 24));
-    }
 
     // Preview: smoothly move boxes to their left neighbor, then snap back and apply mutation (e.g., color change)
     function previewShiftLeftThenSnap(mutateFn) {
@@ -492,9 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const rects = measureRects(els);
     const colors = measureBackgroundColors(els);
-        const animations = [];
-
-        // (debug removed)
+        const animations = [];        
 
         for (let i = 0; i < els.length; i++) {
             const el = els[i];
@@ -610,7 +423,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             // Now apply the mutation (e.g., update colors)
             mutateFn && mutateFn();
-            // (debug removed)
+            
             releaseLock();
         });
     }
@@ -1041,8 +854,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const desiredSize = Math.max(3, newCount + 3);
         if (menuGridSize) menuGridSize.value = String(desiredSize);
         updateSizeBoundsForPlayers(newCount);
-        // Animate boxes to shift from their left neighbor while updating active states
-        runFlipShiftLeftAround(() => highlightPlayerBoxes(newCount));
+        // Direct slider interaction: immediately reflect active boxes without FLIP animation
+        // (keeps original behavior of activating the nearest box and all to its left)
+        highlightPlayerBoxes(newCount);
 
     // Sizing/alignment handled purely via CSS
 

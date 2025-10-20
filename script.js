@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof window.matchMedia === 'function') {
             try {
                 if (window.matchMedia('(pointer: coarse)').matches) return true;
-            } catch { /* ignore */ }
+            } catch (e) { /* ignore */ void e; }
         }
         // 3) Multiple touch points (covers iPadOS that reports as Mac)
         if (typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1) {
@@ -71,14 +71,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const el = document.documentElement;
         const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen || el.mozRequestFullScreen;
         if (typeof req === 'function') {
-            try { await req.call(el); } catch { /* no-op */ }
+            try { await req.call(el); } catch (e) { /* no-op */ void e; }
         }
     }
 
     async function exitFullscreenIfPossible() {
         const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen || document.mozCancelFullScreen;
         if (typeof exit === 'function') {
-            try { await exit.call(document); } catch { /* ignore */ }
+            try { await exit.call(document); } catch (e) { /* ignore */ void e; }
         }
     }
 
@@ -100,6 +100,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Define available player colors
     // Start at green, move 5 colors forwards per step (Most contrasting colors)
     const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'orange', 'purple'];
+    // Active game palette, set when a game starts (subset/rotation of playerColors)
+    let gameColors = null; // null until a game is started
+    function activeColors() {
+        return (gameColors && gameColors.length) ? gameColors : playerColors;
+    }
     
     // Get and cap player count at the number of available colors
     let playerCount = parseInt(getQueryParam('players')) || 2;
@@ -119,6 +124,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.documentElement.style.setProperty('--delay-explosion', `${delayExplosion}ms`);
     document.documentElement.style.setProperty('--delay-animation', `${delayAnimation}ms`);
+    // Global lock to block the color cycler while slider animations run
+    let sliderAnimLocks = 0;
+    function isSliderLocked() { return sliderAnimLocks > 0; }
+    function updateCyclerDisabled(disabled) {
+        if (!menuColorCycle) return;
+        if (disabled) {
+            menuColorCycle.setAttribute('aria-disabled', 'true');
+            menuColorCycle.style.pointerEvents = 'none';
+            menuColorCycle.style.cursor = 'not-allowed';
+        } else {
+            menuColorCycle.removeAttribute('aria-disabled');
+            menuColorCycle.style.pointerEvents = '';
+            menuColorCycle.style.cursor = '';
+        }
+    }
+    function beginSliderAnimation(durationMs) {
+        sliderAnimLocks++;
+        updateCyclerDisabled(true);
+        let released = false;
+        const release = () => {
+            if (released) return;
+            released = true;
+            sliderAnimLocks = Math.max(0, sliderAnimLocks - 1);
+            if (sliderAnimLocks === 0) updateCyclerDisabled(false);
+        };
+        if (durationMs && durationMs > 0) setTimeout(release, durationMs + 32);
+        return release;
+    }
     document.documentElement.style.setProperty('--grid-size', gridSize);
 
     // Function to get URL parameters
@@ -189,6 +222,399 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tip && tip.html) menuHint.innerHTML = tip.text; else menuHint.textContent = tip ? tip.text : '';
     }
 
+
+    // --- FLIP helpers for player slider boxes ---
+    /**
+     * Measure bounding rects for a list of elements.
+     * @param {HTMLElement[]} els
+     * @returns {DOMRect[]}
+     */
+    function measureRects(els) {
+        return els.map(el => el.getBoundingClientRect());
+    }
+
+    /**
+     * Measure computed background colors for a list of elements.
+     * @param {HTMLElement[]} els
+     * @returns {string[]} CSS color strings (e.g., rgb(...))
+     */
+    function measureBackgroundColors(els) {
+        return els.map(el => getComputedStyle(el).backgroundColor);
+    }
+
+    /**
+     * Measure computed box-shadows for a list of elements.
+     * @param {HTMLElement[]} els
+     * @returns {string[]} CSS box-shadow strings
+     */
+    function measureBoxShadows(els) {
+        return els.map(el => getComputedStyle(el).boxShadow);
+    }
+    // Probe to retrieve canonical slider box-shadow values for inactive/active
+    let sliderShadowCache = null; // { inactive: string, active: string }
+    function getSliderShadows() {
+        if (sliderShadowCache) return sliderShadowCache;
+        try {
+            const probeContainer = document.createElement('div');
+            probeContainer.className = 'player-box-slider';
+            Object.assign(probeContainer.style, {
+                position: 'fixed',
+                left: '-10000px',
+                top: '0',
+                width: '0',
+                height: '0',
+                overflow: 'hidden'
+            });
+            const probe = document.createElement('div');
+            probe.className = 'box';
+            // Size so CSS like aspect-ratio or border applies; avoid 0 size
+            probe.style.width = '40px';
+            probe.style.height = '40px';
+            probeContainer.appendChild(probe);
+            document.body.appendChild(probeContainer);
+
+            const csInactive = getComputedStyle(probe).boxShadow;
+            probe.classList.add('active');
+            const csActive = getComputedStyle(probe).boxShadow;
+
+            document.body.removeChild(probeContainer);
+            sliderShadowCache = { inactive: csInactive, active: csActive };
+            return sliderShadowCache;
+    } catch (e) { void e;
+            // Fallback to typical values used in CSS
+            sliderShadowCache = { inactive: '0 4px 10px rgba(0,0,0,0.12)', active: '0 8px 20px rgba(0,0,0,0.18)' };
+            return sliderShadowCache;
+        }
+    }
+
+    /**
+     * Extract the hue key (e.g., 'green') from a slider box's inline CSS vars.
+     * @param {HTMLElement} box
+     * @returns {string|null}
+     */
+    function extractColorKeyFromBox(box) {
+        const innerVar = box.style.getPropertyValue('--box-inner'); // e.g., 'var(--inner-green)'
+        const cellVar = box.style.getPropertyValue('--box-cell');   // e.g., 'var(--cell-green)'
+        const from = innerVar || cellVar || '';
+        const mInner = /--inner-([a-z]+)/i.exec(from);
+        if (mInner && mInner[1]) return mInner[1].toLowerCase();
+        const mCell = /--cell-([a-z]+)/i.exec(from);
+        if (mCell && mCell[1]) return mCell[1].toLowerCase();
+        return null;
+    }
+
+    /**
+     * Animate elements so each one appears to move from the previous (left-neighbor) element's
+     * previous rect to its own final rect, including size changes.
+     * Does not change DOM order.
+     * @param {HTMLElement[]} els - ordered list of .box elements in the slider
+     * @param {DOMRect[]} first - rects before a layout/style change
+     * @param {DOMRect[]} last - rects after the change
+     * @param {number} durationMs - animation duration in ms
+     */
+    function flipShiftLeftAnimate(els, first, last, firstBg, lastBg, firstShadow, lastShadow, durationMs, options = {}) {
+        const { direction = 'left', wrap = false, fadeEdges = true } = options;
+        const n = els.length;
+        if (n === 0) return;
+        const edgeOutRatio = 0.4; // fraction of duration used to fade out the exiting edge
+
+        // Determine which destination index is the entering edge for given direction
+        const enteringIndex = (direction === 'left') ? (n - 1) : 0;
+
+        for (let i = 0; i < n; i++) {
+            const dst = last[i];
+            if (!dst) continue;
+
+            // Determine source rect index based on direction
+            let srcIdx;
+            if (direction === 'left') srcIdx = i + 1; else srcIdx = i - 1; // left means shift R->L
+            let useFlip = true;
+
+            // Edge handling when no wrap
+            if (!wrap) {
+                if (direction === 'left' && i === n - 1) useFlip = false; // rightmost: fade-in
+                if (direction === 'right' && i === 0) useFlip = false;    // leftmost: fade-in in opposite direction
+            }
+
+            // Cancel in-flight animations on this element
+            try { els[i].getAnimations().forEach(a => a.cancel()); } catch (e) { /* ignore */ void e; }
+
+            // Baseline transform from CSS state (compose with FLIP so active lift/scale is respected)
+            const hasActive = els[i].classList.contains('active');
+            const baseline = hasActive ? ' translateY(-18%) scale(1.06)' : '';
+
+            if (useFlip) {
+                // clamp srcIdx with or without wrap
+                if (wrap) srcIdx = (srcIdx + n) % n;
+                if (srcIdx < 0 || srcIdx >= n) continue;
+                const src = first[srcIdx];
+                if (!src) continue;
+
+                // Compute center deltas and scale
+                const srcCx = src.left + src.width / 2;
+                const srcCy = src.top + src.height / 2;
+                const dstCx = dst.left + dst.width / 2;
+                const dstCy = dst.top + dst.height / 2;
+
+                const dx = srcCx - dstCx;
+                const dy = srcCy - dstCy;
+                const sx = src.width / (dst.width || 1);
+                const sy = src.height / (dst.height || 1);
+
+                const endTransform = baseline ? baseline : 'none';
+                els[i].animate(
+                    [
+                        { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})${baseline}` },
+                        { transform: endTransform }
+                    ],
+                    {
+                        duration: durationMs,
+                        easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)',
+                        fill: 'none'
+                    }
+                );
+
+                // Background color animation: adopt right neighbor's previous color, then return to own final color
+                try {
+                    const colorSrcIdx = (direction === 'left') ? (i + 1) : (i - 1);
+                    const normalized = (colorSrcIdx + n) % n;
+                    if (normalized >= 0 && normalized < n) {
+                        const fromColor = firstBg[normalized];
+                        const toColor = lastBg[i];
+                        if (fromColor && toColor && fromColor !== toColor) {
+                            els[i].animate(
+                                [ { backgroundColor: fromColor }, { backgroundColor: toColor } ],
+                                { duration: durationMs, easing: 'ease', fill: 'none' }
+                            );
+                        }
+                    }
+                } catch (e) { /* ignore */ void e; }
+
+                // Box-shadow animation: interpolate from old to new to avoid flicker when toggling active
+                try {
+                    const fromShadow = firstShadow[i];
+                    const toShadow = lastShadow[i];
+                    if (fromShadow && toShadow && fromShadow !== toShadow) {
+                        els[i].animate(
+                            [ { boxShadow: fromShadow }, { boxShadow: toShadow } ],
+                            { duration: durationMs, easing: 'ease', fill: 'none' }
+                        );
+                    }
+                } catch (e) { /* ignore */ void e; }
+            } else {
+                // Entering edge: first fade out at original position, then fade in on the opposite edge
+                if (fadeEdges && i === enteringIndex) {
+                    const outDur = durationMs * edgeOutRatio;
+                    const inDur = durationMs - outDur;
+                    const offset = dst.width * 0.35;
+                    const tx = (direction === 'left') ? offset : -offset; // small nudge from entering side
+
+                    // Phase 1: fade out at original position (no movement)
+                    const baseTransform = baseline ? baseline : 'none';
+                    els[i].animate(
+                        [
+                            { transform: baseTransform, opacity: 1 },
+                            { transform: baseTransform, opacity: 0 }
+                        ],
+                        { duration: outDur, easing: 'linear', fill: 'none' }
+                    );
+
+                    // Phase 2: fade in at new position with slight offset, starting after fade-out completes
+                    els[i].animate(
+                        [
+                            { transform: `translate(${tx}px, 0) scale(0.98)${baseline}`, opacity: 0 },
+                            { transform: baseTransform, opacity: 1 }
+                        ],
+                        { duration: inDur, delay: outDur, easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)', fill: 'none' }
+                    );
+                }
+
+                // Background color animation for entering element: adopt from exiting leftmost to final color
+                try {
+                    const fromColor = firstBg[0];
+                    const toColor = lastBg[i];
+                    if (fromColor && toColor && fromColor !== toColor) {
+                        els[i].animate(
+                            [ { backgroundColor: fromColor }, { backgroundColor: toColor } ],
+                            { duration: durationMs, easing: 'ease', fill: 'none' }
+                        );
+                    }
+                } catch (e) { /* ignore */ void e; }
+
+                // Box-shadow for entering element: from leftmost's previous to this element's final
+                try {
+                    const fromShadow = firstShadow[0];
+                    const toShadow = lastShadow[i];
+                    if (fromShadow && toShadow && fromShadow !== toShadow) {
+                        els[i].animate(
+                            [ { boxShadow: fromShadow }, { boxShadow: toShadow } ],
+                            { duration: durationMs, easing: 'ease', fill: 'none' }
+                        );
+                    }
+                } catch (e) { /* ignore */ void e; }
+            }
+        }
+    }
+
+    /**
+     * Run a FLIP shift-left animation around a synchronous DOM/style update.
+     * @param {() => void} mutateFn - function that applies the intended state change
+     */
+    function runFlipShiftLeftAround(mutateFn) {
+        const container = playerBoxSlider;
+        if (!container) { mutateFn && mutateFn(); return; }
+        const els = Array.from(container.querySelectorAll('.box'));
+        if (els.length === 0) { mutateFn && mutateFn(); return; }
+
+        const releaseLock = beginSliderAnimation(delayAnimation);
+
+        const first = measureRects(els);
+        const firstBg = measureBackgroundColors(els);
+        const firstShadow = measureBoxShadows(els);
+        // Apply mutation (e.g., toggling .active)
+        mutateFn && mutateFn();
+        const last = measureRects(els);
+        const lastBg = measureBackgroundColors(els);
+        const lastShadow = measureBoxShadows(els);
+        // Shift visually right-to-left with edge fade, and color/shadow adoption
+        flipShiftLeftAnimate(els, first, last, firstBg, lastBg, firstShadow, lastShadow, delayAnimation, { direction: 'left', wrap: false, fadeEdges: true });
+        setTimeout(releaseLock, Math.max(2, delayAnimation + 24));
+    }
+
+    // Preview: smoothly move boxes to their left neighbor, then snap back and apply mutation (e.g., color change)
+    function previewShiftLeftThenSnap(mutateFn) {
+        const container = playerBoxSlider;
+        if (!container) { mutateFn && mutateFn(); return; }
+        const els = Array.from(container.querySelectorAll('.box'));
+        if (els.length === 0) { mutateFn && mutateFn(); return; }
+
+        const releaseLock = beginSliderAnimation(delayAnimation);
+
+    const rects = measureRects(els);
+    const colors = measureBackgroundColors(els);
+        const animations = [];
+
+        // (debug removed)
+
+        for (let i = 0; i < els.length; i++) {
+            const el = els[i];
+            try { el.getAnimations().forEach(a => a.cancel()); } catch (e) { /* ignore */ void e; }
+            const hasActive = el.classList.contains('active');
+            const baseline = hasActive ? ' translateY(-18%) scale(1.06)' : '';
+            const baseTransform = baseline ? baseline : 'none';
+
+            if (i === 0) {
+                // Leftmost: fade out, then re-enter from half a cell to the right of the rightmost and glide to it
+                const outBase = delayAnimation * 0.4; // original fraction
+                const outDur = outBase * 0.5;         // 2x faster fade
+                const inDur = delayAnimation - outDur; // consume remaining time for slide-in so total == delayAnimation
+                // Phase 1: fade out in place
+                const fadeOut = el.animate(
+                    [ { transform: baseTransform, opacity: 1 }, { transform: baseTransform, opacity: 0 } ],
+                    { duration: outDur, easing: 'linear', fill: 'forwards' }
+                );
+
+                // Compute teleport start just beyond the rightmost cell, then slide into rightmost
+                const n = els.length;
+                const src0 = rects[0];
+                const dstR = rects[n - 1];
+                const srcCx = src0.left + src0.width / 2;
+                const srcCy = src0.top + src0.height / 2;
+                const rightCx = dstR.left + dstR.width / 2;
+                const rightCy = dstR.top + dstR.height / 2;
+                const startDx = (rightCx + dstR.width) - srcCx; // half a cell to the right of the rightmost (center + width)
+                const startDy = rightCy - srcCy;
+                const endDx = rightCx - srcCx;
+                const endDy = rightCy - srcCy;
+                const sx = dstR.width / (src0.width || 1);
+                const sy = dstR.height / (src0.height || 1);
+
+                // Phase 2: slide in from off-right to the rightmost, fading in
+                const slideIn = el.animate(
+                    [
+                        { transform: `translate(${startDx}px, ${startDy}px) scale(${sx}, ${sy})${baseline}`, opacity: 0 },
+                        { transform: `translate(${endDx}px, ${endDy}px) scale(${sx}, ${sy})${baseline}`, opacity: 1 }
+                    ],
+                    { duration: inDur, delay: outDur, easing: 'cubic-bezier(0.05, 0.5, 0.5, 1)', fill: 'forwards' }
+                );
+                animations.push(fadeOut, slideIn);
+                continue;
+            }
+
+            const src = rects[i];
+            const dst = rects[i - 1];
+            const srcCx = src.left + src.width / 2;
+            const srcCy = src.top + src.height / 2;
+            const dstCx = dst.left + dst.width / 2;
+            const dstCy = dst.top + dst.height / 2;
+            const dx = dstCx - srcCx;
+            const dy = dstCy - srcCy;
+            const sx = dst.width / (src.width || 1);
+            const sy = dst.height / (src.height || 1);
+
+            const anim = el.animate(
+                [
+                    { transform: baseTransform },
+                    { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})${baseline}` }
+                ],
+                { duration: delayAnimation, easing: 'cubic-bezier(0.5, 1, 0.75, 1)', fill: 'forwards' }
+            );
+            animations.push(anim);
+        }
+
+    // Color: smoothly transition from current state to own hue in the active/inactive state of the left neighbor (wrap)
+    // Note: For i === 0 (leftmost), leftIdx wraps to n-1 (rightmost), so it transitions toward the rightmost cell's state.
+        const n = els.length;
+        const rootStyle = getComputedStyle(document.documentElement);
+        for (let i = 0; i < n; i++) {
+            const el = els[i];
+            const fromColor = colors[i];
+            const leftIdx = (i - 1 + n) % n;
+            const leftIsActive = els[leftIdx].classList.contains('active');
+            // Determine this box's hue from its current inline vars (stable even if startingColorIndex changes)
+            const key = extractColorKeyFromBox(el);
+            if (!key) continue;
+            const varName = leftIsActive ? `--inner-${key}` : `--cell-${key}`;
+            const toColor = rootStyle.getPropertyValue(varName).trim();
+            if (!fromColor || !toColor || fromColor === toColor) continue;
+            try {
+                el.animate(
+                    [ { backgroundColor: fromColor }, { backgroundColor: toColor } ],
+                    { duration: delayAnimation, easing: 'ease', fill: 'none' }
+                );
+            } catch (e) { /* ignore */ void e; }
+        }
+
+        // Shadow: animate box-shadow to the target state's shadow during preview so it doesn't drop
+        const shadows = getSliderShadows();
+        for (let i = 0; i < n; i++) {
+            const el = els[i];
+            const fromShadow = getComputedStyle(el).boxShadow;
+            const leftIdx = (i - 1 + n) % n;
+            const leftIsActive = els[leftIdx].classList.contains('active');
+            const toShadow = leftIsActive ? shadows.active : shadows.inactive;
+            if (!fromShadow || !toShadow || fromShadow === toShadow) continue;
+            try {
+                el.animate(
+                    [ { boxShadow: fromShadow }, { boxShadow: toShadow } ],
+                    { duration: delayAnimation, easing: 'ease', fill: 'none' }
+                );
+            } catch (e) { /* ignore */ void e; }
+        }
+
+        const done = animations.length ? Promise.allSettled(animations.map(a => a.finished)) : Promise.resolve();
+        done.finally(() => {
+            // Snap back to baseline by cancelling animations
+            for (const el of els) {
+                try { el.getAnimations().forEach(a => a.cancel()); } catch (e) { /* ignore */ void e; }
+            }
+            // Now apply the mutation (e.g., update colors)
+            mutateFn && mutateFn();
+            // (debug removed)
+            releaseLock();
+        });
+    }
+
     // Ensure CSS variables for colors are set on :root BEFORE building boxes
     Object.entries(innerCircleColors).forEach(([key, hex]) => {
         // inner circle strong color (hex)
@@ -202,6 +628,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.style.setProperty(`--body-${key}`, `rgb(${dark(rr)}, ${dark(gg)}, ${dark(bb)})`);
     });
 
+    // Starting color cycler: init to green and cycle through playerColors on click
+    let startingColorIndex = playerColors.indexOf('green');
+    if (startingColorIndex < 0) startingColorIndex = 0;
+
     buildPlayerBoxes();
     // highlight using initial URL or default
     const initialPlayersToShow = clampPlayers(playerCount);
@@ -211,9 +641,24 @@ document.addEventListener('DOMContentLoaded', () => {
     menuPlayerCount = clampPlayers(playerCount);
     updateSizeBoundsForPlayers(menuPlayerCount);
 
-    // Starting color cycler: init to green and cycle through playerColors on click
-    let startingColorIndex = playerColors.indexOf('green');
-    if (startingColorIndex < 0) startingColorIndex = 0;
+    // startingColorIndex declared earlier so it's available to builders below
+
+    // Helper: given a box index (0-based from left), return its color key anchored to startingColorIndex
+    function colorKeyForBoxIndex(idx) {
+        const n = playerColors.length;
+        return playerColors[(startingColorIndex + (idx % n) + n) % n];
+    }
+
+    // Apply current color scheme to all slider boxes so that the first box matches the cycler
+    function updatePlayerBoxColors() {
+        if (!playerBoxSlider) return;
+        const boxes = Array.from(playerBoxSlider.querySelectorAll('.box'));
+        boxes.forEach((box, idx) => {
+            const colorKey = colorKeyForBoxIndex(idx);
+            box.style.setProperty('--box-inner', `var(--inner-${colorKey})`);
+            box.style.setProperty('--box-cell', `var(--cell-${colorKey})`);
+        });
+    }
 
     function applyMenuColorBox(colorKey) {
         if (!menuColorCycle) return;
@@ -226,20 +671,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // No global dynamic style needed; element-scoped CSS vars control colors
 
+    // Reflect the currently chosen color in the page background when the menu is visible
+    function setMenuBodyColor() {
+        // Only adjust body color while in the menu, so gameplay updates remain in control during a match
+        if (!menu || menu.style.display === 'none') return;
+        const colorKey = playerColors[startingColorIndex] || 'green';
+        document.body.className = colorKey;
+    }
+
     function cycleStartingColor() {
         startingColorIndex = (startingColorIndex + 1) % playerColors.length;
         applyMenuColorBox(playerColors[startingColorIndex]);
+        setMenuBodyColor();
+    }
+
+    // Compute the selected game colors based on the cycler start and slider count
+    function computeSelectedColors(count) {
+        const n = playerColors.length;
+        const c = Math.max(1, Math.min(count, n));
+        const arr = [];
+        for (let i = 0; i < c; i++) arr.push(playerColors[(startingColorIndex + i) % n]);
+        return arr;
     }
 
     // Initialize and bind
     applyMenuColorBox(playerColors[startingColorIndex]);
+    // Ensure the first box color matches the cycler initially
+    updatePlayerBoxColors();
+    // Set initial background to match current cycler while menu is open
+    setMenuBodyColor();
     if (menuColorCycle) {
         menuColorCycle.tabIndex = 0; // focusable for accessibility
-        menuColorCycle.addEventListener('click', cycleStartingColor);
+        menuColorCycle.addEventListener('click', () => {
+            if (isSliderLocked()) return;
+            // First preview shift-left, then snap and apply color rotation
+            cycleStartingColor();
+            previewShiftLeftThenSnap(updatePlayerBoxColors);
+        });
         menuColorCycle.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
+                if (isSliderLocked()) return;
                 cycleStartingColor();
+                previewShiftLeftThenSnap(updatePlayerBoxColors);
             }
         });
     }
@@ -279,7 +753,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     playerBoxSlider.addEventListener('pointerup', (e) => {
         isDragging = false;
-        try { playerBoxSlider.releasePointerCapture(e.pointerId); } catch { /* empty */ }
+    try { playerBoxSlider.releasePointerCapture(e.pointerId); } catch (e2) { /* empty */ void e2; }
     });
 
     // Also handle pointercancel/leave
@@ -323,6 +797,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // push a new history entry so Back returns to the menu instead of previous/blank
         window.history.pushState({ mode: 'play', players: p, size: s }, '', newUrl);
 
+        // Set the active game palette from the UI selection
+        gameColors = computeSelectedColors(p);
+
         // Hide menu and start a fresh game with the chosen settings
         if (menu) menu.style.display = 'none';
         trainMode = false;
@@ -356,6 +833,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // push a new history entry so Back returns to the menu instead of previous/blank
             window.history.pushState({ mode: 'train', players: p, size: s }, '', newUrl);
 
+            // Set the active game palette from the UI selection
+            gameColors = computeSelectedColors(p);
+
             // Hide menu and start train mode immediately
             if (menu) menu.style.display = 'none';
             trainMode = true;
@@ -372,6 +852,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (showMenu) {
             if (menu) menu.style.display = '';
             updateRandomTip();
+            // When returning to the menu, reflect current chosen color on the background
+            setMenuBodyColor();
             exitFullscreenIfPossible();
             return;
         }
@@ -382,6 +864,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const isTrain = params.has('train');
         if (menu) menu.style.display = 'none';
         trainMode = isTrain;
+        // Derive the active game palette from current cycler selection and requested player count
+        gameColors = computeSelectedColors(p);
         recreateGrid(Math.max(3, s), p);
     }
 
@@ -436,7 +920,7 @@ document.addEventListener('DOMContentLoaded', () => {
             box.className = 'box';
             box.dataset.count = String(count); // the player count this box represents
             box.title = `${count} player${count > 1 ? 's' : ''}`;
-            const colorKey = playerColors[(count - 1) % playerColors.length];
+            const colorKey = playerColors[(startingColorIndex + count - 1) % playerColors.length];
             // set per-box CSS variables pointing to the global color vars
             box.style.setProperty('--box-inner', `var(--inner-${colorKey})`);
             box.style.setProperty('--box-cell', `var(--cell-${colorKey})`);
@@ -557,7 +1041,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const desiredSize = Math.max(3, newCount + 3);
         if (menuGridSize) menuGridSize.value = String(desiredSize);
         updateSizeBoundsForPlayers(newCount);
-        highlightPlayerBoxes(newCount);
+        // Animate boxes to shift from their left neighbor while updating active states
+        runFlipShiftLeftAround(() => highlightPlayerBoxes(newCount));
 
     // Sizing/alignment handled purely via CSS
 
@@ -581,7 +1066,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function stopExplosionLoop() {
         if (explosionTimerId !== null) {
-            try { clearTimeout(explosionTimerId); } catch { /* ignore */ }
+            try { clearTimeout(explosionTimerId); } catch (e) { /* ignore */ void e; }
             explosionTimerId = null;
         }
         isProcessing = false;
@@ -643,7 +1128,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // highlight invalid positions with new layout
         highlightInvalidInitialPositions();
-        document.body.className = playerColors[currentPlayer];
+    document.body.className = activeColors()[currentPlayer];
 
         // If the menu's grid input doesn't match newSize, update it to reflect the actual grid
         if (menuGridSize) {
@@ -660,7 +1145,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // (humanPlayer is 0 by design; defensive check)
             // DEBUG: make ai first player
             currentPlayer = Math.min(humanPlayer, playerCount - 1);
-            document.body.className = playerColors[currentPlayer];
+        document.body.className = activeColors()[currentPlayer];
             updateGrid();
             // Trigger AI if the first randomly chosen currentPlayer isn't the human
             maybeTriggerAIMove();
@@ -683,9 +1168,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (grid[row][col].value === 0) {
                 grid[row][col].value = initialPlacementValue;
-                grid[row][col].player = playerColors[currentPlayer];
+                grid[row][col].player = activeColors()[currentPlayer];
                 
-                cell.classList.add(playerColors[currentPlayer]);
+                cell.classList.add(activeColors()[currentPlayer]);
                 updateCell(row, col, 0, grid[row][col].player, true);
                 updateGrid();
                 highlightInvalidInitialPositions();
@@ -699,7 +1184,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
         } else {
-            if (grid[row][col].value > 0 && cellColor === playerColors[currentPlayer]) {
+            if (grid[row][col].value > 0 && cellColor === activeColors()[currentPlayer]) {
                 grid[row][col].value++;
                 updateCell(row, col, 0, grid[row][col].player, true);
 
@@ -882,7 +1367,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateInnerCircle(cell, grid[i][j].player);
                 updateValueCircles(cell.querySelector('.inner-circle'), grid[i][j].value);
                 
-                if (grid[i][j].player === playerColors[currentPlayer]) {
+                if (grid[i][j].player === activeColors()[currentPlayer]) {
                     cell.className = `cell ${grid[i][j].player}`;
                 } else if (grid[i][j].player) {
                     cell.className = `cell hidden ${grid[i][j].player}`;
@@ -1010,7 +1495,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentPlayer = (currentPlayer + 1) % playerCount;
         } while (!hasCells(currentPlayer) && initialPlacements.every(placement => placement));
 
-        document.body.className = playerColors[currentPlayer];
+    document.body.className = activeColors()[currentPlayer];
         updateGrid();
 
         // If in train mode, possibly trigger AI move for non-human players
@@ -1024,7 +1509,7 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function hasCells(playerIndex) {
         return Array.from(document.querySelectorAll('.cell'))
-            .some(cell => cell.classList.contains(playerColors[playerIndex]));
+            .some(cell => cell.classList.contains(activeColors()[playerIndex]));
     }
 
     /**
@@ -1126,7 +1611,7 @@ document.addEventListener('DOMContentLoaded', () => {
         for (let i = 0; i < gridSize; i++) {
             for (let j = 0; j < gridSize; j++) {
                 const playerColor = grid[i][j].player;
-                const playerIndex = playerColors.indexOf(playerColor);
+                const playerIndex = activeColors().indexOf(playerColor);
                 if (playerIndex >= 0) {
                     playerCells[playerIndex]++;
                 }
@@ -1213,7 +1698,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let total = 0;
         for (let r = 0; r < gridSize; r++) {
             for (let c = 0; c < gridSize; c++) {
-                if (simGrid[r][c].player === playerColors[playerIndex]) total += simGrid[r][c].value;
+                if (simGrid[r][c].player === activeColors()[playerIndex]) total += simGrid[r][c].value;
             }
         }
         return total;
@@ -1342,7 +1827,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             for (let r = 0; r < gridSize; r++) {
                 for (let c = 0; c < gridSize; c++) {
-                    if (simGrid[r][c].player === playerColors[playerIndex]) {
+                    if (simGrid[r][c].player === activeColors()[playerIndex]) {
                         const key = Math.max(0, Math.min(3, simGrid[r][c].value));
                         candidates.push({ r, c, isInitial: false, srcVal: simGrid[r][c].value, sortKey: key });
                     }
@@ -1411,7 +1896,7 @@ document.addEventListener('DOMContentLoaded', () => {
         panel.id = 'aiDebugPanel';
 
         const title = document.createElement('h4');
-        title.textContent = `AI dataRespect — player ${currentPlayer} (${playerColors[currentPlayer]})`;
+    title.textContent = `AI dataRespect — player ${currentPlayer} (${activeColors()[currentPlayer]})`;
         panel.appendChild(title);
 
         const summary = document.createElement('div');
@@ -1462,11 +1947,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (isInitialMove) {
             simGrid[moveR][moveC].value = initialPlacementValue;
-            simGrid[moveR][moveC].player = playerColors[moverIndex];
+            simGrid[moveR][moveC].player = activeColors()[moverIndex];
         } else {
             const prev = simGrid[moveR][moveC].value;
             simGrid[moveR][moveC].value = Math.min(maxCellValue, prev + 1);
-            simGrid[moveR][moveC].player = playerColors[moverIndex];
+            simGrid[moveR][moveC].player = activeColors()[moverIndex];
         }
 
         const result = simulateExplosions(simGrid, simInitial);
@@ -1503,7 +1988,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const owner = simGridInput[r][c].player;
                     if (owner !== '') {
                         hasAnyCells = true;
-                        const idx = playerColors.indexOf(owner);
+                        const idx = activeColors().indexOf(owner);
                         if (idx !== -1) {
                             if (solePlayerIdx === -1) {
                                 solePlayerIdx = idx;
@@ -1627,7 +2112,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * - Tiebreaker 2: higher def (AI cells one away from exploding).
      * - Final: random among exact ties.
      *
-     * @param {number} playerIndex - AI player index in playerColors.
+    * @param {number} playerIndex - AI player index in activeColors.
      * @returns {void} either performs a move (handleClick) or advances turn.
      */
     function aiMakeMoveFor(playerIndex) {
@@ -1740,8 +2225,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Compute atk/def for topK as before on each e.resultGrid
         for (const cand of topK) {
             const rg = cand.resultGrid;
-            const aiColor = playerColors[playerIndex];
-            const playerColor = playerColors[humanPlayer];
+            const aiColor = activeColors()[playerIndex];
+            const playerColor = activeColors()[humanPlayer];
             const nearVal = cellExplodeThreshold - 1;
             let def = 0, atk = 0;
             for (let r = 0; r < gridSize; r++) {

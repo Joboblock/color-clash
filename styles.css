@@ -265,7 +265,8 @@ body {
     box-shadow: 0 4px 10px rgba(0,0,0,0.12);
     /* default background is the lighter 'cell' color for this box */
     background: var(--box-cell, #ccc);
-    transition: transform .12s ease, opacity .12s ease, box-shadow .12s ease;
+        /* Remove box-shadow from CSS transitions to avoid fighting WAAPI shadow animation */
+        transition: transform .12s ease, opacity .12s ease;
     border: 2px solid rgba(255,255,255,0.6);
     -webkit-user-drag: none;
     user-select: none;

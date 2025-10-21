@@ -23,15 +23,20 @@
                         <div id="menuColorCycle" class="menu-color-box" role="button" aria-label="Cycle starting color" title="starting color"></div>
                         <input id="playerName" class="player-name-input" type="text" placeholder="Name (3–16)" aria-label="Player name" maxlength="16" inputmode="latin" autocapitalize="none" autocomplete="off" spellcheck="false" />
                         <div id="playerBoxSlider" class="player-box-slider" role="slider"
-                            aria-label="player count" aria-valuemin="2" aria-valuemax="8" aria-valuenow="2"></div>
+                            aria-label="player count" aria-valuemin="2" aria-valuemax="8" aria-valuenow="2">
+                            <div class="player-slider-label">Player Count</div>
+                            <div class="slider-cells"></div>
+                        </div>
 
-                        <!-- Grid Size tile inside the same grid (row 3, cols 1-2) -->
-                        <div class="player-size-tile" aria-label="Grid size">
-                            <div class="player-size-label">Grid Size</div>
-                            <div class="size-stepper">
-                                <button id="gridDec" class="size-btn" type="button" aria-label="Decrease grid size">−</button>
-                                <input id="menuGridSize" class="size-value" type="number" inputmode="numeric" pattern="[0-9]*" min="3" max="16" step="1" value="5" aria-label="Grid size" autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" />
-                                <button id="gridInc" class="size-btn" type="button" aria-label="Increase grid size">+</button>
+                        <!-- Grid Size tile: includes a header and three owned cells with +/- as left/right and center big number -->
+                        <div class="grid-size-tile" aria-label="Grid size">
+                            <div class="grid-size-label">Grid Size</div>
+                            <div class="grid-size-cells">
+                                <button id="gridDec" class="size-cell btn-cell" type="button" aria-label="Decrease grid size"><span aria-hidden="true">−</span></button>
+                                <div class="size-cell grid-size-center">
+                                    <div id="gridValue" class="grid-size-number" aria-live="polite" aria-atomic="true">5</div>
+                                </div>
+                                <button id="gridInc" class="size-cell btn-cell" type="button" aria-label="Increase grid size"><span aria-hidden="true">+</span></button>
                             </div>
                         </div>
                     </div>

@@ -168,7 +168,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // removed hidden native range input; visual slider maintains menuPlayerCount
     let menuPlayerCount = playerCount; // current selection from visual slider
 
-    const menuGridSize = document.getElementById('menuGridSize');
+    // Grid size display only (input removed)
+    const gridValueEl = document.getElementById('gridValue');
+    let menuGridSizeVal = 0; // set after initial clamps
     const startBtn = document.getElementById('startBtn');
     const trainBtn = document.getElementById('trainBtn');
     const menuColorCycle = document.getElementById('menuColorCycle');
@@ -229,6 +231,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Build visual player box slider
     const playerBoxSlider = document.getElementById('playerBoxSlider');
+    // inner container that holds the clickable boxes (may be same as slider if wrapper missing)
+    let sliderCells = playerBoxSlider ? (playerBoxSlider.querySelector('.slider-cells') || playerBoxSlider) : null;
     // inner-circle color map (match styles.css .inner-circle.* colors)
     const innerCircleColors = {
         red: '#d55f5f',
@@ -358,89 +362,39 @@ document.addEventListener('DOMContentLoaded', () => {
     playerBoxSlider.addEventListener('pointercancel', () => { isDragging = false; });
     playerBoxSlider.addEventListener('pointerleave', (e) => { if (isDragging) setPlayerCountFromPointer(e.clientX); });
 
-    // validate on unfocus or Enter — validate and recreate grid when value changes
-    menuGridSize.addEventListener('blur', () => {
-        validateGridSize();
-        const s = Math.max(3, parseInt(menuGridSize.value, 10) || (3 + menuPlayerCount));
-        if (s !== gridSize) recreateGrid(s, playerCount);
-    });
-    menuGridSize.addEventListener('keydown', e => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            validateGridSize();
-            const s = Math.max(3, parseInt(menuGridSize.value, 10) || (3 + menuPlayerCount));
-            if (s !== gridSize) recreateGrid(s, playerCount);
-            menuGridSize.blur(); // optional: trigger blur to close keyboard on mobile
-        }
-    });
-
-    // Allow only digits in the grid size input
-    const allowedControlKeys = new Set(['Backspace','Delete','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Tab','Home','End']);
-    menuGridSize.addEventListener('keydown', (e) => {
-        // permit Enter (handled above), digits, and control/navigation keys
-        if (e.key === 'Enter' || allowedControlKeys.has(e.key)) return;
-        // Block non-digit characters commonly allowed in number inputs
-        if (e.key === '.' || e.key === ',' || e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-' || e.key === ' ') {
-            e.preventDefault();
-            return;
-        }
-        // If it's a single character that's not a digit, block it
-        if (e.key.length === 1 && !/\d/.test(e.key)) {
-            e.preventDefault();
-        }
-    });
-    // Prevent non-digit insertion at OS/IME level (e.g., iOS double-space -> '.')
-    menuGridSize.addEventListener('beforeinput', (e) => {
-        // Inserted text must be digits only; block others
-        if (e.inputType === 'insertText') {
-            const data = e.data || '';
-            if (/\D/.test(data)) {
-                e.preventDefault();
-            }
-        } else if (e.inputType === 'insertFromPaste') {
-            // Sanitize pasted text before it hits the field
-            const pasted = (e.clipboardData && e.clipboardData.getData('text')) || '';
-            const digits = pasted.replace(/\D+/g, '');
-            if (digits !== pasted) {
-                e.preventDefault();
-                const start = menuGridSize.selectionStart ?? menuGridSize.value.length;
-                const end = menuGridSize.selectionEnd ?? start;
-                menuGridSize.setRangeText(digits, start, end, 'end');
-                menuGridSize.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-        }
-    });
-    // Sanitize pasted/IME input to digits only
-    const sanitizeDigitsOnly = () => {
-        const raw = menuGridSize.value || '';
-        const digits = raw.replace(/\D+/g, '');
-        if (digits !== raw) menuGridSize.value = digits;
-    };
-    menuGridSize.addEventListener('input', sanitizeDigitsOnly);
-    menuGridSize.addEventListener('paste', () => {
-        // Delay to allow paste, then sanitize
-        setTimeout(sanitizeDigitsOnly, 0);
-    });
+    // Input removed: no key handlers required
 
     // Stepper buttons for grid size
+    function reflectGridSizeDisplay() {
+        if (gridValueEl) {
+            gridValueEl.textContent = String(menuGridSizeVal);
+        }
+        if (gridDecBtn) gridDecBtn.disabled = menuGridSizeVal <= 3;
+        if (gridIncBtn) gridIncBtn.disabled = menuGridSizeVal >= 16;
+    }
+
+    function bumpValueAnimation() {
+        if (!gridValueEl) return;
+        gridValueEl.classList.remove('bump');
+        // force reflow to restart animation
+    void gridValueEl.offsetWidth;
+        gridValueEl.classList.add('bump');
+    }
+
     function adjustGridSize(delta) {
-        let v = parseInt(menuGridSize.value, 10);
-        if (!Number.isInteger(v)) v = 3 + menuPlayerCount;
+        let v = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : (3 + menuPlayerCount);
         v = Math.max(3, Math.min(16, v + delta));
-        menuGridSize.value = String(v);
-        validateGridSize();
-        const s = Math.max(3, parseInt(menuGridSize.value, 10) || (3 + menuPlayerCount));
-        if (s !== gridSize) recreateGrid(s, playerCount);
+        menuGridSizeVal = v;
+        reflectGridSizeDisplay();
+        bumpValueAnimation();
+        if (v !== gridSize) recreateGrid(v, playerCount);
     }
     if (gridDecBtn) gridDecBtn.addEventListener('click', () => adjustGridSize(-1));
     if (gridIncBtn) gridIncBtn.addEventListener('click', () => adjustGridSize(1));
 
     startBtn.addEventListener('click', async () => {
         const p = clampPlayers(menuPlayerCount);
-        // Trust input handler: normalize via validateGridSize then use value directly
-        validateGridSize();
-        let s = parseInt(menuGridSize.value, 10);
-        if (!Number.isInteger(s)) s = 3;
+    let s = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : 3;
 
         // Enter fullscreen on mobile from the same user gesture
         await requestFullscreenIfMobile();
@@ -472,10 +426,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         trainBtn.addEventListener('click', async () => {
             const p = clampPlayers(menuPlayerCount);
-            // Trust input handler: normalize via validateGridSize then use value directly
-            validateGridSize();
-            let s = parseInt(menuGridSize.value, 10);
-            if (!Number.isInteger(s)) s = 3;
+            let s = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : 3;
 
             // Enter fullscreen on mobile from the same user gesture
             await requestFullscreenIfMobile();
@@ -676,9 +627,9 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void}
      */
     function previewShiftLeftThenSnap(mutateFn) {
-        const container = playerBoxSlider;
+    const container = sliderCells || playerBoxSlider;
         if (!container) { mutateFn && mutateFn(); return; }
-        const els = Array.from(container.querySelectorAll('.box'));
+    const els = Array.from(container.querySelectorAll('.box'));
         if (els.length === 0) { mutateFn && mutateFn(); return; }
 
         const releaseLock = beginSliderAnimation(delayAnimation);
@@ -823,7 +774,7 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function updatePlayerBoxColors() {
         if (!playerBoxSlider) return;
-        const boxes = Array.from(playerBoxSlider.querySelectorAll('.box'));
+    const boxes = Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box'));
         boxes.forEach((box, idx) => {
             const colorKey = colorKeyForBoxIndex(idx);
             box.style.setProperty('--box-inner', `var(--inner-${colorKey})`);
@@ -908,13 +859,13 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function buildPlayerBoxes() {
         // Preserve the color cycler if it's inside the slider
-        const cycler = playerBoxSlider.querySelector('#menuColorCycle');
+    const cycler = playerBoxSlider.querySelector('#menuColorCycle');
         if (cycler && cycler.parentElement === playerBoxSlider) {
             playerBoxSlider.removeChild(cycler);
         }
 
         // Remove existing player boxes only
-        Array.from(playerBoxSlider.querySelectorAll('.box')).forEach(n => n.remove());
+    Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box')).forEach(n => n.remove());
 
         for (let count = 1; count <= maxPlayers; count++) {
             const box = document.createElement('div');
@@ -937,11 +888,11 @@ document.addEventListener('DOMContentLoaded', () => {
             box.setAttribute('draggable', 'false');
             box.addEventListener('dragstart', (ev) => ev.preventDefault());
 
-            playerBoxSlider.appendChild(box);
+            (sliderCells || playerBoxSlider).appendChild(box);
         }
 
         // Re-append the cycler; CSS grid places it to row 2, col 1
-        if (cycler) playerBoxSlider.appendChild(cycler);
+    if (cycler) playerBoxSlider.appendChild(cycler);
     }
 
     /**
@@ -950,7 +901,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} updates aria attributes, internal selection, and grid if needed.
      */
     function highlightPlayerBoxes(count) {
-        playerBoxSlider.querySelectorAll('.box').forEach((child) => {
+    (sliderCells || playerBoxSlider).querySelectorAll('.box').forEach((child) => {
             const boxCount = parseInt(child.dataset.count, 10);
             if (boxCount <= count) child.classList.add('active'); else child.classList.remove('active');
         });
@@ -972,8 +923,9 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} sets menuGridSize.value.
      */
     function updateSizeBoundsForPlayers(pCount) {
-        const desired = pCount + 3;
-        menuGridSize.value = String(desired);
+        const desired = Math.max(3, pCount + 3);
+        menuGridSizeVal = desired;
+        reflectGridSizeDisplay();
     }
 
     // Sync functions
@@ -991,17 +943,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * Validate and normalize the grid size input to [3..16].
      * @returns {void} adjusts input to a valid number.
      */
-    function validateGridSize() {
-        let val = parseInt(menuGridSize.value, 10);
-        const minSz = 3;
-        const maxSz = 16;
-
-        if (isNaN(val)) val = menuPlayerCount + 3; // reset to default if empty
-        if (val < minSz) val = minSz;
-        if (val > maxSz) val = maxSz;
-
-        menuGridSize.value = String(val);
-    }
+    // Input removed: grid size is controlled via +/- and reflected in menuGridSizeVal
 
     /**
      * Map a pointer x-position to the nearest player box and update selection.
@@ -1010,7 +952,7 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function setPlayerCountFromPointer(clientX) {
     // Only consider player boxes for mapping, skip the color cycler
-    const children = Array.from(playerBoxSlider.querySelectorAll('.box'));
+    const children = Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box'));
         if (children.length === 0) return;
         // find nearest box center to clientX
         let nearest = children[0];
@@ -1037,7 +979,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function onMenuPlayerCountChanged(newCount) {
         menuPlayerCount = newCount;
         const desiredSize = Math.max(3, newCount + 3);
-        if (menuGridSize) menuGridSize.value = String(desiredSize);
+    // reflect desired size in display state and animate bump when it changes via player slider
+    const prevSize = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : null;
+    menuGridSizeVal = desiredSize;
+    if (gridValueEl) gridValueEl.textContent = String(desiredSize);
+    if (prevSize === null || desiredSize !== prevSize) {
+        bumpValueAnimation();
+    }
         updateSizeBoundsForPlayers(newCount);
         // Direct slider interaction: immediately reflect active boxes without FLIP animation
         // (keeps original behavior of activating the nearest box and all to its left)
@@ -1135,10 +1083,9 @@ document.addEventListener('DOMContentLoaded', () => {
         highlightInvalidInitialPositions();
     document.body.className = activeColors()[currentPlayer];
 
-        // If the menu's grid input doesn't match newSize, update it to reflect the actual grid
-        if (menuGridSize) {
-            menuGridSize.value = String(Math.max(3, newSize));
-        }
+        // Reflect actual grid size in display value while menu is present
+    menuGridSizeVal = Math.max(3, newSize);
+    reflectGridSizeDisplay();
 
         // Ensure the visual player boxes reflect new player count
         highlightPlayerBoxes(clampPlayers(playerCount));

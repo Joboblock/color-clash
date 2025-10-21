@@ -6,9 +6,11 @@ html, body {
 :root {
     /* Neutral board color used by cells and UI chrome */
     --cell-bg: #e7eddb;
+    /* Invalid/limit color used for buttons at bounds and invalid cells */
+    --invalid-color: #b8beac;
     /* Responsive spacing for player controls */
     --player-gap: clamp(2px, 1.2vmin, 8px);       /* gap between player boxes (columns) */
-    --player-row-gap: clamp(12px, 3.6vmin, 36px);  /* vertical gap between cycler row and slider row */
+    --player-row-gap: 12px;  /* vertical gap between cycler row and slider row */
 }
 
 /* Base body layout and font */
@@ -52,7 +54,9 @@ body {
     box-shadow: 0 6px 20px rgba(0,0,0,0.25);
     font-weight: 800;
     color: #222;
-    font-size: 2.5rem;
+    font-size: clamp(1.25rem, 6.5vw, 2.5rem); /* scale down on smaller screens, cap at 2.5rem */
+    white-space: nowrap; /* never wrap; shrink instead */
+    max-width: 100%;
     backdrop-filter: blur(4px);
 }
 
@@ -170,7 +174,7 @@ body {
 /* Grid wrapper to align cycler (row 1) and slider (row 2) on the same column rhythm */
 .player-grid-wrapper {
     display: grid;
-    grid-template-columns: repeat(8, 1fr);
+    grid-template-columns: repeat(8, minmax(0, 1fr));
     column-gap: var(--player-gap);
     row-gap: var(--player-row-gap);
     padding: var(--player-gap);
@@ -184,6 +188,7 @@ body {
 /* Prevent grid children (like inputs) from imposing a min-content width on columns */
 .player-grid-wrapper > * {
     min-width: 0;
+    min-height: 0; /* allow rows to shrink; prevent content from forcing height */
     max-width: 100%;
 }
 
@@ -202,58 +207,143 @@ body {
 }
 
 /* Grid Size tile in row 3, columns 1-2 */
-.player-grid-wrapper .player-size-tile {
-    grid-column: 1 / 3;
-    grid-row: 3;
+.player-grid-wrapper .grid-size-tile {
+    grid-column: 1 / span 3; /* exactly 3 columns wide */
+    grid-row: 3; /* header and cells within same wrapper row */
     display: grid;
-    grid-template-rows: auto 1fr auto; /* label on top, spacer, stepper at bottom */
-    align-items: stretch;
+    grid-template-columns: subgrid; /* adopt parent columns for perfect box sizing */
+    grid-template-rows: auto 1fr; /* header on row 1, cells on row 2 */
+    column-gap: var(--player-gap);
+    align-items: center; /* vertically center the cells within row */
+    position: relative; /* for background pseudo-element */
 }
-
-.player-grid-wrapper .player-size-label {
-    font-weight: 700;
+/* Label inside the tile (header) */
+.player-grid-wrapper .grid-size-tile .grid-size-label {
+    grid-column: 1 / -1;
     justify-self: start;
+    align-self: start;
+    font-weight: 800;
+    font-size: clamp(0.8rem, 2.4vmin, 1rem);
+    color: #222;
+    margin-bottom: 8px; /* increased from ~6 to 8 */
+    white-space: nowrap;      /* never wrap, shrink instead */
+    max-width: 100%;
+    overflow: hidden;         /* guard against overflow on ultra-small screens */
+    text-overflow: ellipsis;  /* final fallback if text still doesn't fit */
 }
 
-.player-grid-wrapper .size-stepper {
+/* Fallback if subgrid isn't supported for the tile */
+@supports not (grid-template-columns: subgrid) {
+    .player-grid-wrapper .grid-size-tile { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Slider-like background behind the three cells */
+/* Background should hug only the cells, not the header */
+.player-grid-wrapper .grid-size-cells {
     display: grid;
-    grid-template-columns: min-content max-content min-content; /* keep value compact */
+    grid-template-columns: subgrid;
+    column-gap: var(--player-gap);
+    grid-column: 1 / -1;
+    grid-row: 2; /* sit below the header */
+    position: relative; /* create containing block for ::before */
+}
+@supports not (grid-template-columns: subgrid) {
+    .player-grid-wrapper .grid-size-cells { grid-template-columns: repeat(3, 1fr); }
+}
+.player-grid-wrapper .grid-size-cells::before {
+    content: '';
+    position: absolute;
+    inset: calc(var(--player-gap) * -1);
+    background: var(--cell-bg);
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.06);
+    z-index: 0;
+    pointer-events: none;
+}
+/* Ensure children (the three squares) don't impose min-content widths */
+.player-grid-wrapper .grid-size-cells > * { min-width: 0; }
+
+/* Ensure tile children sit above background */
+.player-grid-wrapper .grid-size-tile > * {
+    position: relative;
+    z-index: 1;
+    min-width: 0; /* prevent min-content from widening parent columns */
+}
+/* Also ensure cells render above their background */
+.player-grid-wrapper .grid-size-cells > * { position: relative; z-index: 1; }
+
+/* Subtle 'pop' animation when value changes */
+@keyframes value-bump {
+    0% { transform: scale(1); }
+    35% { transform: scale(1.14); }
+    100% { transform: scale(1); }
+}
+/* Apply bump animation to the big number when its value changes */
+.player-grid-wrapper .grid-size-number.bump { animation: value-bump 160ms ease; }
+
+/* New three-cell tile elements */
+.player-grid-wrapper .size-cell {
+    width: 100%;
+    aspect-ratio: 1 / 1; /* squares matching player boxes */
+    border-radius: 25%;
+    border: 2px solid rgba(255,255,255,0.6);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+    background: var(--cell-bg);
+    display: flex;
     align-items: center;
-    gap: var(--player-gap);
+    justify-content: center;
+    box-sizing: border-box;
+    overflow: hidden; /* prevent content from expanding height beyond square */
+    min-height: 0;    /* ignore min-content height from children */
 }
 
-.player-grid-wrapper .size-btn {
+.player-grid-wrapper .btn-cell {
     appearance: none;
     -webkit-appearance: none;
-    border: 1px solid rgba(0,0,0,0.12);
-    background: rgba(255,255,255,0.9);
-    color: #333;
-    border-radius: 10px;
-    padding: 6px 10px;
-    font-weight: 800;
-    line-height: 1;
     cursor: pointer;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    font-weight: 900;
+    font-size: clamp(1rem, 4.2vmin, 2rem);
+    color: #222;
+    line-height: 1;
+    white-space: nowrap;
+    min-inline-size: 0;
+    padding: 0; /* avoid default button padding affecting layout */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: transform .08s ease, box-shadow .12s ease, background-color .12s ease;
 }
 
-.player-grid-wrapper .size-btn:active {
-    transform: translateY(1px);
+.player-grid-wrapper .btn-cell:active { transform: translateY(1px) scale(0.98); }
+.player-grid-wrapper .btn-cell:disabled {
+    background: var(--invalid-color);
+    cursor: not-allowed;
 }
 
-.player-grid-wrapper .size-value {
-    width: 3ch;            /* content width for up to 3 chars */
-    max-width: 3ch;        /* prevent stretching */
-    min-width: 0;          /* allow shrinkage in grid */
-    box-sizing: content-box; /* width excludes padding/border for tight fit */
-    justify-self: center;
-    text-align: center;
-    padding: 4px 6px;      /* smaller padding to keep it compact */
-    border-radius: 10px;
-    border: 1px solid rgba(0,0,0,0.12);
-    background: #fff;
-    font-weight: 700;
-    appearance: textfield;
-    -moz-appearance: textfield;
+.player-grid-wrapper .grid-size-center {
+    display: grid;
+    place-items: center;
+    padding: 6%; /* breathable padding inside the square */
+}
+
+/* Place the three squares on the second row under the header */
+/* Cells are direct children of .grid-size-cells now, no row assignment needed */
+
+.player-grid-wrapper .grid-size-label {
+    font-weight: 800;
+    font-size: clamp(0.8rem, 2.4vmin, 1rem);
+    color: #222;
+}
+
+.player-grid-wrapper .grid-size-number {
+    font-weight: 900;
+    font-size: clamp(1.4rem, 6vmin, 2.4rem);
+    line-height: 1;
+    color: #111;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden; /* avoid pushing the cell if digits grow */
 }
 
 /* Remove numeric spinners on WebKit */
@@ -327,34 +417,50 @@ body {
     width: 100%;
     position: relative;
     box-sizing: border-box; /* ensure padding stays inside width */
-    /* Keep container transparent; chrome applied via ::before limited to first row */
 }
 
 /* Fallback for browsers without subgrid support */
 @supports not (grid-template-columns: subgrid) {
-    .player-grid-wrapper { grid-template-columns: repeat(8, 1fr); }
+    .player-grid-wrapper { grid-template-columns: repeat(8, minmax(0, 1fr)); }
     .player-box-slider { grid-template-columns: repeat(8, 1fr); }
+    .player-box-slider .slider-cells { grid-template-columns: repeat(8, 1fr); }
 }
 
-/* Limit background/border to the first row area only */
-.player-box-slider::before {
+/* Background only behind the cells, not the header */
+.player-box-slider .slider-cells {
+    display: grid;
+    grid-template-columns: subgrid;
+    gap: var(--player-gap);
+    align-items: center;
+    position: relative; /* for background pseudo-element */
+    grid-column: 1 / -1; /* span all slider columns so items lay out horizontally */
+}
+.player-box-slider .slider-cells::before {
     content: '';
     position: absolute;
-    /* Extend beyond the first row a little (vertical and horizontal bleed) */
     inset: calc(var(--player-gap) * -1);
-    /* Compute height of first row: we use the tallest box plus vertical padding. Since boxes are square with aspect-ratio in grid columns, the row height equals a column width. We approximate with 1fr track height using grid metrics by stretching behind the first row only. */
-    /* Use padding box to sit under boxes */
     background: var(--cell-bg);
     border-radius: 12px;
     border: 1px solid rgba(0,0,0,0.06);
     z-index: 0;
-    pointer-events: none; /* never block interactions with neighboring elements */
+    pointer-events: none;
 }
+/* Ensure slider cells render above background */
+.player-box-slider .slider-cells > * { position: relative; z-index: 1; }
 
-/* Ensure grid content appears above the background */
-.player-box-slider > * {
-    position: relative;
-    z-index: 1;
+/* Header styling inside the slider */
+.player-box-slider .player-slider-label {
+    grid-column: 1 / -1;
+    justify-self: start;
+    align-self: start;
+    font-weight: 800;
+    font-size: clamp(0.8rem, 2.4vmin, 1rem);
+    color: #222;
+    margin-bottom: 8px; /* increased from ~6 to 8 */
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* cycler is no longer a child of .player-box-slider; placed by wrapper */
@@ -461,7 +567,7 @@ body {
 .cell.purple { background-color: var(--cell-purple) !important; }
 .cell.magenta { background-color: var(--cell-magenta) !important; }
 
-.cell.invalid { background-color: #b8beac; }
+.cell.invalid { background-color: var(--invalid-color); }
 .cell.hidden { background-color: var(--cell-bg) !important;}
 
 /* Player Colors for Inner Circles (Strong) (use JS-set CSS variables) */

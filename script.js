@@ -19,9 +19,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Attach once; per-cell listeners are removed.
     gridElement.addEventListener('click', onGridClick, { passive: true });
 
-    // Double-tap fullscreen toggle outside the game grid (mobile only)
     let lastTapTime = 0;
     const doubleTapThreshold = 300; // ms
+    /**
+     * Handle pointer down and toggle fullscreen on mobile after a double-tap outside the grid.
+     * @param {PointerEvent|MouseEvent|TouchEvent} ev - The pointer event.
+     * @returns {void}
+     */
     function onBodyPointerDown(ev) {
         if (!isMobileDevice()) return;
         // Only active during gameplay (menu hidden)
@@ -46,7 +50,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     const isTrainMode = urlParams.has('train');
 
-    // Broad mobile detection using feature hints (less brittle than UA regex)
+    /**
+     * Broad mobile detection using feature hints (coarse pointer, touch points, UA hints).
+     * @returns {boolean} true if device is likely mobile/touch-centric.
+     */
     function isMobileDevice() {
         // 1) UA Client Hints (Chromium): navigator.userAgentData?.mobile
         if (navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean') {
@@ -65,7 +72,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return false;
     }
 
-    // Request fullscreen on mobile devices; ignore failures silently
+    /**
+     * Request fullscreen on mobile devices if possible; ignore failures silently.
+     * @returns {Promise<void>} resolves when the request completes or is ignored.
+     */
     async function requestFullscreenIfMobile() {
         if (!isMobileDevice()) return;
         const el = document.documentElement;
@@ -75,6 +85,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Exit fullscreen mode if supported; ignore failures.
+     * @returns {Promise<void>} resolves when exit completes or is ignored.
+     */
     async function exitFullscreenIfPossible() {
         const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen || document.mozCancelFullScreen;
         if (typeof exit === 'function') {
@@ -82,12 +96,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Check current fullscreen state
+    /**
+     * Check current fullscreen state.
+     * @returns {boolean} true if any element is fullscreen.
+     */
     function isFullscreenActive() {
         return !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || document.mozFullScreenElement);
     }
 
-    // Toggle fullscreen on mobile devices only
+    /**
+     * Toggle fullscreen on mobile devices only.
+     * @returns {Promise<void>} resolves after attempting to toggle.
+     */
     async function toggleFullscreenMobile() {
         if (!isMobileDevice()) return;
         if (isFullscreenActive()) {
@@ -100,8 +120,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Define available player colors
     // Start at green, move 5 colors forwards per step (Most contrasting colors)
     const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'orange', 'purple'];
-    // Active game palette, set when a game starts (subset/rotation of playerColors)
     let gameColors = null; // null until a game is started
+    /**
+     * Get the current active color palette (game palette if set, otherwise full list).
+     * @returns {string[]} array of player color keys.
+     */
     function activeColors() {
         return (gameColors && gameColors.length) ? gameColors : playerColors;
     }
@@ -126,35 +149,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.documentElement.style.setProperty('--delay-animation', `${delayAnimation}ms`);
     // Global lock to block the color cycler while slider animations run
     let sliderAnimLocks = 0;
-    function isSliderLocked() { return sliderAnimLocks > 0; }
-    function updateCyclerDisabled(disabled) {
-        if (!menuColorCycle) return;
-        if (disabled) {
-            menuColorCycle.setAttribute('aria-disabled', 'true');
-            menuColorCycle.style.pointerEvents = 'none';
-            menuColorCycle.style.cursor = 'not-allowed';
-        } else {
-            menuColorCycle.removeAttribute('aria-disabled');
-            menuColorCycle.style.pointerEvents = '';
-            menuColorCycle.style.cursor = '';
-        }
-    }
-    function beginSliderAnimation(durationMs) {
-        sliderAnimLocks++;
-        updateCyclerDisabled(true);
-        let released = false;
-        const release = () => {
-            if (released) return;
-            released = true;
-            sliderAnimLocks = Math.max(0, sliderAnimLocks - 1);
-            if (sliderAnimLocks === 0) updateCyclerDisabled(false);
-        };
-        if (durationMs && durationMs > 0) setTimeout(release, durationMs + 32);
-        return release;
-    }
     document.documentElement.style.setProperty('--grid-size', gridSize);
 
-    // Function to get URL parameters
     /**
      * Fetch a query parameter value from the current page URL.
      * @param {string} param - the query key to retrieve.
@@ -164,6 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const urlParams = new URLSearchParams(window.location.search);
         return urlParams.get(param);
     }
+
 
 //#region Menu Stuff
     const menu = document.getElementById('mainMenu');
@@ -204,229 +201,9 @@ document.addEventListener('DOMContentLoaded', () => {
         { text: 'Tip: This is a rare message.', weight: 0.1 },
         { text: 'Tip: Praise the Raute, embrace the Raute!', weight: 0.1 }
     ];
-
-    function pickWeightedTip(list) {
-        let total = 0;
-        for (const t of list) total += (typeof t.weight === 'number' ? t.weight : 1);
-        let roll = Math.random() * total;
-        for (const t of list) {
-            roll -= (typeof t.weight === 'number' ? t.weight : 1);
-            if (roll <= 0) return t;
-        }
-        return list[list.length - 1];
-    }
-
-    function updateRandomTip() {
-        if (!menuHint) return;
-        const tip = pickWeightedTip(tips);
-        if (tip && tip.html) menuHint.innerHTML = tip.text; else menuHint.textContent = tip ? tip.text : '';
-    }
-
-
-    // --- FLIP helpers for player slider boxes ---
-    /**
-     * Measure bounding rects for a list of elements.
-     * @param {HTMLElement[]} els
-     * @returns {DOMRect[]}
-     */
-    function measureRects(els) {
-        return els.map(el => el.getBoundingClientRect());
-    }
-
-    /**
-     * Measure computed background colors for a list of elements.
-     * @param {HTMLElement[]} els
-     * @returns {string[]} CSS color strings (e.g., rgb(...))
-     */
-    function measureBackgroundColors(els) {
-        return els.map(el => getComputedStyle(el).backgroundColor);
-    }
-
-    // Probe to retrieve canonical slider box-shadow values for inactive/active
-    let sliderShadowCache = null; // { inactive: string, active: string }
-    function getSliderShadows() {
-        if (sliderShadowCache) return sliderShadowCache;
-        try {
-            const probeContainer = document.createElement('div');
-            probeContainer.className = 'player-box-slider';
-            Object.assign(probeContainer.style, {
-                position: 'fixed',
-                left: '-10000px',
-                top: '0',
-                width: '0',
-                height: '0',
-                overflow: 'hidden'
-            });
-            const probe = document.createElement('div');
-            probe.className = 'box';
-            // Size so CSS like aspect-ratio or border applies; avoid 0 size
-            probe.style.width = '40px';
-            probe.style.height = '40px';
-            probeContainer.appendChild(probe);
-            document.body.appendChild(probeContainer);
-
-            const csInactive = getComputedStyle(probe).boxShadow;
-            probe.classList.add('active');
-            const csActive = getComputedStyle(probe).boxShadow;
-
-            document.body.removeChild(probeContainer);
-            sliderShadowCache = { inactive: csInactive, active: csActive };
-            return sliderShadowCache;
-    } catch (e) { void e;
-            // Fallback to typical values used in CSS
-            sliderShadowCache = { inactive: '0 4px 10px rgba(0,0,0,0.12)', active: '0 8px 20px rgba(0,0,0,0.18)' };
-            return sliderShadowCache;
-        }
-    }
-
-    /**
-     * Extract the hue key (e.g., 'green') from a slider box's inline CSS vars.
-     * @param {HTMLElement} box
-     * @returns {string|null}
-     */
-    function extractColorKeyFromBox(box) {
-        const innerVar = box.style.getPropertyValue('--box-inner'); // e.g., 'var(--inner-green)'
-        const cellVar = box.style.getPropertyValue('--box-cell');   // e.g., 'var(--cell-green)'
-        const from = innerVar || cellVar || '';
-        const mInner = /--inner-([a-z]+)/i.exec(from);
-        if (mInner && mInner[1]) return mInner[1].toLowerCase();
-        const mCell = /--cell-([a-z]+)/i.exec(from);
-        if (mCell && mCell[1]) return mCell[1].toLowerCase();
-        return null;
-    }
-
-
-    // Preview: smoothly move boxes to their left neighbor, then snap back and apply mutation (e.g., color change)
-    function previewShiftLeftThenSnap(mutateFn) {
-        const container = playerBoxSlider;
-        if (!container) { mutateFn && mutateFn(); return; }
-        const els = Array.from(container.querySelectorAll('.box'));
-        if (els.length === 0) { mutateFn && mutateFn(); return; }
-
-        const releaseLock = beginSliderAnimation(delayAnimation);
-
-    const rects = measureRects(els);
-    const colors = measureBackgroundColors(els);
-        const animations = [];        
-
-        for (let i = 0; i < els.length; i++) {
-            const el = els[i];
-            try { el.getAnimations().forEach(a => a.cancel()); } catch (e) { /* ignore */ void e; }
-            const hasActive = el.classList.contains('active');
-            const baseline = hasActive ? ' translateY(-18%) scale(1.06)' : '';
-            const baseTransform = baseline ? baseline : 'none';
-
-            if (i === 0) {
-                // Leftmost: fade out, then re-enter from half a cell to the right of the rightmost and glide to it
-                const outBase = delayAnimation * 0.4; // original fraction
-                const outDur = outBase * 0.5;         // 2x faster fade
-                const inDur = delayAnimation - outDur; // consume remaining time for slide-in so total == delayAnimation
-                // Phase 1: fade out in place
-                const fadeOut = el.animate(
-                    [ { transform: baseTransform, opacity: 1 }, { transform: baseTransform, opacity: 0 } ],
-                    { duration: outDur, easing: 'linear', fill: 'forwards' }
-                );
-
-                // Compute teleport start just beyond the rightmost cell, then slide into rightmost
-                const n = els.length;
-                const src0 = rects[0];
-                const dstR = rects[n - 1];
-                const srcCx = src0.left + src0.width / 2;
-                const srcCy = src0.top + src0.height / 2;
-                const rightCx = dstR.left + dstR.width / 2;
-                const rightCy = dstR.top + dstR.height / 2;
-                const startDx = (rightCx + dstR.width) - srcCx; // half a cell to the right of the rightmost (center + width)
-                const startDy = rightCy - srcCy;
-                const endDx = rightCx - srcCx;
-                const endDy = rightCy - srcCy;
-                const sx = dstR.width / (src0.width || 1);
-                const sy = dstR.height / (src0.height || 1);
-
-                // Phase 2: slide in from off-right to the rightmost, fading in
-                const slideIn = el.animate(
-                    [
-                        { transform: `translate(${startDx}px, ${startDy}px) scale(${sx}, ${sy})${baseline}`, opacity: 0 },
-                        { transform: `translate(${endDx}px, ${endDy}px) scale(${sx}, ${sy})${baseline}`, opacity: 1 }
-                    ],
-                    { duration: inDur, delay: outDur, easing: 'cubic-bezier(0.05, 0.5, 0.5, 1)', fill: 'forwards' }
-                );
-                animations.push(fadeOut, slideIn);
-                continue;
-            }
-
-            const src = rects[i];
-            const dst = rects[i - 1];
-            const srcCx = src.left + src.width / 2;
-            const srcCy = src.top + src.height / 2;
-            const dstCx = dst.left + dst.width / 2;
-            const dstCy = dst.top + dst.height / 2;
-            const dx = dstCx - srcCx;
-            const dy = dstCy - srcCy;
-            const sx = dst.width / (src.width || 1);
-            const sy = dst.height / (src.height || 1);
-
-            const anim = el.animate(
-                [
-                    { transform: baseTransform },
-                    { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})${baseline}` }
-                ],
-                { duration: delayAnimation, easing: 'cubic-bezier(0.5, 1, 0.75, 1)', fill: 'forwards' }
-            );
-            animations.push(anim);
-        }
-
-    // Color: smoothly transition from current state to own hue in the active/inactive state of the left neighbor (wrap)
-    // Note: For i === 0 (leftmost), leftIdx wraps to n-1 (rightmost), so it transitions toward the rightmost cell's state.
-        const n = els.length;
-        const rootStyle = getComputedStyle(document.documentElement);
-        for (let i = 0; i < n; i++) {
-            const el = els[i];
-            const fromColor = colors[i];
-            const leftIdx = (i - 1 + n) % n;
-            const leftIsActive = els[leftIdx].classList.contains('active');
-            // Determine this box's hue from its current inline vars (stable even if startingColorIndex changes)
-            const key = extractColorKeyFromBox(el);
-            if (!key) continue;
-            const varName = leftIsActive ? `--inner-${key}` : `--cell-${key}`;
-            const toColor = rootStyle.getPropertyValue(varName).trim();
-            if (!fromColor || !toColor || fromColor === toColor) continue;
-            try {
-                el.animate(
-                    [ { backgroundColor: fromColor }, { backgroundColor: toColor } ],
-                    { duration: delayAnimation, easing: 'ease', fill: 'none' }
-                );
-            } catch (e) { /* ignore */ void e; }
-        }
-
-        // Shadow: animate box-shadow to the target state's shadow during preview so it doesn't drop
-        const shadows = getSliderShadows();
-        for (let i = 0; i < n; i++) {
-            const el = els[i];
-            const fromShadow = getComputedStyle(el).boxShadow;
-            const leftIdx = (i - 1 + n) % n;
-            const leftIsActive = els[leftIdx].classList.contains('active');
-            const toShadow = leftIsActive ? shadows.active : shadows.inactive;
-            if (!fromShadow || !toShadow || fromShadow === toShadow) continue;
-            try {
-                el.animate(
-                    [ { boxShadow: fromShadow }, { boxShadow: toShadow } ],
-                    { duration: delayAnimation, easing: 'ease', fill: 'none' }
-                );
-            } catch (e) { /* ignore */ void e; }
-        }
-
-        const done = animations.length ? Promise.allSettled(animations.map(a => a.finished)) : Promise.resolve();
-        done.finally(() => {
-            // Snap back to baseline by cancelling animations
-            for (const el of els) {
-                try { el.getAnimations().forEach(a => a.cancel()); } catch (e) { /* ignore */ void e; }
-            }
-            // Now apply the mutation (e.g., update colors)
-            mutateFn && mutateFn();
-            
-            releaseLock();
-        });
-    }
+    
+    // Cache for computed shadows used by the slider animation
+    let sliderShadowCache = null; // { inactive: string, active: string }    
 
     // Ensure CSS variables for colors are set on :root BEFORE building boxes
     Object.entries(innerCircleColors).forEach(([key, hex]) => {
@@ -456,64 +233,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // startingColorIndex declared earlier so it's available to builders below
 
-    // Helper: given a box index (0-based from left), return its color key anchored to startingColorIndex
-    function colorKeyForBoxIndex(idx) {
-        const n = playerColors.length;
-        return playerColors[(startingColorIndex + (idx % n) + n) % n];
-    }
-
-    // Determine which player index should start, based on the currently selected cycler color
-    function computeStartPlayerIndex() {
-        const ac = activeColors();
-        const selectedKey = playerColors[startingColorIndex];
-        const idx = ac.indexOf(selectedKey);
-        return idx >= 0 ? idx : 0;
-    }
-
-    // Apply current color scheme to all slider boxes so that the first box matches the cycler
-    function updatePlayerBoxColors() {
-        if (!playerBoxSlider) return;
-        const boxes = Array.from(playerBoxSlider.querySelectorAll('.box'));
-        boxes.forEach((box, idx) => {
-            const colorKey = colorKeyForBoxIndex(idx);
-            box.style.setProperty('--box-inner', `var(--inner-${colorKey})`);
-            box.style.setProperty('--box-cell', `var(--cell-${colorKey})`);
-        });
-    }
-
-    function applyMenuColorBox(colorKey) {
-        if (!menuColorCycle) return;
-        const outer = getComputedStyle(document.documentElement).getPropertyValue(`--cell-${colorKey}`) || '';
-        const inner = getComputedStyle(document.documentElement).getPropertyValue(`--inner-${colorKey}`) || '';
-        // Use element-scoped CSS variables for consistency
-        menuColorCycle.style.setProperty('--menu-outer-color', outer.trim());
-        menuColorCycle.style.setProperty('--menu-inner-color', inner.trim());
-    }
-
     // No global dynamic style needed; element-scoped CSS vars control colors
-
-    // Reflect the currently chosen color in the page background when the menu is visible
-    function setMenuBodyColor() {
-        // Only adjust body color while in the menu, so gameplay updates remain in control during a match
-        if (!menu || menu.style.display === 'none') return;
-        const colorKey = playerColors[startingColorIndex] || 'green';
-        document.body.className = colorKey;
-    }
-
-    function cycleStartingColor() {
-        startingColorIndex = (startingColorIndex + 1) % playerColors.length;
-        applyMenuColorBox(playerColors[startingColorIndex]);
-        setMenuBodyColor();
-    }
-
-    // Compute the selected game colors based on the cycler start and slider count
-    function computeSelectedColors(count) {
-        const n = playerColors.length;
-        const c = Math.max(1, Math.min(count, n));
-        const arr = [];
-        for (let i = 0; i < c; i++) arr.push(playerColors[(startingColorIndex + i) % n]);
-        return arr;
-    }
 
     // Initialize and bind
     applyMenuColorBox(playerColors[startingColorIndex]);
@@ -557,6 +277,12 @@ document.addEventListener('DOMContentLoaded', () => {
             window.history.replaceState(null, '', newUrl);
         }
     }
+
+    // Handle browser navigation to toggle between menu and game instead of leaving the app
+    window.addEventListener('popstate', applyStateFromUrl);
+
+    // Make the visual box slider draggable like a real slider
+    let isDragging = false;
 
     playerBoxSlider.addEventListener('pointerdown', (e) => {
         // Ignore pointer events that originate on the color cycler
@@ -665,7 +391,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 //#endregion
 
-    // Sync UI with current URL (called on back/forward navigation)
+
+//#region Menu Functions
+    /**
+     * Sync menu/game UI from current URL state (back/forward navigation handler).
+     * @returns {void}
+     */
     function applyStateFromUrl() {
         const params = new URLSearchParams(window.location.search);
         const hasPS = params.has('players') || params.has('size');
@@ -689,12 +420,352 @@ document.addEventListener('DOMContentLoaded', () => {
         gameColors = computeSelectedColors(p);
         recreateGrid(Math.max(3, s), p);
     }
+    /**
+     * Whether the slider is currently locked due to running animations.
+     * @returns {boolean}
+     */
+    function isSliderLocked() { return sliderAnimLocks > 0; }
 
-    // Handle browser navigation to toggle between menu and game instead of leaving the app
-    window.addEventListener('popstate', applyStateFromUrl);
+    /**
+     * Enable/disable interactions on the color cycler while slider animates.
+     * @param {boolean} disabled - true to disable the cycler temporarily.
+     * @returns {void}
+     */
+    function updateCyclerDisabled(disabled) {
+        if (!menuColorCycle) return;
+        if (disabled) {
+            menuColorCycle.setAttribute('aria-disabled', 'true');
+            menuColorCycle.style.pointerEvents = 'none';
+            menuColorCycle.style.cursor = 'not-allowed';
+        } else {
+            menuColorCycle.removeAttribute('aria-disabled');
+            menuColorCycle.style.pointerEvents = '';
+            menuColorCycle.style.cursor = '';
+        }
+    }
+    /**
+     * Acquire a temporary animation lock for the slider and auto-release later.
+     * @param {number} durationMs - expected animation duration in ms.
+     * @returns {() => void} call to release early/explicitly.
+     */
+    function beginSliderAnimation(durationMs) {
+        sliderAnimLocks++;
+        updateCyclerDisabled(true);
+        let released = false;
+        const release = () => {
+            if (released) return;
+            released = true;
+            sliderAnimLocks = Math.max(0, sliderAnimLocks - 1);
+            if (sliderAnimLocks === 0) updateCyclerDisabled(false);
+        };
+        if (durationMs && durationMs > 0) setTimeout(release, durationMs + 32);
+        return release;
+    }
 
+    /**
+     * Pick a random entry from a weighted list of tips.
+     * @param {Array<{text:string, weight?:number, html?:boolean}>} list - candidate tips.
+     * @returns {{text:string, weight?:number, html?:boolean}} chosen tip.
+     */
+    function pickWeightedTip(list) {
+        let total = 0;
+        for (const t of list) total += (typeof t.weight === 'number' ? t.weight : 1);
+        let roll = Math.random() * total;
+        for (const t of list) {
+            roll -= (typeof t.weight === 'number' ? t.weight : 1);
+            if (roll <= 0) return t;
+        }
+        return list[list.length - 1];
+    }
 
-//#region Menu Functions
+    /**
+     * Update the menu hint with a randomly picked weighted tip.
+     * @returns {void}
+     */
+    function updateRandomTip() {
+        if (!menuHint) return;
+        const tip = pickWeightedTip(tips);
+        if (tip && tip.html) menuHint.innerHTML = tip.text; else menuHint.textContent = tip ? tip.text : '';
+    }
+
+    // --- FLIP helpers for player slider boxes ---
+    /**
+     * Measure bounding client rects for a list of elements.
+     * @param {Element[]} els - elements to measure.
+     * @returns {DOMRect[]} list of rects.
+     */
+    function measureRects(els) {
+        return els.map(el => el.getBoundingClientRect());
+    }
+
+    /**
+     * Get computed background-color strings for elements.
+     * @param {Element[]} els - elements to inspect.
+     * @returns {string[]} CSS color strings.
+     */
+    function measureBackgroundColors(els) {
+        return els.map(el => getComputedStyle(el).backgroundColor);
+    }
+
+    /**
+     * Compute and cache the inactive/active box-shadow styles used by slider boxes.
+     * @returns {{inactive:string, active:string}} cached shadow values.
+     */
+    function getSliderShadows() {
+        if (sliderShadowCache) return sliderShadowCache;
+        try {
+            const probeContainer = document.createElement('div');
+            probeContainer.className = 'player-box-slider';
+            Object.assign(probeContainer.style, {
+                position: 'fixed',
+                left: '-10000px',
+                top: '0',
+                width: '0',
+                height: '0',
+                overflow: 'hidden'
+            });
+            const probe = document.createElement('div');
+            probe.className = 'box';
+            probe.style.width = '40px';
+            probe.style.height = '40px';
+            probeContainer.appendChild(probe);
+            document.body.appendChild(probeContainer);
+
+            const csInactive = getComputedStyle(probe).boxShadow;
+            probe.classList.add('active');
+            const csActive = getComputedStyle(probe).boxShadow;
+
+            document.body.removeChild(probeContainer);
+            sliderShadowCache = { inactive: csInactive, active: csActive };
+            return sliderShadowCache;
+        } catch (e) { void e;
+            sliderShadowCache = { inactive: '0 4px 10px rgba(0,0,0,0.12)', active: '0 8px 20px rgba(0,0,0,0.18)' };
+            return sliderShadowCache;
+        }
+    }
+
+    /**
+     * Infer the color key of a slider box from its inline CSS vars.
+     * @param {HTMLElement} box - slider box element.
+     * @returns {string|null} color key like 'green' or null on failure.
+     */
+    function extractColorKeyFromBox(box) {
+        const innerVar = box.style.getPropertyValue('--box-inner');
+        const cellVar = box.style.getPropertyValue('--box-cell');
+        const from = innerVar || cellVar || '';
+        const mInner = /--inner-([a-z]+)/i.exec(from);
+        if (mInner && mInner[1]) return mInner[1].toLowerCase();
+        const mCell = /--cell-([a-z]+)/i.exec(from);
+        if (mCell && mCell[1]) return mCell[1].toLowerCase();
+        return null;
+    }
+
+    /**
+     * Perform a FLIP-like preview animation shifting boxes left, then snap and run mutateFn.
+     * @param {() => void} mutateFn - called after animation to apply final state.
+     * @returns {void}
+     */
+    function previewShiftLeftThenSnap(mutateFn) {
+        const container = playerBoxSlider;
+        if (!container) { mutateFn && mutateFn(); return; }
+        const els = Array.from(container.querySelectorAll('.box'));
+        if (els.length === 0) { mutateFn && mutateFn(); return; }
+
+        const releaseLock = beginSliderAnimation(delayAnimation);
+
+        const rects = measureRects(els);
+        const colors = measureBackgroundColors(els);
+        const animations = [];
+
+        for (let i = 0; i < els.length; i++) {
+            const el = els[i];
+            try { el.getAnimations().forEach(a => a.cancel()); } catch (e) { /* ignore */ void e; }
+            const hasActive = el.classList.contains('active');
+            const baseline = hasActive ? ' translateY(-18%) scale(1.06)' : '';
+            const baseTransform = baseline ? baseline : 'none';
+
+            if (i === 0) {
+                const outBase = delayAnimation * 0.4;
+                const outDur = outBase * 0.5;
+                const inDur = delayAnimation - outDur;
+                const fadeOut = el.animate(
+                    [ { transform: baseTransform, opacity: 1 }, { transform: baseTransform, opacity: 0 } ],
+                    { duration: outDur, easing: 'linear', fill: 'forwards' }
+                );
+
+                const n = els.length;
+                const src0 = rects[0];
+                const dstR = rects[n - 1];
+                const srcCx = src0.left + src0.width / 2;
+                const srcCy = src0.top + src0.height / 2;
+                const rightCx = dstR.left + dstR.width / 2;
+                const rightCy = dstR.top + dstR.height / 2;
+                const startDx = (rightCx + dstR.width) - srcCx;
+                const startDy = rightCy - srcCy;
+                const endDx = rightCx - srcCx;
+                const endDy = rightCy - srcCy;
+                const sx = dstR.width / (src0.width || 1);
+                const sy = dstR.height / (src0.height || 1);
+
+                const slideIn = el.animate(
+                    [
+                        { transform: `translate(${startDx}px, ${startDy}px) scale(${sx}, ${sy})${baseline}`, opacity: 0 },
+                        { transform: `translate(${endDx}px, ${endDy}px) scale(${sx}, ${sy})${baseline}`, opacity: 1 }
+                    ],
+                    { duration: inDur, delay: outDur, easing: 'cubic-bezier(0.05, 0.5, 0.5, 1)', fill: 'forwards' }
+                );
+                animations.push(fadeOut, slideIn);
+                continue;
+            }
+
+            const src = rects[i];
+            const dst = rects[i - 1];
+            const srcCx = src.left + src.width / 2;
+            const srcCy = src.top + src.height / 2;
+            const dstCx = dst.left + dst.width / 2;
+            const dstCy = dst.top + dst.height / 2;
+            const dx = dstCx - srcCx;
+            const dy = dstCy - srcCy;
+            const sx = dst.width / (src.width || 1);
+            const sy = dst.height / (src.height || 1);
+
+            const anim = el.animate(
+                [
+                    { transform: baseTransform },
+                    { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})${baseline}` }
+                ],
+                { duration: delayAnimation, easing: 'cubic-bezier(0.5, 1, 0.75, 1)', fill: 'forwards' }
+            );
+            animations.push(anim);
+        }
+
+        const n = els.length;
+        const rootStyle = getComputedStyle(document.documentElement);
+        for (let i = 0; i < n; i++) {
+            const el = els[i];
+            const fromColor = colors[i];
+            const leftIdx = (i - 1 + n) % n;
+            const leftIsActive = els[leftIdx].classList.contains('active');
+            const key = extractColorKeyFromBox(el);
+            if (!key) continue;
+            const varName = leftIsActive ? `--inner-${key}` : `--cell-${key}`;
+            const toColor = rootStyle.getPropertyValue(varName).trim();
+            if (!fromColor || !toColor || fromColor === toColor) continue;
+            try {
+                el.animate(
+                    [ { backgroundColor: fromColor }, { backgroundColor: toColor } ],
+                    { duration: delayAnimation, easing: 'ease', fill: 'none' }
+                );
+            } catch (e) { /* ignore */ void e; }
+        }
+
+        const shadows = getSliderShadows();
+        for (let i = 0; i < n; i++) {
+            const el = els[i];
+            const fromShadow = getComputedStyle(el).boxShadow;
+            const leftIdx = (i - 1 + n) % n;
+            const leftIsActive = els[leftIdx].classList.contains('active');
+            const toShadow = leftIsActive ? shadows.active : shadows.inactive;
+            if (!fromShadow || !toShadow || fromShadow === toShadow) continue;
+            try {
+                el.animate(
+                    [ { boxShadow: fromShadow }, { boxShadow: toShadow } ],
+                    { duration: delayAnimation, easing: 'ease', fill: 'none' }
+                );
+            } catch (e) { /* ignore */ void e; }
+        }
+
+        const done = animations.length ? Promise.allSettled(animations.map(a => a.finished)) : Promise.resolve();
+        done.finally(() => {
+            for (const el of els) {
+                try { el.getAnimations().forEach(a => a.cancel()); } catch (e) { /* ignore */ void e; }
+            }
+            mutateFn && mutateFn();
+            releaseLock();
+        });
+    }
+
+    // Helpers tied to player color selection and UI reflection
+    /**
+     * Get color key for a box index relative to current startingColorIndex rotation.
+     * @param {number} idx - box position index.
+     * @returns {string} color key.
+     */
+    function colorKeyForBoxIndex(idx) {
+        const n = playerColors.length;
+        return playerColors[(startingColorIndex + (idx % n) + n) % n];
+    }
+
+    /**
+     * Compute the starting player index based on the current cycler color in the active palette.
+     * @returns {number} index into activeColors().
+     */
+    function computeStartPlayerIndex() {
+        const ac = activeColors();
+        const selectedKey = playerColors[startingColorIndex];
+        const idx = ac.indexOf(selectedKey);
+        return idx >= 0 ? idx : 0;
+    }
+
+    /**
+     * Apply current rotated color mapping to all player boxes via CSS vars.
+     * @returns {void}
+     */
+    function updatePlayerBoxColors() {
+        if (!playerBoxSlider) return;
+        const boxes = Array.from(playerBoxSlider.querySelectorAll('.box'));
+        boxes.forEach((box, idx) => {
+            const colorKey = colorKeyForBoxIndex(idx);
+            box.style.setProperty('--box-inner', `var(--inner-${colorKey})`);
+            box.style.setProperty('--box-cell', `var(--cell-${colorKey})`);
+        });
+    }
+
+    /**
+     * Update the color cycler UI element to reflect the provided color key.
+     * @param {string} colorKey - selected base color.
+     * @returns {void}
+     */
+    function applyMenuColorBox(colorKey) {
+        if (!menuColorCycle) return;
+        const outer = getComputedStyle(document.documentElement).getPropertyValue(`--cell-${colorKey}`) || '';
+        const inner = getComputedStyle(document.documentElement).getPropertyValue(`--inner-${colorKey}`) || '';
+        menuColorCycle.style.setProperty('--menu-outer-color', outer.trim());
+        menuColorCycle.style.setProperty('--menu-inner-color', inner.trim());
+    }
+
+    /**
+     * While the menu is open, tint the page background to the current cycler color.
+     * @returns {void}
+     */
+    function setMenuBodyColor() {
+        if (!menu || menu.style.display === 'none') return;
+        const colorKey = playerColors[startingColorIndex] || 'green';
+        document.body.className = colorKey;
+    }
+
+    /**
+     * Advance the starting color cycler by one and update dependent UI.
+     * @returns {void}
+     */
+    function cycleStartingColor() {
+        startingColorIndex = (startingColorIndex + 1) % playerColors.length;
+        applyMenuColorBox(playerColors[startingColorIndex]);
+        setMenuBodyColor();
+    }
+
+    /**
+     * Compute the active game palette starting from cycler color, for given player count.
+     * @param {number} count - number of players/colors to include.
+     * @returns {string[]} ordered color keys.
+     */
+    function computeSelectedColors(count) {
+        const n = playerColors.length;
+        const c = Math.max(1, Math.min(count, n));
+        const arr = [];
+        for (let i = 0; i < c; i++) arr.push(playerColors[(startingColorIndex + i) % n]);
+        return arr;
+    }
     /**
      * Convert hex color string (#rgb or #rrggbb) to RGB components.
      * @param {string} hex - color in hex form.
@@ -707,7 +778,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
     }
 
-    // cell color: pastel mix toward white (opaque), use 50% white by default
+    
     /**
      * Mix a hex color with white to produce a pastel RGB color.
      * @param {string} hex - base hex color.
@@ -721,7 +792,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
     }
 
-    // Build boxes for counts 1..maxPlayers (we'll enforce a minimum selection of 2)
     /**
      * Build the visual player "box slider" (1..maxPlayers) and attach handlers.
      * @returns {void} updates DOM under #playerBoxSlider.
@@ -823,8 +893,6 @@ document.addEventListener('DOMContentLoaded', () => {
         menuGridSize.value = String(val);
     }
 
-    // Make the visual box slider draggable like a real slider
-    let isDragging = false;
     /**
      * Map a pointer x-position to the nearest player box and update selection.
      * @param {number} clientX - pointer x-coordinate in viewport space.
@@ -851,7 +919,6 @@ document.addEventListener('DOMContentLoaded', () => {
         onMenuPlayerCountChanged(mapped);
     }
 
-    // Centralized handler for menu player count changes
     /**
      * Central handler when menu player count changes; syncs size, UI, and grid.
      * @param {number} newCount - selected player count.
@@ -887,6 +954,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let menuShownAfterWin = false; // guard to avoid repeated menu reopen scheduling
     let explosionTimerId = null;   // track explosion timeout for cancellation
 
+    /**
+     * Stop any scheduled explosion processing loop and clear processing flags.
+     * @returns {void}
+     */
     function stopExplosionLoop() {
         if (explosionTimerId !== null) {
             try { clearTimeout(explosionTimerId); } catch (e) { /* ignore */ void e; }
@@ -976,9 +1047,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * Handle a user/AI click to place or increment
-     * Params: row (number), col (number) – cell coordinates.
-     * Returns: void – mutates grid state and schedules explosion processing.
+     * Handle a user/AI click to place or increment a cell and schedule explosions.
+     * @param {number} row - cell row.
+     * @param {number} col - cell column.
+     * @returns {void}
      */
     function handleClick(row, col) {
         if (isProcessing || gameWon) return;
@@ -1225,11 +1297,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * Create/update positioned value-circles within inner-circle to represent cell value.
-     * @param {Element} innerCircle - the inner-circle element.
-     * @param {number} value - cell value 0..maxCellValue.
-     * @param {boolean} causedByExplosion - for animation.
-     * @returns {void} animates and positions child dots.
+     * Update or create inner value-circle elements based on the cell's value.
+     * Uses a single RAF to coordinate transitions and removes surplus dots.
+     * @param {Element} innerCircle - inner-circle element to populate.
+     * @param {number} value - number of dots to display (0..maxCellValue).
+     * @param {boolean} causedByExplosion - whether triggered by explosion.
+     * @returns {void}
      */
     function updateValueCircles(innerCircle, value, causedByExplosion) {
         if (performanceMode) {
@@ -1426,8 +1499,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * Check if only one player still owns cells; if so, end game and reopen menu after delay.
-     * @returns {void} sets gameWon and then reopens the menu via URL param.
+     * Determine if the game is won (only one player with any cells) and open menu after a delay.
+     * @returns {void}
      */
     function checkWinCondition() {
         const playerCells = Array(playerCount).fill(0);
@@ -1466,6 +1539,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 //#endregion
 
+
 //#region Training / AI helpers (dataRespect + debug)
     // AI debug mode
     const aiDebug = true;
@@ -1476,7 +1550,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const maxExplosionsToAssumeLoop = gridSize * 3;
 
 
-    // Called after each turn change to possibly run AI moves
     /**
      * In train mode, trigger AI move if it's currently an AI player's turn.
      * @returns {void} may schedule aiMakeMoveFor with a short delay.
@@ -1660,7 +1733,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return candidates;
     }
 
-    // Coalition helper: union of all opponents' legal moves, each tagged with its real owner
+    /**
+     * Coalition helper: union of all non-focus players' legal moves, each tagged with owner.
+     * @param {Array<Array<{value:number,player:string}>>} simGrid - simulated grid.
+     * @param {boolean[]} simInitialPlacements - initial placement flags per player.
+     * @param {number} focusPlayerIndex - player index for whom coalition is formed.
+     * @returns {Array<{r:number,c:number,isInitial:boolean,srcVal:number,sortKey:number,owner:number}>} candidates.
+     */
     function generateCoalitionCandidatesOnSim(simGrid, simInitialPlacements, focusPlayerIndex) {
         const out = [];
         for (let idx = 0; idx < playerCount; idx++) {

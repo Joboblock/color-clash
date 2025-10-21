@@ -462,6 +462,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return playerColors[(startingColorIndex + (idx % n) + n) % n];
     }
 
+    // Determine which player index should start, based on the currently selected cycler color
+    function computeStartPlayerIndex() {
+        const ac = activeColors();
+        const selectedKey = playerColors[startingColorIndex];
+        const idx = ac.indexOf(selectedKey);
+        return idx >= 0 ? idx : 0;
+    }
+
     // Apply current color scheme to all slider boxes so that the first box matches the cycler
     function updatePlayerBoxColors() {
         if (!playerBoxSlider) return;
@@ -871,7 +879,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let grid = [];
     let isProcessing = false;
     let performanceMode = false;
-    let currentPlayer = Math.floor(Math.random() * playerCount);
+    // Start with the first selected color (index 0) instead of a random player
+    let currentPlayer = computeStartPlayerIndex();
     let initialPlacements = Array(playerCount).fill(false);
     let gameWon = false;
     let invalidInitialPositions = [];
@@ -922,7 +931,8 @@ document.addEventListener('DOMContentLoaded', () => {
     stopExplosionLoop();
         isProcessing = false;
         performanceMode = false;
-        currentPlayer = Math.floor(Math.random() * playerCount);
+    // When creating a new level, start with the selected cycler color within the active palette
+    currentPlayer = computeStartPlayerIndex();
 
         // recompute invalid initial positions for new size
         invalidInitialPositions = computeInvalidInitialPositions(gridSize);
@@ -957,7 +967,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (trainMode) {
             // Ensure humanPlayer index is valid for current playerCount
             // (humanPlayer is 0 by design; defensive check)
-            // DEBUG: make ai first player
             currentPlayer = Math.min(humanPlayer, playerCount - 1);
         document.body.className = activeColors()[currentPlayer];
             updateGrid();

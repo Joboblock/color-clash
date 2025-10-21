@@ -17,21 +17,26 @@
             <div class="game-header-panel">Color Clash</div>
 
             <div class="menu-panel">
-                <h1 class="menu-title">Settings</h1>
 
                 <div class="control-row">
-                    <label for="playerBoxSlider">Players</label>
                     <div class="player-grid-wrapper">
+                        <div id="menuColorCycle" class="menu-color-box" role="button" aria-label="Cycle starting color" title="starting color"></div>
+                        <input id="playerName" class="player-name-input" type="text" placeholder="Name (3–16)" aria-label="Player name" maxlength="16" inputmode="latin" autocapitalize="none" autocomplete="off" spellcheck="false" />
                         <div id="playerBoxSlider" class="player-box-slider" role="slider"
                             aria-label="player count" aria-valuemin="2" aria-valuemax="8" aria-valuenow="2"></div>
-                        <div id="menuColorCycle" class="menu-color-box" role="button" aria-label="Cycle starting color" title="starting color"></div>
+
+                        <!-- Grid Size tile inside the same grid (row 3, cols 1-2) -->
+                        <div class="player-size-tile" aria-label="Grid size">
+                            <div class="player-size-label">Grid Size</div>
+                            <div class="size-stepper">
+                                <button id="gridDec" class="size-btn" type="button" aria-label="Decrease grid size">−</button>
+                                <input id="menuGridSize" class="size-value" type="number" inputmode="numeric" pattern="[0-9]*" min="3" max="16" step="1" value="5" aria-label="Grid size" autocorrect="off" autocapitalize="off" autocomplete="off" spellcheck="false" />
+                                <button id="gridInc" class="size-btn" type="button" aria-label="Increase grid size">+</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <div class="control-row grid-size-row">
-                    <label for="menuGridSize">Grid Size</label>
-                    <input id="menuGridSize" type="number" min="0" value="5">
-                </div>
 
                 <div class="menu-actions">
                     <button id="startBtn" class="btn">Start</button>

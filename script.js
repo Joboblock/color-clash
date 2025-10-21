@@ -172,6 +172,57 @@ document.addEventListener('DOMContentLoaded', () => {
     const startBtn = document.getElementById('startBtn');
     const trainBtn = document.getElementById('trainBtn');
     const menuColorCycle = document.getElementById('menuColorCycle');
+    const playerNameInput = document.getElementById('playerName');
+    const gridDecBtn = document.getElementById('gridDec');
+    const gridIncBtn = document.getElementById('gridInc');
+
+    // Sanitize player name: replace spaces with underscores, remove non-alphanumerics, limit to 16
+    if (playerNameInput) {
+    try { playerNameInput.maxLength = 16; } catch { /* ignore */ }
+        const sanitizeName = (raw) => {
+            if (typeof raw !== 'string') return '';
+            let s = raw.replace(/\s+/g, '_');
+            s = s.replace(/[^A-Za-z0-9_]/g, '');
+            if (s.length > 16) s = s.slice(0, 16);
+            return s;
+        };
+        const reflectValidity = (val) => {
+            const tooShort = val.length > 0 && val.length < 3;
+            if (tooShort) {
+                playerNameInput.classList.add('invalid');
+                playerNameInput.setAttribute('aria-invalid', 'true');
+                playerNameInput.title = 'Enter 3–16 letters or numbers (spaces become _)';
+            } else {
+                playerNameInput.classList.remove('invalid');
+                playerNameInput.removeAttribute('aria-invalid');
+                playerNameInput.removeAttribute('title');
+            }
+        };
+        const handleSanitize = (e) => {
+            const v = e.target.value;
+            const cleaned = sanitizeName(v);
+            if (v !== cleaned) {
+                const pos = Math.min(cleaned.length, 16);
+                e.target.value = cleaned;
+                // best-effort caret restore to end
+                try { e.target.setSelectionRange(pos, pos); } catch { /* ignore */ }
+            }
+            reflectValidity(e.target.value);
+        };
+        playerNameInput.addEventListener('input', handleSanitize);
+        playerNameInput.addEventListener('blur', handleSanitize);
+        playerNameInput.addEventListener('change', handleSanitize);
+        // Pressing Enter should close (blur) the text field
+        playerNameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                playerNameInput.blur();
+            }
+        });
+        // Initialize from any prefilled value
+        playerNameInput.value = sanitizeName(playerNameInput.value || '');
+        reflectValidity(playerNameInput.value);
+    }
 
     // set dynamic bounds
     const maxPlayers = playerColors.length;
@@ -323,13 +374,73 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Allow only digits in the grid size input
+    const allowedControlKeys = new Set(['Backspace','Delete','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Tab','Home','End']);
+    menuGridSize.addEventListener('keydown', (e) => {
+        // permit Enter (handled above), digits, and control/navigation keys
+        if (e.key === 'Enter' || allowedControlKeys.has(e.key)) return;
+        // Block non-digit characters commonly allowed in number inputs
+        if (e.key === '.' || e.key === ',' || e.key === 'e' || e.key === 'E' || e.key === '+' || e.key === '-' || e.key === ' ') {
+            e.preventDefault();
+            return;
+        }
+        // If it's a single character that's not a digit, block it
+        if (e.key.length === 1 && !/\d/.test(e.key)) {
+            e.preventDefault();
+        }
+    });
+    // Prevent non-digit insertion at OS/IME level (e.g., iOS double-space -> '.')
+    menuGridSize.addEventListener('beforeinput', (e) => {
+        // Inserted text must be digits only; block others
+        if (e.inputType === 'insertText') {
+            const data = e.data || '';
+            if (/\D/.test(data)) {
+                e.preventDefault();
+            }
+        } else if (e.inputType === 'insertFromPaste') {
+            // Sanitize pasted text before it hits the field
+            const pasted = (e.clipboardData && e.clipboardData.getData('text')) || '';
+            const digits = pasted.replace(/\D+/g, '');
+            if (digits !== pasted) {
+                e.preventDefault();
+                const start = menuGridSize.selectionStart ?? menuGridSize.value.length;
+                const end = menuGridSize.selectionEnd ?? start;
+                menuGridSize.setRangeText(digits, start, end, 'end');
+                menuGridSize.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        }
+    });
+    // Sanitize pasted/IME input to digits only
+    const sanitizeDigitsOnly = () => {
+        const raw = menuGridSize.value || '';
+        const digits = raw.replace(/\D+/g, '');
+        if (digits !== raw) menuGridSize.value = digits;
+    };
+    menuGridSize.addEventListener('input', sanitizeDigitsOnly);
+    menuGridSize.addEventListener('paste', () => {
+        // Delay to allow paste, then sanitize
+        setTimeout(sanitizeDigitsOnly, 0);
+    });
+
+    // Stepper buttons for grid size
+    function adjustGridSize(delta) {
+        let v = parseInt(menuGridSize.value, 10);
+        if (!Number.isInteger(v)) v = 3 + menuPlayerCount;
+        v = Math.max(3, Math.min(16, v + delta));
+        menuGridSize.value = String(v);
+        validateGridSize();
+        const s = Math.max(3, parseInt(menuGridSize.value, 10) || (3 + menuPlayerCount));
+        if (s !== gridSize) recreateGrid(s, playerCount);
+    }
+    if (gridDecBtn) gridDecBtn.addEventListener('click', () => adjustGridSize(-1));
+    if (gridIncBtn) gridIncBtn.addEventListener('click', () => adjustGridSize(1));
+
     startBtn.addEventListener('click', async () => {
         const p = clampPlayers(menuPlayerCount);
-        let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
-        const minAllowed = 3 + p;
-        if (s < minAllowed) s = minAllowed;
-        const maxSz = parseInt(menuGridSize.max);
-        if (s > maxSz) s = maxSz;
+        // Trust input handler: normalize via validateGridSize then use value directly
+        validateGridSize();
+        let s = parseInt(menuGridSize.value, 10);
+        if (!Number.isInteger(s)) s = 3;
 
         // Enter fullscreen on mobile from the same user gesture
         await requestFullscreenIfMobile();
@@ -361,11 +472,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         trainBtn.addEventListener('click', async () => {
             const p = clampPlayers(menuPlayerCount);
-            let s = Math.max(3, Math.floor(menuGridSize.value) || 3);
-            const minAllowed = 3 + p;
-            if (s < minAllowed) s = minAllowed;
-            const maxSz = parseInt(menuGridSize.max);
-            if (s > maxSz) s = maxSz;
+            // Trust input handler: normalize via validateGridSize then use value directly
+            validateGridSize();
+            let s = parseInt(menuGridSize.value, 10);
+            if (!Number.isInteger(s)) s = 3;
 
             // Enter fullscreen on mobile from the same user gesture
             await requestFullscreenIfMobile();

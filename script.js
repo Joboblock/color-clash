@@ -266,7 +266,9 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
     
     // Cache for computed shadows used by the slider animation
-    let sliderShadowCache = null; // { inactive: string, active: string }    
+    let sliderShadowCache = null; // { inactive: string, active: string }
+    // Track the currently running slider preview animation to allow instant finalize on re-trigger
+    let currentSliderPreview = null; // { finalizeNow: () => void, finished: boolean }
 
     // Ensure CSS variables for colors are set on :root BEFORE building boxes
     Object.entries(innerCircleColors).forEach(([key, hex]) => {
@@ -307,18 +309,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (menuColorCycle) {
         menuColorCycle.tabIndex = 0; // focusable for accessibility
         menuColorCycle.addEventListener('click', () => {
-            if (isSliderLocked()) return;
-            // First preview shift-left, then snap and apply color rotation
+            // Advance color and animate slider shift; if a previous animation is in-flight,
+            // it will be finalized and a fresh animation will start.
             cycleStartingColor();
-            previewShiftLeftThenSnap(updatePlayerBoxColors);
+            const idx = startingColorIndex; // capture the intended mapping index for this animation
+            previewShiftLeftThenSnap(() => applyPlayerBoxColorsForIndex(idx));
             updateAIPreview();
         });
         menuColorCycle.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                if (isSliderLocked()) return;
                 cycleStartingColor();
-                previewShiftLeftThenSnap(updatePlayerBoxColors);
+                const idx = startingColorIndex;
+                previewShiftLeftThenSnap(() => applyPlayerBoxColorsForIndex(idx));
                 updateAIPreview();
             }
         });
@@ -507,29 +510,7 @@ document.addEventListener('DOMContentLoaded', () => {
         gameColors = computeSelectedColors(p);
         recreateGrid(Math.max(3, s), p);
     }
-    /**
-     * Whether the slider is currently locked due to running animations.
-     * @returns {boolean}
-     */
-    function isSliderLocked() { return sliderAnimLocks > 0; }
-
-    /**
-     * Enable/disable interactions on the color cycler while slider animates.
-     * @param {boolean} disabled - true to disable the cycler temporarily.
-     * @returns {void}
-     */
-    function updateCyclerDisabled(disabled) {
-        if (!menuColorCycle) return;
-        if (disabled) {
-            menuColorCycle.setAttribute('aria-disabled', 'true');
-            menuColorCycle.style.pointerEvents = 'none';
-            menuColorCycle.style.cursor = 'not-allowed';
-        } else {
-            menuColorCycle.removeAttribute('aria-disabled');
-            menuColorCycle.style.pointerEvents = '';
-            menuColorCycle.style.cursor = '';
-        }
-    }
+    // Note: color cycler remains active during slider animations; no lock/disable needed.
     /**
      * Acquire a temporary animation lock for the slider and auto-release later.
      * @param {number} durationMs - expected animation duration in ms.
@@ -537,13 +518,11 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function beginSliderAnimation(durationMs) {
         sliderAnimLocks++;
-        updateCyclerDisabled(true);
         let released = false;
         const release = () => {
             if (released) return;
             released = true;
             sliderAnimLocks = Math.max(0, sliderAnimLocks - 1);
-            if (sliderAnimLocks === 0) updateCyclerDisabled(false);
         };
         if (durationMs && durationMs > 0) setTimeout(release, durationMs + 32);
         return release;
@@ -653,10 +632,16 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void}
      */
     function previewShiftLeftThenSnap(mutateFn) {
-    const container = sliderCells || playerBoxSlider;
-        if (!container) { mutateFn && mutateFn(); return; }
-    const els = Array.from(container.querySelectorAll('.box'));
-        if (els.length === 0) { mutateFn && mutateFn(); return; }
+        // If a previous preview animation is running, snap it to end-state immediately
+        // then proceed to start a new animation for this trigger.
+        if (currentSliderPreview && typeof currentSliderPreview.finalizeNow === 'function' && !currentSliderPreview.finished) {
+            try { currentSliderPreview.finalizeNow(); } catch { /* ignore */ }
+        }
+
+        const container = sliderCells || playerBoxSlider;
+    if (!container) { mutateFn && mutateFn(); return; }
+        const els = Array.from(container.querySelectorAll('.box'));
+    if (els.length === 0) { mutateFn && mutateFn(); return; }
 
         const releaseLock = beginSliderAnimation(delayAnimation);
 
@@ -762,26 +747,39 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (e) { /* ignore */ void e; }
         }
 
+        const instance = { finished: false };
+
+        // Expose a finalize function to instantly finish the current animation cycle
+        instance.finalizeNow = () => {
+            if (instance.finished) return;
+            // Instantly clear any running animations and their transforms
+            for (const el of els) {
+                try {
+                    el.getAnimations().forEach(a => { try { a.cancel(); } catch { /* ignore */ } });
+                } catch { /* ignore */ }
+            }
+            try { mutateFn && mutateFn(); } catch { /* ignore */ }
+            try { releaseLock && releaseLock(); } catch { /* ignore */ }
+            instance.finished = true;
+            if (currentSliderPreview === instance) currentSliderPreview = null;
+        };
+
+        currentSliderPreview = instance;
+
         const done = animations.length ? Promise.allSettled(animations.map(a => a.finished)) : Promise.resolve();
         done.finally(() => {
+            if (instance.finished) return; // already finalized by a newer trigger
             for (const el of els) {
                 try { el.getAnimations().forEach(a => a.cancel()); } catch (e) { /* ignore */ void e; }
             }
             mutateFn && mutateFn();
             releaseLock();
+            instance.finished = true;
+            if (currentSliderPreview === instance) currentSliderPreview = null;
         });
     }
 
     // Helpers tied to player color selection and UI reflection
-    /**
-     * Get color key for a box index relative to current startingColorIndex rotation.
-     * @param {number} idx - box position index.
-     * @returns {string} color key.
-     */
-    function colorKeyForBoxIndex(idx) {
-        const n = playerColors.length;
-        return playerColors[(startingColorIndex + (idx % n) + n) % n];
-    }
 
     /**
      * Compute the starting player index based on the current cycler color in the active palette.
@@ -800,9 +798,20 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function updatePlayerBoxColors() {
         if (!playerBoxSlider) return;
-    const boxes = Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box'));
+        applyPlayerBoxColorsForIndex(startingColorIndex);
+    }
+
+    /**
+     * Apply box color CSS vars as if the rotation index were a specific value.
+     * @param {number} index - rotation index into playerColors used for mapping.
+     * @returns {void}
+     */
+    function applyPlayerBoxColorsForIndex(index) {
+        if (!playerBoxSlider) return;
+        const boxes = Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box'));
+        const n = playerColors.length;
         boxes.forEach((box, idx) => {
-            const colorKey = colorKeyForBoxIndex(idx);
+            const colorKey = playerColors[(index + (idx % n) + n) % n];
             box.style.setProperty('--box-inner', `var(--inner-${colorKey})`);
             box.style.setProperty('--box-cell', `var(--cell-${colorKey})`);
         });

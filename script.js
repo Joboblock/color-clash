@@ -48,7 +48,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Detect train mode via URL param
     const urlParams = new URLSearchParams(window.location.search);
-    const isTrainMode = urlParams.has('train');
+    // Train mode is enabled if any AI-related parameter is present in the URL
+    const isTrainMode = urlParams.has('ai_depth') || urlParams.has('ai_k');
 
     /**
      * Broad mobile detection using feature hints (coarse pointer, touch points, UA hints).
@@ -177,6 +178,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const playerNameInput = document.getElementById('playerName');
     const gridDecBtn = document.getElementById('gridDec');
     const gridIncBtn = document.getElementById('gridInc');
+    const aiPreviewCell = document.getElementById('aiPreviewCell');
+    // Initialize AI preview value from URL (?ai_depth=) if present, else 1; clamp to 1..5 for UI
+    let aiPreviewValue = 1;
+    {
+        const ad = parseInt(getQueryParam('ai_depth') || '', 10);
+        if (!Number.isNaN(ad) && ad >= 1) aiPreviewValue = Math.max(1, Math.min(5, ad));
+    }
 
     // Sanitize player name: replace spaces with underscores, remove non-alphanumerics, limit to 16
     if (playerNameInput) {
@@ -303,6 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // First preview shift-left, then snap and apply color rotation
             cycleStartingColor();
             previewShiftLeftThenSnap(updatePlayerBoxColors);
+            updateAIPreview();
         });
         menuColorCycle.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
@@ -310,6 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isSliderLocked()) return;
                 cycleStartingColor();
                 previewShiftLeftThenSnap(updatePlayerBoxColors);
+                updateAIPreview();
             }
         });
     }
@@ -324,6 +334,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         if (menu) menu.style.display = '';
         updateRandomTip();
+        // Reflect URL-provided ai_depth in the preview when opening menu
+        updateAIPreview();
         // Ensure the URL reflects menu state so back-button can navigate in-app
         if (!isMenu) {
             const params = new URLSearchParams(window.location.search);
@@ -431,15 +443,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // Enter fullscreen on mobile from the same user gesture
             await requestFullscreenIfMobile();
 
-            // Update URL without reloading (reflect train mode)
+            // Update URL without reloading (reflect AI settings)
             const params = new URLSearchParams(window.location.search);
             params.delete('menu');
             params.set('players', String(p));
             params.set('size', String(s));
-            params.set('train', 'true');
+            // Set AI strength parameter from the preview value (1..5)
+            params.set('ai_depth', String(aiPreviewValue));
             const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
             // push a new history entry so Back returns to the menu instead of previous/blank
-            window.history.pushState({ mode: 'train', players: p, size: s }, '', newUrl);
+            window.history.pushState({ mode: 'ai', players: p, size: s }, '', newUrl);
 
             // Set the active game palette from the UI selection
             gameColors = computeSelectedColors(p);
@@ -447,6 +460,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Hide menu and start train mode immediately
             if (menu) menu.style.display = 'none';
             trainMode = true;
+            // Apply the chosen AI depth immediately for this session
+            try { aiDepth = Math.max(1, parseInt(String(aiPreviewValue), 10)); } catch { /* ignore */ }
             recreateGrid(s, p);
         });
     }
@@ -467,6 +482,12 @@ document.addEventListener('DOMContentLoaded', () => {
             updateRandomTip();
             // When returning to the menu, reflect current chosen color on the background
             setMenuBodyColor();
+            // Sync AI preview to URL parameter when showing menu
+            const ad = parseInt(params.get('ai_depth') || '', 10);
+            if (!Number.isNaN(ad) && ad >= 1) {
+                aiPreviewValue = Math.max(1, Math.min(5, ad));
+                updateAIPreview();
+            }
             exitFullscreenIfPossible();
             return;
         }
@@ -474,9 +495,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const p = clampPlayers(parseInt(params.get('players') || '', 10) || 2);
         let s = parseInt(params.get('size') || '', 10);
         if (!Number.isInteger(s)) s = Math.max(3, 3 + p);
-        const isTrain = params.has('train');
-        if (menu) menu.style.display = 'none';
-        trainMode = isTrain;
+    if (menu) menu.style.display = 'none';
+    // Enable train mode if any AI-related parameter exists in the URL
+    trainMode = params.has('ai_depth') || params.has('ai_k');
+        // Update AI depth from URL if provided
+        const ad = parseInt(params.get('ai_depth') || '', 10);
+        if (!Number.isNaN(ad) && ad >= 1) {
+            try { aiDepth = Math.max(1, ad); } catch { /* ignore */ }
+        }
         // Derive the active game palette from current cycler selection and requested player count
         gameColors = computeSelectedColors(p);
         recreateGrid(Math.max(3, s), p);
@@ -796,6 +822,48 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
+     * Update the AI preview tile to show the next color after the current starting color.
+     * Includes inner-circle coloring and a single centered value dot.
+     * @returns {void}
+     */
+    function updateAIPreview() {
+        if (!aiPreviewCell) return;
+        const nextColor = playerColors[(startingColorIndex + 1) % playerColors.length];
+        // apply cell background color via class
+        aiPreviewCell.className = `cell ${nextColor}`;
+        // ensure inner-circle exists and colored
+        let inner = aiPreviewCell.querySelector('.inner-circle');
+        if (!inner) {
+            inner = document.createElement('div');
+            inner.className = 'inner-circle';
+            aiPreviewCell.appendChild(inner);
+        }
+        inner.className = `inner-circle ${nextColor}`;
+        // show current preview value (1..5)
+        try { updateValueCircles(inner, aiPreviewValue, false); } catch { /* ignore */ }
+    }
+
+    // Allow interacting with the preview cell to cycle its value 1→5 then wrap to 1
+    function onAIPreviewClick() {
+        aiPreviewValue = (aiPreviewValue % 5) + 1; // 1..5 loop
+        const inner = aiPreviewCell && aiPreviewCell.querySelector('.inner-circle');
+        if (inner) {
+            try { updateValueCircles(inner, aiPreviewValue, false); } catch { /* ignore */ }
+        }
+    }
+    if (aiPreviewCell) {
+        aiPreviewCell.setAttribute('role', 'button');
+        aiPreviewCell.tabIndex = 0;
+        aiPreviewCell.addEventListener('click', onAIPreviewClick);
+        aiPreviewCell.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onAIPreviewClick();
+            }
+        });
+    }
+
+    /**
      * While the menu is open, tint the page background to the current cycler color.
      * @returns {void}
      */
@@ -1030,6 +1098,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // create initial grid
     recreateGrid(gridSize, playerCount);
+    // Initialize AI preview after initial color application
+    updateAIPreview();
 //#endregion
 
 
@@ -1382,6 +1452,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const angleStep = 360 / Math.max(value, 1);
 
         const existingCircles = Array.from(innerCircle.querySelectorAll('.value-circle'));
+        // Cancel any pending removals from previous updates to avoid races
+        for (const c of existingCircles) {
+            if (c._removalTimer) {
+                try { clearTimeout(c._removalTimer); } catch { /* ignore */ }
+                c._removalTimer = null;
+            }
+        }
         const existingCount = existingCircles.length;
 
         if (causedByExplosion) {
@@ -1392,7 +1469,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Collect elements we created so we can set final state for all of them in one RAF
         const newElements = [];
         for (let i = 0; i < value; i++) {
-            const angle = angleStep * i + (value === 3 ? 30 : value === 4 ? 45 : 0);
+            // Rotate specific configurations for better aesthetics:
+            // 3 → +30°, 4 → +45°, 5 → +72° (one full step for a pentagon)
+            const angle = angleStep * i + (value === 3 ? 30 : value === 4 ? 45 : value === 5 ? 72 : 0);
             const x = radius * Math.cos((angle * Math.PI) / 180);
             const y = radius * Math.sin((angle * Math.PI) / 180);
 
@@ -1401,6 +1480,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (!isNew) {
                 valueCircle = existingCircles[i];
+                // If this circle was previously scheduled for removal, cancel it now
+                if (valueCircle._removalTimer) {
+                    try { clearTimeout(valueCircle._removalTimer); } catch { /* ignore */ }
+                    valueCircle._removalTimer = null;
+                }
                 // For existing elements, we update in the batch below (no double RAF per element)
                 newElements.push({ el: valueCircle, x, y });
             } else {
@@ -1419,7 +1503,12 @@ document.addEventListener('DOMContentLoaded', () => {
         for (let i = value; i < existingCount; i++) {
             const valueCircle = existingCircles[i];
             valueCircle.style.opacity = '0';
-            setTimeout(() => valueCircle.remove(), delayAnimation);
+            // Schedule removal but keep a handle so we can cancel if reused before timeout
+            const tid = setTimeout(() => {
+                try { valueCircle.remove(); } catch { /* ignore */ }
+                valueCircle._removalTimer = null;
+            }, delayAnimation);
+            valueCircle._removalTimer = tid;
         }
 
         // One RAF to trigger all transitions together
@@ -1603,7 +1692,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Configure dataRespect branching factor K via URL param ai_k, default 3
     const dataRespectK = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_k')) || 25);
     // number of plies (AI-perspective). Example: 3 (AI -> opp -> AI)
-    const aiDepth = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_depth')) || 4);
+    let aiDepth = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_depth')) || 4);
     const maxExplosionsToAssumeLoop = gridSize * 3;
 
 

@@ -225,7 +225,7 @@ body {
     font-weight: 800;
     font-size: clamp(0.8rem, 2.4vmin, 1rem);
     color: #222;
-    margin-bottom: 8px; /* increased from ~6 to 8 */
+    margin-bottom: var(--player-gap); /* scale with screen size */
     white-space: nowrap;      /* never wrap, shrink instead */
     max-width: 100%;
     overflow: hidden;         /* guard against overflow on ultra-small screens */
@@ -346,6 +346,63 @@ body {
     overflow: hidden; /* avoid pushing the cell if digits grow */
 }
 
+/* AI Strength preview tile: place at far right of row 3 */
+.player-grid-wrapper .ai-preview-tile {
+    grid-column: 8; /* rightmost column */
+    grid-row: 3;
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-template-rows: auto 1fr; /* header + single square */
+    align-items: start;
+}
+
+.player-grid-wrapper .ai-preview-tile .ai-preview-label {
+    grid-column: 1 / -1;
+    justify-self: start;
+    align-self: start;
+    font-weight: 800;
+    font-size: clamp(0.8rem, 2.4vmin, 1rem);
+    color: #222;
+    margin-bottom: var(--player-gap);
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.player-grid-wrapper .grid-preview-cells {
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
+    align-items: center;
+    position: relative;
+}
+@supports not (grid-template-columns: subgrid) {
+    .player-grid-wrapper .ai-preview-tile { grid-template-columns: 1fr; }
+    .player-grid-wrapper .grid-preview-cells { grid-template-columns: 1fr; }
+}
+.player-grid-wrapper .grid-preview-cells::before {
+    content: '';
+    position: absolute;
+    inset: calc(var(--player-gap) * -1);
+    background: var(--cell-bg);
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.06);
+    z-index: 0;
+    pointer-events: none;
+}
+.player-grid-wrapper .grid-preview-cells > * { position: relative; z-index: 1; }
+
+/* Make the in-game cell behave as a square and use the same color rules */
+.player-grid-wrapper .ai-preview-tile #aiPreviewCell.cell {
+    width: 100%;
+    height: auto;           /* override global .cell height calc */
+    aspect-ratio: 1 / 1;    /* keep a perfect square */
+    border-radius: 25%;
+    overflow: hidden;       /* keep inner-circle within rounded corners */
+    box-sizing: border-box;
+}
+
 /* Remove numeric spinners on WebKit */
 .player-grid-wrapper .size-value::-webkit-outer-spin-button,
 .player-grid-wrapper .size-value::-webkit-inner-spin-button {
@@ -456,7 +513,7 @@ body {
     font-weight: 800;
     font-size: clamp(0.8rem, 2.4vmin, 1rem);
     color: #222;
-    margin-bottom: 8px; /* increased from ~6 to 8 */
+    margin-bottom: var(--player-gap); /* scale with screen size */
     white-space: nowrap;
     max-width: 100%;
     overflow: hidden;

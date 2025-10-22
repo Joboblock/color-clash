@@ -179,6 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const gridDecBtn = document.getElementById('gridDec');
     const gridIncBtn = document.getElementById('gridInc');
     const aiPreviewCell = document.getElementById('aiPreviewCell');
+    const playerGridWrapper = document.querySelector('.player-grid-wrapper');
     // Initialize AI preview value from URL (?ai_depth=) if present, else 1; clamp to 1..5 for UI
     let aiPreviewValue = 1;
     {
@@ -288,6 +289,29 @@ document.addEventListener('DOMContentLoaded', () => {
     if (startingColorIndex < 0) startingColorIndex = 0;
 
     buildPlayerBoxes();
+    // Make the player slider keyboard-accessible
+    if (playerBoxSlider) {
+        playerBoxSlider.setAttribute('role', 'slider');
+        playerBoxSlider.setAttribute('aria-label', 'Player Count');
+        playerBoxSlider.setAttribute('aria-valuemin', '2');
+        playerBoxSlider.setAttribute('aria-valuemax', String(maxPlayers));
+        if (!playerBoxSlider.hasAttribute('tabindex')) playerBoxSlider.tabIndex = 0;
+
+        // Arrow/Home/End keys adjust the player count when the slider itself is focused
+        playerBoxSlider.addEventListener('keydown', (e) => {
+            const key = e.key;
+            let handled = false;
+            let newCount = menuPlayerCount;
+            if (key === 'ArrowLeft') { newCount = clampPlayers(menuPlayerCount - 1); handled = true; }
+            else if (key === 'ArrowRight') { newCount = clampPlayers(menuPlayerCount + 1); handled = true; }
+            else if (key === 'Home') { newCount = 2; handled = true; }
+            else if (key === 'End') { newCount = maxPlayers; handled = true; }
+            if (handled) {
+                e.preventDefault();
+                onMenuPlayerCountChanged(newCount);
+            }
+        });
+    }
     // highlight using initial URL or default
     const initialPlayersToShow = clampPlayers(playerCount);
     highlightPlayerBoxes(initialPlayersToShow);
@@ -380,12 +404,23 @@ document.addEventListener('DOMContentLoaded', () => {
     // Input removed: no key handlers required
 
     // Stepper buttons for grid size
+    function setAriaDisabledButton(btn, disabled) {
+        if (!btn) return;
+        // Always keep native disabled off so element stays focusable
+        try { btn.disabled = false; } catch { /* ignore */ }
+        if (disabled) {
+            btn.setAttribute('aria-disabled', 'true');
+        } else {
+            btn.removeAttribute('aria-disabled');
+        }
+    }
     function reflectGridSizeDisplay() {
         if (gridValueEl) {
             gridValueEl.textContent = String(menuGridSizeVal);
         }
-        if (gridDecBtn) gridDecBtn.disabled = menuGridSizeVal <= 3;
-        if (gridIncBtn) gridIncBtn.disabled = menuGridSizeVal >= 16;
+        // Keep buttons focusable but mark non-interactive via aria-disabled
+        setAriaDisabledButton(gridDecBtn, menuGridSizeVal <= 3);
+        setAriaDisabledButton(gridIncBtn, menuGridSizeVal >= 16);
     }
 
     function bumpValueAnimation() {
@@ -404,8 +439,211 @@ document.addEventListener('DOMContentLoaded', () => {
         bumpValueAnimation();
         if (v !== gridSize) recreateGrid(v, playerCount);
     }
-    if (gridDecBtn) gridDecBtn.addEventListener('click', () => adjustGridSize(-1));
-    if (gridIncBtn) gridIncBtn.addEventListener('click', () => adjustGridSize(1));
+    if (gridDecBtn) gridDecBtn.addEventListener('click', (e) => {
+        if (gridDecBtn.getAttribute('aria-disabled') === 'true') { e.preventDefault(); e.stopPropagation(); return; }
+        adjustGridSize(-1);
+    });
+    if (gridIncBtn) gridIncBtn.addEventListener('click', (e) => {
+        if (gridIncBtn.getAttribute('aria-disabled') === 'true') { e.preventDefault(); e.stopPropagation(); return; }
+        adjustGridSize(1);
+    });
+
+    // Make +/- controls operable via keyboard even if not native buttons
+    function makeAccessibleButton(el) {
+        if (!el) return;
+        const isButton = el.tagName && el.tagName.toLowerCase() === 'button';
+        if (!isButton) {
+            el.setAttribute('role', 'button');
+            if (!el.hasAttribute('tabindex')) el.tabIndex = 0;
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); return; }
+                if ((e.key === 'ArrowLeft' || e.key === '-') && el.id === 'gridDec') { e.preventDefault(); el.click(); return; }
+                if ((e.key === 'ArrowRight' || e.key === '+' || e.key === '=') && el.id === 'gridInc') { e.preventDefault(); el.click(); return; }
+            });
+        }
+    }
+    makeAccessibleButton(gridDecBtn);
+    makeAccessibleButton(gridIncBtn);
+
+    // Global keyboard shortcuts when the menu is visible
+    document.addEventListener('keydown', (e) => {
+        // Only handle when menu is visible
+        if (!menu || menu.style.display === 'none') return;
+        const ae = document.activeElement;
+        // Ignore when typing in inputs/textareas or contentEditable
+        const isEditable = !!(ae && ((ae.tagName && (ae.tagName.toLowerCase() === 'input' || ae.tagName.toLowerCase() === 'textarea')) || ae.isContentEditable));
+        // ESC should blur the currently focused element (not just inputs)
+        if (e.key === 'Escape') {
+            try { if (ae && typeof ae.blur === 'function') ae.blur(); } catch { /* ignore */ }
+            e.preventDefault();
+            return;
+        }
+        // Allow Arrow navigation even from an empty input/textarea/contentEditable
+        const keyIsArrow = (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown');
+        let allowArrowFromEmptyEditable = false;
+        if (isEditable && keyIsArrow && ae) {
+            const tag = (ae.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea') {
+                const val = (ae.value || '').trim();
+                allowArrowFromEmptyEditable = val.length === 0;
+            } else if (ae.isContentEditable) {
+                const txt = (ae.textContent || '').trim();
+                allowArrowFromEmptyEditable = txt.length === 0;
+            }
+        }
+        if (isEditable && !allowArrowFromEmptyEditable) return;
+
+        // Helper to move focus spatially within the player-grid-wrapper from a given origin element
+        const tryMoveFocusFrom = (fromEl, direction) => {
+            if (!playerGridWrapper) return false;
+            // Only attempt spatial nav if the origin is inside the wrapper
+            if (!(fromEl instanceof HTMLElement) || !playerGridWrapper.contains(fromEl)) return false;
+            const focusableSelector = 'button,[role="button"],[role="slider"],a[href],input:not([type="hidden"]),select,textarea,[tabindex]:not([tabindex="-1"])';
+            const all = Array.from(playerGridWrapper.querySelectorAll(focusableSelector));
+            // Include disabled/aria-disabled in the list so current element can still navigate away
+            const focusables = all.filter(el => {
+                if (!(el instanceof HTMLElement)) return false;
+                const r = el.getBoundingClientRect();
+                return r.width > 0 && r.height > 0;
+            });
+            if (focusables.length === 0) return false;
+            if (!focusables.includes(fromEl)) return false;
+
+            const curRect = fromEl.getBoundingClientRect();
+            const originX = curRect.left + 1; // left edge origin for multi-cell elements
+            const originY = curRect.top + curRect.height / 2;
+
+            // Overlap helpers: ensure candidates are reasonably aligned on the orthogonal axis
+            const verticalOverlapFrac = (r1, r2) => {
+                const overlap = Math.max(0, Math.min(r1.bottom, r2.bottom) - Math.max(r1.top, r2.top));
+                const base = Math.min(r1.height || 1, r2.height || 1);
+                return overlap / base;
+            };
+            const horizontalOverlapFrac = (r1, r2) => {
+                const overlap = Math.max(0, Math.min(r1.right, r2.right) - Math.max(r1.left, r2.left));
+                const base = Math.min(r1.width || 1, r2.width || 1);
+                return overlap / base;
+            };
+
+            let best = null;
+            let bestPrimary = Infinity; // distance along the intended axis
+            let bestSecondary = Infinity; // tie-breaker: orthogonal distance
+            const tol = 0.5; // px tolerance for near-equal comparisons
+            const edgeTol = 2; // px tolerance for edge comparisons
+            const minOverlap = 0.35; // require at least ~35% overlap on the orthogonal axis
+
+            for (const el of focusables) {
+                if (el === fromEl) continue;
+                // Skip disabled/aria-disabled targets
+                if (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true') continue;
+                const r = el.getBoundingClientRect();
+                const centerX = r.left + r.width / 2;
+                const centerY = r.top + r.height / 2;
+
+                if (direction === 'right') {
+                    // must be generally to the right and vertically aligned
+                    const primary = r.left - curRect.right; // >= 0 to the right
+                    if (primary < -edgeTol) continue;
+                    if (verticalOverlapFrac(curRect, r) < minOverlap) continue;
+                    const secondary = Math.abs(centerY - originY);
+                    if (primary < bestPrimary - tol || (Math.abs(primary - bestPrimary) <= tol && secondary < bestSecondary)) {
+                        best = el; bestPrimary = primary; bestSecondary = secondary;
+                    }
+                } else if (direction === 'left') {
+                    // must be generally to the left and vertically aligned
+                    const primary = curRect.left - r.right; // >= 0 to the left
+                    if (primary < -edgeTol) continue;
+                    if (verticalOverlapFrac(curRect, r) < minOverlap) continue;
+                    const secondary = Math.abs(centerY - originY);
+                    if (primary < bestPrimary - tol || (Math.abs(primary - bestPrimary) <= tol && secondary < bestSecondary)) {
+                        best = el; bestPrimary = primary; bestSecondary = secondary;
+                    }
+                } else if (direction === 'up') {
+                    // must be generally above and horizontally aligned
+                    const primary = curRect.top - r.bottom; // >= 0 above
+                    if (primary < -edgeTol) continue;
+                    if (horizontalOverlapFrac(curRect, r) < minOverlap) continue;
+                    const secondary = Math.abs(centerX - originX);
+                    if (primary < bestPrimary - tol || (Math.abs(primary - bestPrimary) <= tol && secondary < bestSecondary)) {
+                        best = el; bestPrimary = primary; bestSecondary = secondary;
+                    }
+                } else if (direction === 'down') {
+                    // must be generally below and horizontally aligned
+                    const primary = r.top - curRect.bottom; // >= 0 below
+                    if (primary < -edgeTol) continue;
+                    if (horizontalOverlapFrac(curRect, r) < minOverlap) continue;
+                    const secondary = Math.abs(centerX - originX);
+                    if (primary < bestPrimary - tol || (Math.abs(primary - bestPrimary) <= tol && secondary < bestSecondary)) {
+                        best = el; bestPrimary = primary; bestSecondary = secondary;
+                    }
+                }
+            }
+            if (best) {
+                try { best.focus(); } catch { /* ignore */ }
+                return true;
+            }
+            return false;
+        };
+        // Convenience wrapper using the currently focused element as origin
+        const tryMoveFocus = (direction) => tryMoveFocusFrom(ae, direction);
+
+        const k = e.key;
+        if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
+            // Determine if effectively nothing is focused (browser reports <body> or <html>)
+            const noFocus = !ae || ae === document.body || ae === document.documentElement;
+
+            // If nothing is focused, act as if starting from the slider
+            if (noFocus) {
+                e.preventDefault();
+                if (playerBoxSlider) {
+                    if (k === 'ArrowUp' || k === 'ArrowDown') {
+                        const dirUD = k === 'ArrowUp' ? 'up' : 'down';
+                        const moved = tryMoveFocusFrom(playerBoxSlider, dirUD);
+                        if (!moved) {
+                            // fallback: just focus the slider
+                            try { playerBoxSlider.focus(); } catch { /* ignore */ }
+                        }
+                    } else {
+                        // Left/Right: focus slider and nudge by one
+                        try { playerBoxSlider.focus(); } catch { /* ignore */ }
+                        const delta = (k === 'ArrowLeft') ? -1 : 1;
+                        onMenuPlayerCountChanged(clampPlayers(menuPlayerCount + delta));
+                    }
+                }
+                return;
+            }
+
+            // If focus is already on the slider, let its built-in behavior handle left/right
+            if (ae === playerBoxSlider && (k === 'ArrowLeft' || k === 'ArrowRight')) return;
+
+            // Try spatial navigation first when focus is inside the grid wrapper
+            const dir = k === 'ArrowLeft' ? 'left' : k === 'ArrowRight' ? 'right' : k === 'ArrowUp' ? 'up' : 'down';
+            const moved = tryMoveFocus(dir);
+            if (moved) { e.preventDefault(); return; }
+            // Otherwise, do nothing (no auto-fallback) when something is focused
+            return;
+        } else if (k === 'Home') {
+            e.preventDefault();
+            onMenuPlayerCountChanged(2);
+        } else if (k === 'End') {
+            e.preventDefault();
+            onMenuPlayerCountChanged(maxPlayers);
+        } else if (k === '+' || k === '=') {
+            // '+' can arrive as '=' without Shift on some layouts
+            e.preventDefault();
+            adjustGridSize(1);
+        } else if (k === '-') {
+            e.preventDefault();
+            adjustGridSize(-1);
+        } else if (/^[1-9]$/.test(k)) {
+            // Number shortcuts: 1-9 select player count, clamped to [2..maxPlayers]
+            e.preventDefault();
+            const requested = parseInt(k, 10);
+            onMenuPlayerCountChanged(clampPlayers(requested));
+            // Optionally move focus to the slider to reflect selection context
+            try { playerBoxSlider && playerBoxSlider.focus(); } catch { /* ignore */ }
+        }
+    });
 
     startBtn.addEventListener('click', async () => {
         const p = clampPlayers(menuPlayerCount);
@@ -491,6 +729,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 aiPreviewValue = Math.max(1, Math.min(5, ad));
                 updateAIPreview();
             }
+            // Move keyboard focus to the slider for easy keyboard navigation
+            try { (playerBoxSlider || menuColorCycle || startBtn)?.focus(); } catch { /* ignore */ }
             exitFullscreenIfPossible();
             return;
         }

@@ -11,6 +11,10 @@ html, body {
     /* Responsive spacing for player controls */
     --player-gap: clamp(2px, 1.2vmin, 8px);       /* gap between player boxes (columns) */
     --player-row-gap: 12px;  /* vertical gap between cycler row and slider row */
+    /* Focus ring styling for keyboard navigation */
+    --focus-ring-color: rgba(0,0,0,0.28);
+    --focus-ring-width: 3px;
+    --focus-ring-offset: 2px;
 }
 
 /* Base body layout and font */
@@ -151,8 +155,21 @@ body {
 }
 
 .menu-color-box:focus-visible {
-    outline: 3px solid rgba(0,0,0,0.25);
-    outline-offset: 2px;
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
+}
+
+/* Generic focus-visible ring for interactive controls when navigating via keyboard */
+:where(button,
+       [role="button"],
+       [role="slider"],
+       a[href],
+       input:not([type="hidden"]),
+       select,
+       textarea
+      ):focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
 }
 
 /* When inside the slider, the color cycler visually matches a player box */
@@ -320,6 +337,11 @@ body {
     background: var(--invalid-color);
     cursor: not-allowed;
 }
+/* Keep +/- buttons focusable at bounds: mirror disabled look via aria-disabled */
+.player-grid-wrapper .btn-cell[aria-disabled="true"] {
+    background: var(--invalid-color);
+    cursor: not-allowed;
+}
 
 .player-grid-wrapper .grid-size-center {
     display: grid;
@@ -474,6 +496,8 @@ body {
     width: 100%;
     position: relative;
     box-sizing: border-box; /* ensure padding stays inside width */
+    /* Make it clear the slider is horizontal */
+    cursor: ew-resize;
 }
 
 /* Fallback for browsers without subgrid support */
@@ -537,6 +561,12 @@ body {
     user-select: none;
     touch-action: none; /* allow pointer events without default gestures */
 }
+/* Ensure the color cycler shows pointer, not ew-resize, when hovered */
+#playerBoxSlider #menuColorCycle,
+.player-box-slider #menuColorCycle,
+.player-box-slider .menu-color-box {
+    cursor: pointer;
+}
 
 .player-box-slider .box.active {
     transform: translateY(-18%) scale(1.06); /* lift proportional to height */
@@ -581,7 +611,10 @@ body {
     justify-content: center;
     align-items: center;
     z-index: 1;
-    transition: transform var(--delay-animation) ease-in-out, background-color var(--delay-animation) ease-in-out, opacity var(--delay-explosion) ease-out;
+    /* Match color-change speed/easing with .cell and the color cycler */
+    transition: transform var(--delay-animation) ease-in-out,
+                background-color var(--delay-animation) ease,
+                opacity var(--delay-explosion) ease-out;
 }
 
 .inner-circle.fade-out {

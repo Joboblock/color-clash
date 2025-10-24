@@ -160,16 +160,17 @@ body {
 }
 
 /* Generic focus-visible ring for interactive controls when navigating via keyboard */
-:where(button,
-       [role="button"],
-       [role="slider"],
-       a[href],
-       input:not([type="hidden"]),
-       select,
-       textarea
-      ):focus-visible {
-    outline: var(--focus-ring-width) solid var(--focus-ring-color);
-    outline-offset: var(--focus-ring-offset);
+:where(.cell,
+             button,
+             [role="button"],
+             [role="slider"],
+             a[href],
+             input:not([type="hidden"]),
+             select,
+             textarea
+            ):focus-visible {
+        outline: var(--focus-ring-width) solid var(--focus-ring-color);
+        outline-offset: var(--focus-ring-offset);
 }
 
 /* When inside the slider, the color cycler visually matches a player box */

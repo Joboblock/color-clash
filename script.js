@@ -302,8 +302,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const key = e.key;
             let handled = false;
             let newCount = menuPlayerCount;
-            if (key === 'ArrowLeft') { newCount = clampPlayers(menuPlayerCount - 1); handled = true; }
-            else if (key === 'ArrowRight') { newCount = clampPlayers(menuPlayerCount + 1); handled = true; }
+            if (key === 'ArrowLeft' || key === 'a' || key === 'A') {
+                newCount = clampPlayers(menuPlayerCount - 1); handled = true;
+            }
+            else if (key === 'ArrowRight' || key === 'd' || key === 'D') {
+                newCount = clampPlayers(menuPlayerCount + 1); handled = true;
+            }
             else if (key === 'Home') { newCount = 2; handled = true; }
             else if (key === 'End') { newCount = maxPlayers; handled = true; }
             if (handled) {
@@ -469,20 +473,34 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('keydown', (e) => {
         // Only handle when menu is visible
         if (!menu || menu.style.display === 'none') return;
+
         const ae = document.activeElement;
-        // Ignore when typing in inputs/textareas or contentEditable
-        const isEditable = !!(ae && ((ae.tagName && (ae.tagName.toLowerCase() === 'input' || ae.tagName.toLowerCase() === 'textarea')) || ae.isContentEditable));
+        const tag = ae && ae.tagName && ae.tagName.toLowerCase();
+        const isEditable = !!(ae && (tag === 'input' || tag === 'textarea' || ae.isContentEditable));
+
         // ESC should blur the currently focused element (not just inputs)
         if (e.key === 'Escape') {
             try { if (ae && typeof ae.blur === 'function') ae.blur(); } catch { /* ignore */ }
             e.preventDefault();
             return;
         }
-        // Allow Arrow navigation even from an empty input/textarea/contentEditable
-        const keyIsArrow = (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown');
+
+        // If focused element is editable:
+        //  - WASD should always be typing (do not intercept)
+        //  - Arrow keys: if the editable is empty -> allow menu navigation; otherwise let arrow keys act inside the field
+        // If nothing editable is focused, map WASD -> Arrows and handle navigation normally.
+
+        // If editable and user pressed a WASD key => don't intercept (allow typing)
+        const lower = (k) => (typeof k === 'string' ? k.toLowerCase() : k);
+        const isWasd = ['w', 'a', 's', 'd'].includes(lower(e.key));
+        if (isEditable && isWasd) {
+            // Let the character be inserted into the field
+            return;
+        }
+
+        // Determine whether Arrow keys should be allowed when an editable has focus and is empty
         let allowArrowFromEmptyEditable = false;
-        if (isEditable && keyIsArrow && ae) {
-            const tag = (ae.tagName || '').toLowerCase();
+        if (isEditable) {
             if (tag === 'input' || tag === 'textarea') {
                 const val = (ae.value || '').trim();
                 allowArrowFromEmptyEditable = val.length === 0;
@@ -491,7 +509,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 allowArrowFromEmptyEditable = txt.length === 0;
             }
         }
-        if (isEditable && !allowArrowFromEmptyEditable) return;
+
+        // If focus is editable and arrows should NOT be hijacked, bail out (let browser handle caret movement)
+        const isArrowKey = (k) => (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown');
+        if (isEditable && !allowArrowFromEmptyEditable && isArrowKey(e.key)) {
+            // User is editing text and the field isn't empty -> do not intercept arrows
+            return;
+        }
+
+        // Now perform WASD -> Arrow mapping, but only for non-editable focus (or editable empty case where we want to navigate)
+        let mappedKey = e.key;
+        // Only map WASD when the event isn't intended for typing (i.e. not inside an input/textarea/contentEditable)
+        // For empty editable where we decided to allow arrow navigation, mapping should still be applied if user used WASD (but we earlier returned on WASD when editable).
+        if (!isEditable) {
+            if (mappedKey === 'w' || mappedKey === 'W') mappedKey = 'ArrowUp';
+            else if (mappedKey === 'a' || mappedKey === 'A') mappedKey = 'ArrowLeft';
+            else if (mappedKey === 's' || mappedKey === 'S') mappedKey = 'ArrowDown';
+            else if (mappedKey === 'd' || mappedKey === 'D') mappedKey = 'ArrowRight';
+        }
 
         // Helper to move focus spatially within the player-grid-wrapper from a given origin element
         const tryMoveFocusFrom = (fromEl, direction) => {
@@ -587,7 +622,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Convenience wrapper using the currently focused element as origin
         const tryMoveFocus = (direction) => tryMoveFocusFrom(ae, direction);
 
-        const k = e.key;
+        let k = e.key;
+        if (k === 'w' || k === 'W') k = 'ArrowUp';
+        else if (k === 'a' || k === 'A') k = 'ArrowLeft';
+        else if (k === 's' || k === 'S') k = 'ArrowDown';
+        else if (k === 'd' || k === 'D') k = 'ArrowRight';
         if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
             // Determine if effectively nothing is focused (browser reports <body> or <html>)
             const noFocus = !ae || ae === document.body || ae === document.documentElement;
@@ -647,7 +686,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     startBtn.addEventListener('click', async () => {
         const p = clampPlayers(menuPlayerCount);
-    let s = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : 3;
+        let s = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : 3;
 
         // Enter fullscreen on mobile from the same user gesture
         await requestFullscreenIfMobile();
@@ -1324,6 +1363,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Start with the first selected color (index 0) instead of a random player
     let currentPlayer = computeStartPlayerIndex();
     let initialPlacements = Array(playerCount).fill(false);
+    // Track last focused cell per player: { [playerIndex]: {row, col} }
+    let playerLastFocus = Array(playerCount).fill(null);
     let gameWon = false;
     let invalidInitialPositions = [];
     let menuShownAfterWin = false; // guard to avoid repeated menu reopen scheduling
@@ -1349,6 +1390,115 @@ document.addEventListener('DOMContentLoaded', () => {
     recreateGrid(gridSize, playerCount);
     // Initialize AI preview after initial color application
     updateAIPreview();
+
+        // Keyboard navigation for game grid
+        document.addEventListener('keydown', (e) => {
+            // Only handle when menu is hidden (game mode)
+            if (menu && menu.style.display !== 'none') return;
+            const gridEl = document.querySelector('.grid');
+            if (!gridEl) return;
+            const key = e.key;
+            // Move mapping first
+            let mappedKey = key;
+            if (mappedKey === 'w' || mappedKey === 'W') mappedKey = 'ArrowUp';
+            else if (mappedKey === 'a' || mappedKey === 'A') mappedKey = 'ArrowLeft';
+            else if (mappedKey === 's' || mappedKey === 'S') mappedKey = 'ArrowDown';
+            else if (mappedKey === 'd' || mappedKey === 'D') mappedKey = 'ArrowRight';
+
+            // Now filter based on mapped key
+            if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(mappedKey)) return;
+
+            // Get all cells
+            const cells = Array.from(gridEl.querySelectorAll('.cell[tabindex="0"]'));
+            if (!cells.length) return;
+            // Helper: get cell at row,col
+            const getCell = (row, col) => gridEl.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+            // Helper: is cell owned by current player?
+            const isOwnCell = (cell) => {
+                if (!cell) return false;
+                // Initial placement: allow all cells
+                if (Array.isArray(initialPlacements) && initialPlacements.includes(false)) return true;
+                // Otherwise, check cell class for current player color
+                const colorKey = activeColors()[currentPlayer];
+                return cell.classList.contains(colorKey);
+            };
+            // Find currently focused cell
+            let focused = document.activeElement;
+            // If nothing is focused or not a .cell, fallback to center/any own cell
+            if (!focused || !focused.classList.contains('cell')) {
+                const size = Math.sqrt(cells.length);
+                const mid = Math.floor(size / 2);
+                let center = getCell(mid, mid);
+                if (!isOwnCell(center)) {
+                    center = cells.find(isOwnCell);
+                }
+                if (center) {
+                    e.preventDefault();
+                    center.focus();
+                }
+                return;
+            }
+            // If focused cell is not owned by player, allow arrow navigation to nearest own cell in that direction
+            const row = parseInt(focused.dataset.row, 10);
+            const col = parseInt(focused.dataset.col, 10);
+            let target = null;
+            // Direction vectors
+            const dirMap = {
+                'ArrowLeft':  { vx: -1, vy: 0 },
+                'ArrowRight': { vx: 1, vy: 0 },
+                'ArrowUp':    { vx: 0, vy: -1 },
+                'ArrowDown':  { vx: 0, vy: 1 }
+            };
+            const { vx, vy } = dirMap[mappedKey];
+            // Always pick the own cell with the smallest angle (<90°), tiebreak by distance
+            let minAngle = Math.PI / 2; // 90°
+            let minDist = Infinity;
+            let bestCell = null;
+            for (const cell of cells) {
+                if (!isOwnCell(cell)) continue;
+                const r2 = parseInt(cell.dataset.row, 10);
+                const c2 = parseInt(cell.dataset.col, 10);
+                const dx = c2 - col;
+                const dy = r2 - row;
+                if (dx === 0 && dy === 0) continue;
+                // Normalize
+                const len = Math.sqrt(dx*dx + dy*dy);
+                const dot = (dx/len)*vx + (dy/len)*vy;
+                const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
+                if (angle < minAngle || (Math.abs(angle - minAngle) < 1e-6 && len < minDist)) {
+                    minAngle = angle;
+                    minDist = len;
+                    bestCell = cell;
+                }
+            }
+            if (bestCell) {
+                target = bestCell;
+            }
+            if (target) {
+                e.preventDefault();
+                target.focus();
+            }
+        });
+
+        // Add Enter/Space key activation for focused .cell elements in game mode
+        document.addEventListener('keydown', (e) => {
+            if (menu && menu.style.display !== 'none') return;
+            const gridEl = document.querySelector('.grid');
+            if (!gridEl) return;
+            const key = e.key;
+            if (!(key === 'Enter' || key === ' ')) return;
+            const focused = document.activeElement;
+            if (!focused || !focused.classList.contains('cell')) return;
+            const row = parseInt(focused.dataset.row, 10);
+            const col = parseInt(focused.dataset.col, 10);
+                // Prevent keyboard activation if AI is processing or it's not the human player's turn
+                if (typeof isProcessing !== 'undefined' && isProcessing) return;
+                if (typeof trainMode !== 'undefined' && trainMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
+                if (Number.isInteger(row) && Number.isInteger(col)) {
+                    e.preventDefault();
+                    handleClick(row, col);
+                }
+        });
 //#endregion
 
 
@@ -1393,6 +1543,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 cell.className = 'cell';
                 cell.dataset.row = i;
                 cell.dataset.col = j;
+                cell.tabIndex = 0; // Make cell focusable for keyboard navigation
                 grid[i][j] = { value: 0, player: '' };
                 gridElement.appendChild(cell);
             }
@@ -1431,7 +1582,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function handleClick(row, col) {
         if (isProcessing || gameWon) return;
 
-        const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+    const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+    // Save last focused cell for current player
+    playerLastFocus[currentPlayer] = { row, col };
         const cellColor = getPlayerColor(row, col);
 
         if (!initialPlacements[currentPlayer]) {
@@ -1786,11 +1939,36 @@ document.addEventListener('DOMContentLoaded', () => {
             currentPlayer = (currentPlayer + 1) % playerCount;
         } while (!hasCells(currentPlayer) && initialPlacements.every(placement => placement));
 
-    document.body.className = activeColors()[currentPlayer];
+        document.body.className = activeColors()[currentPlayer];
+        clearCellFocus();
         updateGrid();
-
+        // Restore focus to last focused cell for this player, if any
+        restorePlayerFocus();
         // If in train mode, possibly trigger AI move for non-human players
         maybeTriggerAIMove();
+    }
+
+    /**
+     * Restore focus to the last cell focused by the current player, if any.
+     */
+    function restorePlayerFocus() {
+        // Only restore focus for human player (trainMode: currentPlayer === humanPlayer)
+        if (typeof trainMode !== 'undefined' && trainMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
+        const pos = playerLastFocus[currentPlayer];
+        if (pos) {
+            const cell = document.querySelector(`.cell[data-row="${pos.row}"][data-col="${pos.col}"]`);
+            if (cell) cell.focus();
+        }
+    }
+
+    /**
+     * Clears focus from any grid cell (for accessibility: after turn ends).
+     */
+    function clearCellFocus() {
+        const focused = document.activeElement;
+        if (focused && focused.classList.contains('cell')) {
+            focused.blur();
+        }
     }
 
     /**
@@ -1918,6 +2096,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!gameWon) return;
                 // First, stop the chain; then immediately open the menu (no extra delay)
                 stopExplosionLoop();
+                // Clear focus from any grid cell before showing the menu
+                clearCellFocus();
                 // Open the menu by adding menu=true to the URL
                 const params = new URLSearchParams(window.location.search);
                 params.set('menu', 'true');
@@ -2494,14 +2674,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 showAIDebugPanelWithResponse(info);
 
                 if (chosenFast) {
-                    const onUserClick = (ev) => {
-                        ev.stopPropagation();
-                        ev.preventDefault();
-                        document.removeEventListener('pointerdown', onUserClick, true);
-                        clearAIDebugUI();
-                        handleClick(chosenFast.r, chosenFast.c);
+                    const onUserConfirm = (ev) => {
+                        // Accept pointerdown or Enter/Space keydown
+                        if (ev.type === 'pointerdown' || (ev.type === 'keydown' && (ev.key === 'Enter' || ev.key === ' '))) {
+                            ev.stopPropagation();
+                            ev.preventDefault();
+                            document.removeEventListener('pointerdown', onUserConfirm, true);
+                            document.removeEventListener('keydown', onUserConfirm, true);
+                            clearAIDebugUI();
+                            handleClick(chosenFast.r, chosenFast.c);
+                        }
                     };
-                    document.addEventListener('pointerdown', onUserClick, true);
+                    document.addEventListener('pointerdown', onUserConfirm, true);
+                    document.addEventListener('keydown', onUserConfirm, true);
                 } else {
                     if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
                     switchPlayer();
@@ -2599,14 +2784,19 @@ document.addEventListener('DOMContentLoaded', () => {
             showAIDebugPanelWithResponse(info);
 
             if (chosen) {
-                const onUserClick = (ev) => {
-                    ev.stopPropagation();
-                    ev.preventDefault();
-                    document.removeEventListener('pointerdown', onUserClick, true);
-                    clearAIDebugUI();
-                    handleClick(chosen.r, chosen.c);
+                const onUserConfirm = (ev) => {
+                    // Accept pointerdown or Enter/Space keydown
+                    if (ev.type === 'pointerdown' || (ev.type === 'keydown' && (ev.key === 'Enter' || ev.key === ' '))) {
+                        ev.stopPropagation();
+                        ev.preventDefault();
+                        document.removeEventListener('pointerdown', onUserConfirm, true);
+                        document.removeEventListener('keydown', onUserConfirm, true);
+                        clearAIDebugUI();
+                        handleClick(chosen.r, chosen.c);
+                    }
                 };
-                document.addEventListener('pointerdown', onUserClick, true);
+                document.addEventListener('pointerdown', onUserConfirm, true);
+                document.addEventListener('keydown', onUserConfirm, true);
             } else {
                 if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
                 switchPlayer();

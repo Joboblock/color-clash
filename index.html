@@ -19,7 +19,7 @@
             <div class="menu-panel">
 
                 <div class="control-row">
-                    <div class="player-grid-wrapper">
+                    <div class="menu-grid">
                         <div id="menuColorCycle" class="menu-color-box" role="button" aria-label="Cycle starting color" title="starting color"></div>
                         <input id="playerName" class="player-name-input" type="text" placeholder="Name (3–16)" aria-label="Player name" maxlength="16" inputmode="latin" autocapitalize="none" autocomplete="off" spellcheck="false" />
                         <div id="playerBoxSlider" class="player-box-slider" role="slider"
@@ -49,14 +49,14 @@
                                 </div>
                             </div>
                         </div>
+                        <!-- Start and Train buttons in row 4, columns 4 and 5 -->
+                        <button id="startBtn" class="btn" style="grid-row: 4; grid-column: 4;">Start</button>
+                        <button id="trainBtn" class="btn secondary" style="grid-row: 4; grid-column: 5;">Train</button>
                     </div>
                 </div>
 
 
-                <div class="menu-actions">
-                    <button id="startBtn" class="btn">Start</button>
-                    <button id="trainBtn" class="btn secondary">Train</button>
-                </div>
+                <!-- ...removed duplicate menu-grid with buttons... -->
 
                 <p class="menu-hint">Tip: you can also set <code>?players=&lt;n&gt;&amp;size=&lt;n&gt;</code> in the URL.</p>
             </div>

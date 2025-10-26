@@ -179,7 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const gridDecBtn = document.getElementById('gridDec');
     const gridIncBtn = document.getElementById('gridInc');
     const aiPreviewCell = document.getElementById('aiPreviewCell');
-    const playerGridWrapper = document.querySelector('.player-grid-wrapper');
+    const playerGridWrapper = document.querySelector('.menu-grid');
     // Initialize AI preview value from URL (?ai_depth=) if present, else 1; clamp to 1..5 for UI
     let aiPreviewValue = 1;
     {
@@ -255,16 +255,24 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Weighted tips list (some with HTML)
-    const tips = [
-        { text: 'Tip: You can also set <code>?players=&lt;n&gt;&amp;size=&lt;n&gt;</code> in the URL.', weight: 1, html: true },
-        { text: 'Tip: Double-tap outside the grid to toggle fullscreen on mobile devices.', weight: 3 },
-        { text: 'Tip: Grid size defaults to a recommended value but can be adjusted manually.', weight: 2 },
-        { text: 'Tip: Use Train mode to observe AI behavior and learn effective strategies.', weight: 1 },
-        { text: 'Tip: <a href="https://joboblock.github.io" target="_blank">joboblock.github.io</a> redirects to this game.', weight: 2, html: true },
-        { text: 'Tip: Give this project a <a href="https://github.com/Joboblock/color-clash" target="_blank">Star</a>, to support its development!', weight: 2, html: true },
-        { text: 'Tip: This is a rare message.', weight: 0.1 },
-        { text: 'Tip: Praise the Raute, embrace the Raute!', weight: 0.1 }
-    ];
+    function getDeviceTips() {
+        const mobile = isMobileDevice();
+        const tips = [
+            { text: 'Tip: You can also set <code>?players=&lt;n&gt;&amp;size=&lt;n&gt;</code> in the URL.', weight: 1, html: true },
+            { text: 'Tip: Grid size defaults to a recommended value but can be adjusted manually.', weight: 2 },
+            { text: 'Tip: Use Train mode to observe AI behavior and learn effective strategies.', weight: 1 },
+            { text: 'Tip: <a href="https://joboblock.github.io" target="_blank">joboblock.github.io</a> redirects to this game.', weight: 2, html: true },
+            { text: 'Tip: Give this project a <a href="https://github.com/Joboblock/color-clash" target="_blank">Star</a>, to support its development!', weight: 2, html: true },
+            { text: 'Tip: This is a rare message.', weight: 0.1 },
+            { text: 'Tip: Praise the Raute, embrace the Raute!', weight: 0.1 }
+        ];
+        if (mobile) {
+            tips.push({ text: 'Tip: Double-tap outside the grid to toggle fullscreen on mobile devices.', weight: 3 });
+        } else {
+            tips.push({ text: 'Tip: Use WASD or Arrow keys to move between menu controls and grid cells.', weight: 2 });
+        }
+        return tips;
+    }
     
     // Cache for computed shadows used by the slider animation
     let sliderShadowCache = null; // { inactive: string, active: string }
@@ -528,7 +536,7 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (mappedKey === 'd' || mappedKey === 'D') mappedKey = 'ArrowRight';
         }
 
-        // Helper to move focus spatially within the player-grid-wrapper from a given origin element
+        // Helper to move focus spatially within the menu-grid from a given origin element
         const tryMoveFocusFrom = (fromEl, direction) => {
             if (!playerGridWrapper) return false;
             // Only attempt spatial nav if the origin is inside the wrapper
@@ -828,9 +836,9 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void}
      */
     function updateRandomTip() {
-        if (!menuHint) return;
-        const tip = pickWeightedTip(tips);
-        if (tip && tip.html) menuHint.innerHTML = tip.text; else menuHint.textContent = tip ? tip.text : '';
+    if (!menuHint) return;
+    const tip = pickWeightedTip(getDeviceTips());
+    if (tip && tip.html) menuHint.innerHTML = tip.text; else menuHint.textContent = tip ? tip.text : '';
     }
 
     // --- FLIP helpers for player slider boxes ---

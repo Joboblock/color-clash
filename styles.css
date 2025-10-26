@@ -38,7 +38,7 @@ body {
     justify-content: center;
     align-items: center;
     background: rgba(0,0,0,0.45);
-    z-index: 10;
+    z-index: 101;
 }
 
 /* New flex column container holding header + menu */
@@ -190,7 +190,7 @@ body {
 }
 
 /* Grid wrapper to align cycler (row 1) and slider (row 2) on the same column rhythm */
-.player-grid-wrapper {
+.menu-grid {
     display: grid;
     grid-template-columns: repeat(8, minmax(0, 1fr));
     column-gap: var(--player-gap);
@@ -204,20 +204,20 @@ body {
 }
 
 /* Prevent grid children (like inputs) from imposing a min-content width on columns */
-.player-grid-wrapper > * {
+.menu-grid > * {
     min-width: 0;
     min-height: 0; /* allow rows to shrink; prevent content from forcing height */
     max-width: 100%;
 }
 
 /* Place slider to span full second row; keep its own chrome contained */
-.player-grid-wrapper .player-box-slider {
+.menu-grid .player-box-slider {
     grid-column: 1 / -1;
     grid-row: 2;
 }
 
 /* Place cycler in first row, first column */
-.player-grid-wrapper .menu-color-box {
+.menu-grid .menu-color-box {
     grid-column: 1;
     grid-row: 1;
     align-self: end;       /* sit at the bottom of its grid area */
@@ -225,7 +225,7 @@ body {
 }
 
 /* Grid Size tile in row 3, columns 1-2 */
-.player-grid-wrapper .grid-size-tile {
+.menu-grid .grid-size-tile {
     grid-column: 1 / span 3; /* exactly 3 columns wide */
     grid-row: 3; /* header and cells within same wrapper row */
     display: grid;
@@ -236,7 +236,7 @@ body {
     position: relative; /* for background pseudo-element */
 }
 /* Label inside the tile (header) */
-.player-grid-wrapper .grid-size-tile .grid-size-label {
+.menu-grid .grid-size-tile .grid-size-label {
     grid-column: 1 / -1;
     justify-self: start;
     align-self: start;
@@ -252,12 +252,12 @@ body {
 
 /* Fallback if subgrid isn't supported for the tile */
 @supports not (grid-template-columns: subgrid) {
-    .player-grid-wrapper .grid-size-tile { grid-template-columns: repeat(3, 1fr); }
+    .menu-grid .grid-size-tile { grid-template-columns: repeat(3, 1fr); }
 }
 
 /* Slider-like background behind the three cells */
 /* Background should hug only the cells, not the header */
-.player-grid-wrapper .grid-size-cells {
+.menu-grid .grid-size-cells {
     display: grid;
     grid-template-columns: subgrid;
     column-gap: var(--player-gap);
@@ -266,9 +266,9 @@ body {
     position: relative; /* create containing block for ::before */
 }
 @supports not (grid-template-columns: subgrid) {
-    .player-grid-wrapper .grid-size-cells { grid-template-columns: repeat(3, 1fr); }
+    .menu-grid .grid-size-cells { grid-template-columns: repeat(3, 1fr); }
 }
-.player-grid-wrapper .grid-size-cells::before {
+.menu-grid .grid-size-cells::before {
     content: '';
     position: absolute;
     inset: calc(var(--player-gap) * -1);
@@ -279,16 +279,16 @@ body {
     pointer-events: none;
 }
 /* Ensure children (the three squares) don't impose min-content widths */
-.player-grid-wrapper .grid-size-cells > * { min-width: 0; }
+.menu-grid .grid-size-cells > * { min-width: 0; }
 
 /* Ensure tile children sit above background */
-.player-grid-wrapper .grid-size-tile > * {
+.menu-grid .grid-size-tile > * {
     position: relative;
     z-index: 1;
     min-width: 0; /* prevent min-content from widening parent columns */
 }
 /* Also ensure cells render above their background */
-.player-grid-wrapper .grid-size-cells > * { position: relative; z-index: 1; }
+.menu-grid .grid-size-cells > * { position: relative; z-index: 1; }
 
 /* Subtle 'pop' animation when value changes */
 @keyframes value-bump {
@@ -297,10 +297,10 @@ body {
     100% { transform: scale(1); }
 }
 /* Apply bump animation to the big number when its value changes */
-.player-grid-wrapper .grid-size-number.bump { animation: value-bump 160ms ease; }
+.menu-grid .grid-size-number.bump { animation: value-bump 160ms ease; }
 
 /* New three-cell tile elements */
-.player-grid-wrapper .size-cell {
+.menu-grid .size-cell {
     width: 100%;
     aspect-ratio: 1 / 1; /* squares matching player boxes */
     border-radius: 25%;
@@ -315,7 +315,7 @@ body {
     min-height: 0;    /* ignore min-content height from children */
 }
 
-.player-grid-wrapper .btn-cell {
+.menu-grid .btn-cell {
     appearance: none;
     -webkit-appearance: none;
     cursor: pointer;
@@ -333,18 +333,18 @@ body {
     transition: transform .08s ease, box-shadow .12s ease, background-color .12s ease;
 }
 
-.player-grid-wrapper .btn-cell:active { transform: translateY(1px) scale(0.98); }
-.player-grid-wrapper .btn-cell:disabled {
+.menu-grid .btn-cell:active { transform: translateY(1px) scale(0.98); }
+.menu-grid .btn-cell:disabled {
     background: var(--invalid-color);
     cursor: not-allowed;
 }
 /* Keep +/- buttons focusable at bounds: mirror disabled look via aria-disabled */
-.player-grid-wrapper .btn-cell[aria-disabled="true"] {
+.menu-grid .btn-cell[aria-disabled="true"] {
     background: var(--invalid-color);
     cursor: not-allowed;
 }
 
-.player-grid-wrapper .grid-size-center {
+.menu-grid .grid-size-center {
     display: grid;
     place-items: center;
     padding: 6%; /* breathable padding inside the square */
@@ -353,13 +353,13 @@ body {
 /* Place the three squares on the second row under the header */
 /* Cells are direct children of .grid-size-cells now, no row assignment needed */
 
-.player-grid-wrapper .grid-size-label {
+.menu-grid .grid-size-label {
     font-weight: 800;
     font-size: clamp(0.8rem, 2.4vmin, 1rem);
     color: #222;
 }
 
-.player-grid-wrapper .grid-size-number {
+.menu-grid .grid-size-number {
     font-weight: 900;
     font-size: clamp(1.4rem, 6vmin, 2.4rem);
     line-height: 1;
@@ -370,7 +370,7 @@ body {
 }
 
 /* AI Strength preview tile: place at far right of row 3 */
-.player-grid-wrapper .ai-preview-tile {
+.menu-grid .ai-preview-tile {
     grid-column: 8; /* rightmost column */
     grid-row: 3;
     display: grid;
@@ -379,7 +379,7 @@ body {
     align-items: start;
 }
 
-.player-grid-wrapper .ai-preview-tile .ai-preview-label {
+.menu-grid .ai-preview-tile .ai-preview-label {
     grid-column: 1 / -1;
     justify-self: start;
     align-self: start;
@@ -393,7 +393,7 @@ body {
     text-overflow: ellipsis;
 }
 
-.player-grid-wrapper .grid-preview-cells {
+.menu-grid .grid-preview-cells {
     display: grid;
     grid-template-columns: subgrid;
     grid-column: 1 / -1;
@@ -401,10 +401,10 @@ body {
     position: relative;
 }
 @supports not (grid-template-columns: subgrid) {
-    .player-grid-wrapper .ai-preview-tile { grid-template-columns: 1fr; }
-    .player-grid-wrapper .grid-preview-cells { grid-template-columns: 1fr; }
+    .menu-grid .ai-preview-tile { grid-template-columns: 1fr; }
+    .menu-grid .grid-preview-cells { grid-template-columns: 1fr; }
 }
-.player-grid-wrapper .grid-preview-cells::before {
+.menu-grid .grid-preview-cells::before {
     content: '';
     position: absolute;
     inset: calc(var(--player-gap) * -1);
@@ -414,10 +414,10 @@ body {
     z-index: 0;
     pointer-events: none;
 }
-.player-grid-wrapper .grid-preview-cells > * { position: relative; z-index: 1; }
+.menu-grid .grid-preview-cells > * { position: relative; z-index: 1; }
 
 /* Make the in-game cell behave as a square and use the same color rules */
-.player-grid-wrapper .ai-preview-tile #aiPreviewCell.cell {
+.menu-grid .ai-preview-tile #aiPreviewCell.cell {
     width: 100%;
     height: auto;           /* override global .cell height calc */
     aspect-ratio: 1 / 1;    /* keep a perfect square */
@@ -427,14 +427,14 @@ body {
 }
 
 /* Remove numeric spinners on WebKit */
-.player-grid-wrapper .size-value::-webkit-outer-spin-button,
-.player-grid-wrapper .size-value::-webkit-inner-spin-button {
+.menu-grid .size-value::-webkit-outer-spin-button,
+.menu-grid .size-value::-webkit-inner-spin-button {
     -webkit-appearance: none;
     margin: 0;
 }
 
 /* Name input to the right of the color cycler (fills remaining columns on row 1) */
-.player-grid-wrapper .player-name-input {
+.menu-grid .player-name-input {
     grid-column: 2 / -1;
     grid-row: 1;
     align-self: center;
@@ -447,12 +447,12 @@ body {
     font: inherit;
 }
 
-.player-grid-wrapper .player-name-input::placeholder {
+.menu-grid .player-name-input::placeholder {
     color: rgba(0,0,0,0.45);
 }
 
 /* Invalid state highlight for too-short names */
-.player-grid-wrapper .player-name-input.invalid {
+.menu-grid .player-name-input.invalid {
     border-color: rgba(220, 38, 38, 0.85); /* red-600-ish */
     box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15);
 }
@@ -503,7 +503,7 @@ body {
 
 /* Fallback for browsers without subgrid support */
 @supports not (grid-template-columns: subgrid) {
-    .player-grid-wrapper { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+    .menu-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
     .player-box-slider { grid-template-columns: repeat(8, 1fr); }
     .player-box-slider .slider-cells { grid-template-columns: repeat(8, 1fr); }
 }
@@ -562,10 +562,11 @@ body {
     user-select: none;
     touch-action: none; /* allow pointer events without default gestures */
 }
-/* Ensure the color cycler shows pointer, not ew-resize, when hovered */
+/* Ensure the color cycler and AI preview show pointer, not ew-resize, when hovered */
 #playerBoxSlider #menuColorCycle,
 .player-box-slider #menuColorCycle,
-.player-box-slider .menu-color-box {
+.player-box-slider .menu-color-box,
+#aiPreviewCell {
     cursor: pointer;
 }
 

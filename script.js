@@ -612,7 +612,22 @@ if (onlinePlayerNameInput) {
     document.addEventListener('keydown', (e) => {
         // Only handle when menu is visible
         if (!menu || menu.style.display === 'none') return;
+/*
+        // Only allow slider/grid shortcuts if those elements are present and visible in the current menu
+        const slider = document.getElementById('playerBoxSlider');
+        const gridDec = document.getElementById('gridDec');
+        const gridInc = document.getElementById('gridInc');
+        const sliderVisible = slider && slider.offsetParent !== null;
+        const gridVisible = gridDec && gridDec.offsetParent !== null && gridInc && gridInc.offsetParent !== null;
 
+        // If neither slider nor grid controls are visible, block shortcuts for player count and grid size
+        const restrictKeys = [
+            'ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D', 'Home', 'End', '+', '=', '-',
+        ];
+        if (!sliderVisible && !gridVisible && restrictKeys.includes(e.key)) {
+            return;
+        }
+*/
         const ae = document.activeElement;
         const tag = ae && ae.tagName && ae.tagName.toLowerCase();
         const isEditable = !!(ae && (tag === 'input' || tag === 'textarea' || ae.isContentEditable));
@@ -1659,9 +1674,9 @@ if (onlinePlayerNameInput) {
         gridSize = newSize;
         playerCount = newPlayerCount;
 
-        // update CSS variable and layout
+        // update CSS variable for grid size; layout handled by CSS
         document.documentElement.style.setProperty('--grid-size', gridSize);
-        gridElement.style.gridTemplateColumns = `repeat(${gridSize}, 1fr)`;
+        // gridElement.style.gridTemplateColumns is NOT set here; CSS uses --grid-size
 
         // clear previous DOM cells
         while (gridElement.firstChild) gridElement.removeChild(gridElement.firstChild);
@@ -1669,13 +1684,13 @@ if (onlinePlayerNameInput) {
         // reset game state arrays according to new sizes
         grid = [];
         initialPlacements = Array(playerCount).fill(false);
-    gameWon = false;
-    menuShownAfterWin = false;
-    stopExplosionLoop();
+        gameWon = false;
+        menuShownAfterWin = false;
+        stopExplosionLoop();
         isProcessing = false;
         performanceMode = false;
-    // When creating a new level, start with the selected cycler color within the active palette
-    currentPlayer = computeStartPlayerIndex();
+        // When creating a new level, start with the selected cycler color within the active palette
+        currentPlayer = computeStartPlayerIndex();
 
         // recompute invalid initial positions for new size
         invalidInitialPositions = computeInvalidInitialPositions(gridSize);
@@ -1696,11 +1711,11 @@ if (onlinePlayerNameInput) {
 
         // highlight invalid positions with new layout
         highlightInvalidInitialPositions();
-    document.body.className = activeColors()[currentPlayer];
+        document.body.className = activeColors()[currentPlayer];
 
         // Reflect actual grid size in display value while menu is present
-    menuGridSizeVal = Math.max(3, newSize);
-    reflectGridSizeDisplay();
+        menuGridSizeVal = Math.max(3, newSize);
+        reflectGridSizeDisplay();
 
         // Ensure the visual player boxes reflect new player count
         highlightPlayerBoxes(clampPlayers(playerCount));
@@ -1936,10 +1951,8 @@ if (onlinePlayerNameInput) {
                 updateInnerCircle(cell, grid[i][j].player);
                 updateValueCircles(cell.querySelector('.inner-circle'), grid[i][j].value);
                 
-                if (grid[i][j].player === activeColors()[currentPlayer]) {
+                if (grid[i][j].player) {
                     cell.className = `cell ${grid[i][j].player}`;
-                } else if (grid[i][j].player) {
-                    cell.className = `cell hidden ${grid[i][j].player}`;
                 } else {
                     cell.className = 'cell';
                 }

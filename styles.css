@@ -1,3 +1,42 @@
+/* General style for player name input fields */
+.player-name-input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.12);
+    background: #fff;
+    box-sizing: border-box;
+    font: inherit;
+}
+.player-name-input::placeholder {
+    color: rgba(0,0,0,0.45);
+}
+/* Utility class to hide menus */
+.hidden {
+    display: none !important;
+}
+/* Main menu big buttons */
+.menu-main-btn {
+    width: 260px;
+    max-width: 90vw;
+    margin: 12px 0;
+    font-size: 1.4rem;
+    padding: 18px 0;
+    border-radius: 18px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.13);
+    letter-spacing: 0.04em;
+    font-weight: 800;
+    background: #5f95d5;
+    color: #fff;
+    transition: background 0.18s, color 0.18s;
+}
+.menu-main-btn:active {
+    background: #3a6ca8;
+}
+.menu-main-btn:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
+}
 html, body {
     height: 100%;
     margin: 0;
@@ -38,7 +77,7 @@ body {
     justify-content: center;
     align-items: center;
     background: rgba(0,0,0,0.45);
-    z-index: 101;
+    z-index: 100;
 }
 
 /* New flex column container holding header + menu */
@@ -682,3 +721,31 @@ body.blue { background-color: var(--body-blue); }
 body.purple { background-color: var(--body-purple); }
 body.magenta { background-color: var(--body-magenta); }
 /* #endregion */
+
+/* Top-right menu close button style */
+.menu-color-box.menu-close-btn {
+    background-color: var(--cell-bg);
+    position: relative;
+}
+.menu-color-box.menu-close-btn::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 48%;
+    height: 4px;
+    background: #111;
+    border-radius: 2px;
+    transform: translate(-50%, -50%) rotate(45deg);
+}
+.menu-color-box.menu-close-btn::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 48%;
+    height: 4px;
+    background: #111;
+    border-radius: 2px;
+    transform: translate(-50%, -50%) rotate(-45deg);
+}

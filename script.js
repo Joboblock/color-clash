@@ -187,6 +187,89 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!Number.isNaN(ad) && ad >= 1) aiPreviewValue = Math.max(1, Math.min(5, ad));
     }
 
+    // Combined top-right close button logic for local and online menus
+    function handleMenuClose(menuId) {
+        const menu = document.getElementById(menuId);
+        const firstMenu = document.getElementById('firstMenu');
+        const onlineMenu = document.getElementById('onlineMenu');
+        // Exception: if closing mainMenu and name input is visible, go to onlineMenu
+        if (menuId === 'mainMenu') {
+            const nameInput = document.getElementById('playerName');
+            if (nameInput && nameInput.style.display !== 'none') {
+                // Redirect to onlineMenu
+                if (menu && onlineMenu) {
+                    menu.classList.add('hidden');
+                    menu.setAttribute('aria-hidden', 'true');
+                    onlineMenu.classList.remove('hidden');
+                    onlineMenu.setAttribute('aria-hidden', 'false');
+                    return;
+                }
+            }
+        }
+        // Default: go to firstMenu
+        if (menu && firstMenu) {
+            menu.classList.add('hidden');
+            menu.setAttribute('aria-hidden', 'true');
+            firstMenu.classList.remove('hidden');
+            firstMenu.setAttribute('aria-hidden', 'false');
+        }
+    }
+    const menuTopRightBtn = document.getElementById('menuTopRightBtn');
+    if (menuTopRightBtn) {
+        menuTopRightBtn.addEventListener('click', () => handleMenuClose('mainMenu'));
+    }
+    const onlineTopRightBtn = document.getElementById('onlineTopRightBtn');
+    if (onlineTopRightBtn) {
+        onlineTopRightBtn.addEventListener('click', () => handleMenuClose('onlineMenu'));
+    }
+    // --- Main Menu Logic ---
+    const firstMenu = document.getElementById('firstMenu');
+    const mainMenu = document.getElementById('mainMenu');
+    const localGameBtn = document.getElementById('localGameBtn');
+    const onlineGameBtn = document.getElementById('onlineGameBtn');
+    const trainMainBtn = document.getElementById('trainMainBtn');
+
+    if (firstMenu && localGameBtn && mainMenu) {
+        // Hide mainMenu initially
+        mainMenu.classList.add('hidden');
+        mainMenu.setAttribute('aria-hidden', 'true');
+        // Show mainMenu for Local Game (hide name input)
+        localGameBtn.addEventListener('click', () => {
+            firstMenu.classList.add('hidden');
+            firstMenu.setAttribute('aria-hidden', 'true');
+            mainMenu.classList.remove('hidden');
+            mainMenu.setAttribute('aria-hidden', 'false');
+            // Hide name input
+            const nameInput = document.getElementById('playerName');
+            if (nameInput) nameInput.style.display = 'none';
+        });
+        // Show onlineMenu for Online Game
+        const onlineMenu = document.getElementById('onlineMenu');
+        const hostGameBtn = document.getElementById('hostGameBtn');
+        if (onlineGameBtn && onlineMenu && mainMenu) {
+            onlineGameBtn.addEventListener('click', () => {
+                firstMenu.classList.add('hidden');
+                firstMenu.setAttribute('aria-hidden', 'true');
+                mainMenu.classList.add('hidden');
+                mainMenu.setAttribute('aria-hidden', 'true');
+                onlineMenu.classList.remove('hidden');
+                onlineMenu.setAttribute('aria-hidden', 'false');
+            });
+        }
+        // Host Game button redirects to current online game menu (mainMenu with name input visible)
+        if (hostGameBtn && onlineMenu && mainMenu) {
+            hostGameBtn.addEventListener('click', () => {
+                onlineMenu.classList.add('hidden');
+                onlineMenu.setAttribute('aria-hidden', 'true');
+                mainMenu.classList.remove('hidden');
+                mainMenu.setAttribute('aria-hidden', 'false');
+                // Show name input
+                const nameInput = document.getElementById('playerName');
+                if (nameInput) nameInput.style.display = '';
+            });
+        }
+    }
+
     // Sanitize player name: replace spaces with underscores, remove non-alphanumerics, limit to 16
     if (playerNameInput) {
     try { playerNameInput.maxLength = 16; } catch { /* ignore */ }

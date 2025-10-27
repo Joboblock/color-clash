@@ -1,3 +1,32 @@
+<!-- Online Game Menu Overlay (hidden initially) -->
+    <div class="menu hidden" id="onlineMenu" aria-hidden="true">
+        <div class="menu-container">
+            <div class="game-header-panel">Online Game</div>
+            <div class="menu-panel" style="align-items: center;">
+                <div class="menu-grid">
+                    <div style="grid-column:2/-1;grid-row:1;align-self:center;width:100%;max-width:320px;margin-bottom:18px;">
+                        <input id="onlinePlayerName" class="player-name-input" type="text" placeholder="Name (3–16)" aria-label="Player name" maxlength="16" inputmode="latin" autocapitalize="none" autocomplete="off" spellcheck="false" />
+                    </div>
+                    <button id="onlineTopRightBtn" class="menu-color-box menu-close-btn" style="grid-column:8;grid-row:1;" aria-label="Close"></button>
+                    <div class="online-room-list" style="grid-column:1/-1;width:100%;max-width:340px;margin-bottom:18px;">
+                        <div class="room-list-title" style="font-weight:700;margin-bottom:8px;">Joinable Rooms</div>
+                        <ul id="roomList" style="list-style:none;padding:0;margin:0;">
+                            <li class="room-list-item" style="padding:10px 0;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;">
+                                <span>Room #1 (2/4)</span><button class="btn secondary" style="font-size:0.95rem;padding:6px 14px;">Join</button>
+                            </li>
+                            <li class="room-list-item" style="padding:10px 0;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;">
+                                <span>Room #2 (1/4)</span><button class="btn secondary" style="font-size:0.95rem;padding:6px 14px;">Join</button>
+                            </li>
+                            <li class="room-list-item" style="padding:10px 0;display:flex;justify-content:space-between;align-items:center;">
+                                <span>Room #3 (3/4)</span><button class="btn secondary" style="font-size:0.95rem;padding:6px 14px;">Join</button>
+                            </li>
+                        </ul>
+                    </div>
+                    <button id="hostGameBtn" class="btn menu-main-btn" style="grid-column:1/-1;margin-top:8px;">Host Game</button>
+                </div>
+            </div>
+        </div>
+    </div>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11,24 +40,33 @@
 <body>
     <div class="grid"></div>
 
-    <!-- Main Menu Overlay -->
-    <div class="menu" id="mainMenu" aria-hidden="false">
+    <!-- Initial Main Menu Overlay -->
+    <div class="menu" id="firstMenu" aria-hidden="false">
         <div class="menu-container">
             <div class="game-header-panel">Color Clash</div>
+            <div class="menu-panel" style="align-items: center;">
+                <button id="localGameBtn" class="btn menu-main-btn">Local Game</button>
+                <button id="onlineGameBtn" class="btn menu-main-btn">Online Game</button>
+                <button id="trainMainBtn" class="btn menu-main-btn">Train</button>
+            </div>
+        </div>
+    </div>
 
+    <!-- Main Game Menu Overlay (hidden initially) -->
+    <div class="menu hidden" id="mainMenu" aria-hidden="true">
+        <div class="menu-container">
+            <div class="game-header-panel">Color Clash</div>
             <div class="menu-panel">
-
                 <div class="control-row">
                     <div class="menu-grid">
                         <div id="menuColorCycle" class="menu-color-box" role="button" aria-label="Cycle starting color" title="starting color"></div>
-                        <input id="playerName" class="player-name-input" type="text" placeholder="Name (3–16)" aria-label="Player name" maxlength="16" inputmode="latin" autocapitalize="none" autocomplete="off" spellcheck="false" />
+                            <button id="menuTopRightBtn" class="menu-color-box menu-close-btn" style="grid-column:8;grid-row:1;" aria-label="Close"></button>
+                            <input id="playerName" class="player-name-input" type="text" placeholder="Name (3–16)" aria-label="Player name" maxlength="16" inputmode="latin" autocapitalize="none" autocomplete="off" spellcheck="false" style="grid-column:2/8;" />
                         <div id="playerBoxSlider" class="player-box-slider" role="slider"
                             aria-label="player count" aria-valuemin="2" aria-valuemax="8" aria-valuenow="2">
                             <div class="player-slider-label">Player Count</div>
                             <div class="slider-cells"></div>
                         </div>
-
-                        <!-- Grid Size tile: includes a header and three owned cells with +/- as left/right and center big number -->
                         <div class="grid-size-tile" aria-label="Grid size">
                             <div class="grid-size-label">Grid Size</div>
                             <div class="grid-size-cells">
@@ -39,8 +77,6 @@
                                 <button id="gridInc" class="size-cell btn-cell" type="button" aria-label="Increase grid size"><span aria-hidden="true">+</span></button>
                             </div>
                         </div>
-
-                        <!-- AI Strength preview tile on the right side of row 3 -->
                         <div class="ai-preview-tile" aria-label="AI Strength">
                             <div class="ai-preview-label">AI Strength</div>
                             <div class="grid-preview-cells">
@@ -49,15 +85,10 @@
                                 </div>
                             </div>
                         </div>
-                        <!-- Start and Train buttons in row 4, columns 4 and 5 -->
                         <button id="startBtn" class="btn" style="grid-row: 4; grid-column: 4;">Start</button>
                         <button id="trainBtn" class="btn secondary" style="grid-row: 4; grid-column: 5;">Train</button>
                     </div>
                 </div>
-
-
-                <!-- ...removed duplicate menu-grid with buttons... -->
-
                 <p class="menu-hint">Tip: you can also set <code>?players=&lt;n&gt;&amp;size=&lt;n&gt;</code> in the URL.</p>
             </div>
         </div>

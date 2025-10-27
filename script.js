@@ -273,50 +273,75 @@ document.addEventListener('DOMContentLoaded', () => {
     // Sanitize player name: replace spaces with underscores, remove non-alphanumerics, limit to 16
     if (playerNameInput) {
     try { playerNameInput.maxLength = 16; } catch { /* ignore */ }
-        const sanitizeName = (raw) => {
+        // Shared name sanitization and validity functions
+        window.sanitizeName = (raw) => {
             if (typeof raw !== 'string') return '';
             let s = raw.replace(/\s+/g, '_');
             s = s.replace(/[^A-Za-z0-9_]/g, '');
             if (s.length > 16) s = s.slice(0, 16);
             return s;
         };
-        const reflectValidity = (val) => {
+        window.reflectValidity = (inputEl, val) => {
             const tooShort = val.length > 0 && val.length < 3;
             if (tooShort) {
-                playerNameInput.classList.add('invalid');
-                playerNameInput.setAttribute('aria-invalid', 'true');
-                playerNameInput.title = 'Enter 3–16 letters or numbers (spaces become _)';
+                inputEl.classList.add('invalid');
+                inputEl.setAttribute('aria-invalid', 'true');
+                inputEl.title = 'Enter 3–16 letters or numbers (spaces become _)';
             } else {
-                playerNameInput.classList.remove('invalid');
-                playerNameInput.removeAttribute('aria-invalid');
-                playerNameInput.removeAttribute('title');
+                inputEl.classList.remove('invalid');
+                inputEl.removeAttribute('aria-invalid');
+                inputEl.removeAttribute('title');
             }
         };
         const handleSanitize = (e) => {
             const v = e.target.value;
-            const cleaned = sanitizeName(v);
+            const cleaned = window.sanitizeName(v);
             if (v !== cleaned) {
                 const pos = Math.min(cleaned.length, 16);
                 e.target.value = cleaned;
-                // best-effort caret restore to end
                 try { e.target.setSelectionRange(pos, pos); } catch { /* ignore */ }
             }
-            reflectValidity(e.target.value);
+            window.reflectValidity(e.target, e.target.value);
         };
         playerNameInput.addEventListener('input', handleSanitize);
         playerNameInput.addEventListener('blur', handleSanitize);
         playerNameInput.addEventListener('change', handleSanitize);
-        // Pressing Enter should close (blur) the text field
         playerNameInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 playerNameInput.blur();
             }
         });
-        // Initialize from any prefilled value
-        playerNameInput.value = sanitizeName(playerNameInput.value || '');
-        reflectValidity(playerNameInput.value);
+        playerNameInput.value = window.sanitizeName(playerNameInput.value || '');
+        window.reflectValidity(playerNameInput, playerNameInput.value);
     }
+
+// Online menu name input restrictions (reuse shared logic)
+const onlinePlayerNameInput = document.getElementById('onlinePlayerName');
+if (onlinePlayerNameInput) {
+    try { onlinePlayerNameInput.maxLength = 16; } catch { /* ignore */ }
+    const handleSanitize = (e) => {
+        const v = e.target.value;
+        const cleaned = window.sanitizeName(v);
+        if (v !== cleaned) {
+            const pos = Math.min(cleaned.length, 16);
+            e.target.value = cleaned;
+            try { e.target.setSelectionRange(pos, pos); } catch { /* ignore */ }
+        }
+        window.reflectValidity(e.target, e.target.value);
+    };
+    onlinePlayerNameInput.addEventListener('input', handleSanitize);
+    onlinePlayerNameInput.addEventListener('blur', handleSanitize);
+    onlinePlayerNameInput.addEventListener('change', handleSanitize);
+    onlinePlayerNameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            onlinePlayerNameInput.blur();
+        }
+    });
+    onlinePlayerNameInput.value = window.sanitizeName(onlinePlayerNameInput.value || '');
+    window.reflectValidity(onlinePlayerNameInput, onlinePlayerNameInput.value);
+}
 
     // set dynamic bounds
     const maxPlayers = playerColors.length;
@@ -436,6 +461,29 @@ document.addEventListener('DOMContentLoaded', () => {
             updateAIPreview();
         });
         menuColorCycle.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                cycleStartingColor();
+                const idx = startingColorIndex;
+                previewShiftLeftThenSnap(() => applyPlayerBoxColorsForIndex(idx));
+                updateAIPreview();
+            }
+        });
+    }
+
+    // Online menu color cycler functionality (reuse main cycler logic)
+    const onlineMenuColorCycle = document.getElementById('onlineMenuColorCycle');
+    if (onlineMenuColorCycle) {
+        onlineMenuColorCycle.tabIndex = 0;
+        // Initialize color on load
+        applyMenuColorBox(playerColors[startingColorIndex]);
+        onlineMenuColorCycle.addEventListener('click', () => {
+            cycleStartingColor();
+            const idx = startingColorIndex;
+            previewShiftLeftThenSnap(() => applyPlayerBoxColorsForIndex(idx));
+            updateAIPreview();
+        });
+        onlineMenuColorCycle.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 cycleStartingColor();
@@ -1193,11 +1241,17 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void}
      */
     function applyMenuColorBox(colorKey) {
-        if (!menuColorCycle) return;
+        // Apply color to both main and online cyclers if present
+        const cyclers = [
+            document.getElementById('menuColorCycle'),
+            document.getElementById('onlineMenuColorCycle')
+        ].filter(Boolean);
         const outer = getComputedStyle(document.documentElement).getPropertyValue(`--cell-${colorKey}`) || '';
         const inner = getComputedStyle(document.documentElement).getPropertyValue(`--inner-${colorKey}`) || '';
-        menuColorCycle.style.setProperty('--menu-outer-color', outer.trim());
-        menuColorCycle.style.setProperty('--menu-inner-color', inner.trim());
+        cyclers.forEach(cycler => {
+            cycler.style.setProperty('--menu-outer-color', outer.trim());
+            cycler.style.setProperty('--menu-inner-color', inner.trim());
+        });
     }
 
     /**

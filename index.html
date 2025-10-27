@@ -2,12 +2,11 @@
     <div class="menu hidden" id="onlineMenu" aria-hidden="true">
         <div class="menu-container">
             <div class="game-header-panel">Online Game</div>
-            <div class="menu-panel" style="align-items: center;">
+            <div class="menu-panel">
                 <div class="menu-grid">
-                    <div style="grid-column:2/-1;grid-row:1;align-self:center;width:100%;max-width:320px;margin-bottom:18px;">
-                        <input id="onlinePlayerName" class="player-name-input" type="text" placeholder="Name (3–16)" aria-label="Player name" maxlength="16" inputmode="latin" autocapitalize="none" autocomplete="off" spellcheck="false" />
-                    </div>
+                    <div id="onlineMenuColorCycle" class="menu-color-box" role="button" aria-label="Cycle starting color" title="starting color"></div>
                     <button id="onlineTopRightBtn" class="menu-color-box menu-close-btn" style="grid-column:8;grid-row:1;" aria-label="Close"></button>
+                    <input id="onlinePlayerName" class="player-name-input" type="text" placeholder="Name (3–16)" aria-label="Player name" maxlength="16" inputmode="latin" autocapitalize="none" autocomplete="off" spellcheck="false" style="grid-column:2/8;" />
                     <div class="online-room-list" style="grid-column:1/-1;width:100%;max-width:340px;margin-bottom:18px;">
                         <div class="room-list-title" style="font-weight:700;margin-bottom:8px;">Joinable Rooms</div>
                         <ul id="roomList" style="list-style:none;padding:0;margin:0;">

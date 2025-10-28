@@ -518,15 +518,6 @@ if (onlinePlayerNameInput) {
             previewShiftLeftThenSnap(() => applyPlayerBoxColorsForIndex(idx));
             updateAIPreview();
         });
-        menuColorCycle.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                cycleStartingColor();
-                const idx = startingColorIndex;
-                previewShiftLeftThenSnap(() => applyPlayerBoxColorsForIndex(idx));
-                updateAIPreview();
-            }
-        });
     }
 
     // Online menu color cycler functionality (reuse main cycler logic)
@@ -540,15 +531,6 @@ if (onlinePlayerNameInput) {
             const idx = startingColorIndex;
             previewShiftLeftThenSnap(() => applyPlayerBoxColorsForIndex(idx));
             updateAIPreview();
-        });
-        onlineMenuColorCycle.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                cycleStartingColor();
-                const idx = startingColorIndex;
-                previewShiftLeftThenSnap(() => applyPlayerBoxColorsForIndex(idx));
-                updateAIPreview();
-            }
         });
     }
 
@@ -635,11 +617,6 @@ if (onlinePlayerNameInput) {
         if (!isButton) {
             el.setAttribute('role', 'button');
             if (!el.hasAttribute('tabindex')) el.tabIndex = 0;
-            el.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); return; }
-                if ((e.key === 'ArrowLeft' || e.key === '-') && el.id === 'gridDec') { e.preventDefault(); el.click(); return; }
-                if ((e.key === 'ArrowRight' || e.key === '+' || e.key === '=') && el.id === 'gridInc') { e.preventDefault(); el.click(); return; }
-            });
         }
     }
     makeAccessibleButton(gridDecBtn);
@@ -665,7 +642,7 @@ if (onlinePlayerNameInput) {
         }
 
         // Handle left/right or a/d shortcut to change player slider when nothing is focused
-        if ((e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A' || e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') && playerBoxSlider && (!document.activeElement || document.activeElement === document.body || document.activeElement === document.documentElement)) {
+        if ((e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A' || e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') && playerBoxSlider && playerBoxSlider.offsetParent !== null && (!document.activeElement || document.activeElement === document.body || document.activeElement === document.documentElement)) {
             let newCount = menuPlayerCount;
             if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
                 newCount = clampPlayers(menuPlayerCount - 1);
@@ -1296,12 +1273,6 @@ document.addEventListener('keydown', (e) => {
         aiPreviewCell.setAttribute('role', 'button');
         aiPreviewCell.tabIndex = 0;
         aiPreviewCell.addEventListener('click', onAIPreviewClick);
-        aiPreviewCell.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onAIPreviewClick();
-            }
-        });
     }
 
     /**

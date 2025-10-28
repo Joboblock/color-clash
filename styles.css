@@ -699,7 +699,7 @@ body {
 .cell.magenta { background-color: var(--cell-magenta) !important; }
 
 .cell.invalid { background-color: var(--invalid-color); }
-.cell.hidden { background-color: var(--cell-bg) !important;}
+.cell.inactive { background-color: var(--cell-bg) !important;}
 
 /* Player Colors for Inner Circles (Strong) (use JS-set CSS variables) */
 .inner-circle.red { background-color: var(--inner-red); }

@@ -675,7 +675,7 @@ if (onlinePlayerNameInput) {
             if (newCount !== menuPlayerCount) {
                 e.preventDefault();
                 onMenuPlayerCountChanged(newCount);
-                try { playerBoxSlider.focus(); } catch {}
+                try { playerBoxSlider.focus(); } catch { /* empty */ }
                 return true;
             }
         }
@@ -709,12 +709,9 @@ if (onlinePlayerNameInput) {
             return false;
         }
         const curRect = focused.getBoundingClientRect();
-        let originX = curRect.left + curRect.width / 2;
-        let originY = curRect.top + curRect.height / 2;
         // For up/down/left/right, use center and left/right midpoints for origin
         const centerX = curRect.left + curRect.width / 2;
         const centerY = curRect.top + curRect.height / 2;
-        const halfHeight = curRect.height / 2;
         const originPoints = [
             [centerX, centerY],
             [curRect.left, centerY],
@@ -1946,9 +1943,10 @@ document.addEventListener('keydown', (e) => {
                 const cell = document.querySelector(`.cell[data-row="${i}"][data-col="${j}"]`);
                 updateInnerCircle(cell, grid[i][j].player);
                 updateValueCircles(cell.querySelector('.inner-circle'), grid[i][j].value);
-                
-                if (grid[i][j].player) {
+                if (grid[i][j].player === activeColors()[currentPlayer]) {
                     cell.className = `cell ${grid[i][j].player}`;
+                } else if (grid[i][j].player) {
+                    cell.className = `cell inactive ${grid[i][j].player}`;
                 } else {
                     cell.className = 'cell';
                 }

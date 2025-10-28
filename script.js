@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function onBodyPointerDown(ev) {
         if (!isMobileDevice()) return;
         // Only active during gameplay (menu hidden)
-        if (menu && menu.style.display !== 'none') return;
+    if (mainMenu && !mainMenu.classList.contains('hidden')) return;
         // Ignore taps inside the grid
         const target = ev.target;
         if (target && (target === gridElement || target.closest('.grid'))) return;
@@ -121,6 +121,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Define available player colors
     // Start at green, move 5 colors forwards per step (Most contrasting colors)
     const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'orange', 'purple'];
+    let startingColorIndex = playerColors.indexOf('green');
+    if (startingColorIndex < 0) startingColorIndex = 0;
     let gameColors = null; // null until a game is started
     /**
      * Get the current active color palette (game palette if set, otherwise full list).
@@ -164,7 +166,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 //#region Menu Stuff
-    const menu = document.getElementById('mainMenu');
     const menuHint = document.querySelector('.menu-hint');
     // removed hidden native range input; visual slider maintains menuPlayerCount
     let menuPlayerCount = playerCount; // current selection from visual slider
@@ -179,12 +180,117 @@ document.addEventListener('DOMContentLoaded', () => {
     const gridDecBtn = document.getElementById('gridDec');
     const gridIncBtn = document.getElementById('gridInc');
     const aiPreviewCell = document.getElementById('aiPreviewCell');
-    const menuGrid = document.querySelector('.menu-grid');
+
     // Initialize AI preview value from URL (?ai_depth=) if present, else 1; clamp to 1..5 for UI
     let aiPreviewValue = 1;
     {
-        const ad = parseInt(getQueryParam('ai_depth') || '', 10);
+        const params = new URLSearchParams(window.location.search);
+        const ad = parseInt(params.get('ai_depth') || '', 10);
         if (!Number.isNaN(ad) && ad >= 1) aiPreviewValue = Math.max(1, Math.min(5, ad));
+    }
+
+    // Decide initial menu visibility: only open menu if no players/size params OR menu param is present
+    const initialParams = new URLSearchParams(window.location.search);
+    const hasPlayersOrSize = initialParams.has('players') || initialParams.has('size');
+    const isMenu = initialParams.has('menu');
+
+    const firstMenu = document.getElementById('firstMenu');
+    const mainMenu = document.getElementById('mainMenu');
+    const localGameBtn = document.getElementById('localGameBtn');
+    const onlineGameBtn = document.getElementById('onlineGameBtn');
+    const trainMainBtn = document.getElementById('trainMainBtn');
+
+    // --- Helpers ---
+    const setHidden = (el, hidden) => {
+        if (!el) return;
+        el.classList.toggle('hidden', !!hidden);
+        el.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+    };
+
+    const replaceUrlWithParams = (params) => {
+        const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+        window.history.replaceState(null, '', newUrl);
+    };
+
+    const ensureMenuParamIfNeeded = (force = false) => {
+        const params = new URLSearchParams(window.location.search);
+        const hasParams = params.has('players') || params.has('size');
+        if (force || (!params.has('menu') && !hasParams)) {
+            params.set('menu', 'true');
+            replaceUrlWithParams(params);
+            return true;
+        }
+        return false;
+    };
+
+    // --- Main behaviour preserved, but simplified ---
+    if (hasPlayersOrSize && !isMenu) {
+        // hide menu when explicit game params provided (and not in menu mode)
+        setHidden(firstMenu, true);
+        setHidden(mainMenu, true);
+    } else {
+        // Open / make menu available
+        if (mainMenu) setHidden(mainMenu, false);
+
+        // Non-fatal: call these if available (preserves original side-effects)
+        if (typeof updateRandomTip === 'function') try { updateRandomTip(); } catch { /* empty */ }
+        if (typeof updateAIPreview === 'function') try { updateAIPreview(); } catch { /* empty */ }
+
+        // Ensure ?menu=true is present when the script decides to open menu
+        if (!isMenu) ensureMenuParamIfNeeded(true);
+
+        // --- Main Menu Logic (firstMenu exists => two-step menu flow) ---
+        if (firstMenu && localGameBtn && mainMenu) {
+            // Hide mainMenu initially (firstMenu is the starting UI)
+            setHidden(mainMenu, true);
+
+            // Ensure ?menu=true is present if no parameters (match previous behaviour)
+            const urlParams = new URLSearchParams(window.location.search);
+            const hasParams = urlParams.has('players') || urlParams.has('size');
+            let showMenu = urlParams.get('menu') === 'true';
+            if (!hasParams && !showMenu) {
+                urlParams.set('menu', 'true');
+                replaceUrlWithParams(urlParams);
+                showMenu = true;
+            }
+
+            setHidden(firstMenu, !showMenu);
+
+            // Attach event listeners once (idempotent guard)
+            if (!document.body.dataset.menuInited) {
+                document.body.dataset.menuInited = '1';
+
+                // Show mainMenu for Local Game (hide name input)
+                localGameBtn.addEventListener('click', () => {
+                    setHidden(firstMenu, true);
+                    setHidden(mainMenu, false);
+                    if (playerNameInput) playerNameInput.style.display = 'none';
+                });
+
+                // Show onlineMenu for Online Game
+                const onlineMenu = document.getElementById('onlineMenu');
+                const hostGameBtn = document.getElementById('hostGameBtn');
+                if (onlineGameBtn && onlineMenu && mainMenu) {
+                    onlineGameBtn.addEventListener('click', () => {
+                        setHidden(firstMenu, true);
+                        setHidden(mainMenu, true);
+                        setHidden(onlineMenu, false);
+                    });
+                }
+
+                // Host Game button returns to mainMenu and shows name input
+                if (hostGameBtn && onlineMenu && mainMenu) {
+                    hostGameBtn.addEventListener('click', () => {
+                        setHidden(onlineMenu, true);
+                        setHidden(mainMenu, false);
+                        if (playerNameInput) playerNameInput.style.display = '';
+                    });
+                }
+            }
+        } else {
+            // If firstMenu is absent, ensure mainMenu visibility (fall back)
+            setHidden(mainMenu, false);
+        }
     }
 
     // Combined top-right close button logic for local and online menus
@@ -223,52 +329,6 @@ document.addEventListener('DOMContentLoaded', () => {
         onlineTopRightBtn.addEventListener('click', () => handleMenuClose('onlineMenu'));
     }
     // --- Main Menu Logic ---
-    const firstMenu = document.getElementById('firstMenu');
-    const mainMenu = document.getElementById('mainMenu');
-    const localGameBtn = document.getElementById('localGameBtn');
-    const onlineGameBtn = document.getElementById('onlineGameBtn');
-    const trainMainBtn = document.getElementById('trainMainBtn');
-
-    if (firstMenu && localGameBtn && mainMenu) {
-        // Hide mainMenu initially
-        mainMenu.classList.add('hidden');
-        mainMenu.setAttribute('aria-hidden', 'true');
-        // Show mainMenu for Local Game (hide name input)
-        localGameBtn.addEventListener('click', () => {
-            firstMenu.classList.add('hidden');
-            firstMenu.setAttribute('aria-hidden', 'true');
-            mainMenu.classList.remove('hidden');
-            mainMenu.setAttribute('aria-hidden', 'false');
-            // Hide name input
-            const nameInput = document.getElementById('playerName');
-            if (nameInput) nameInput.style.display = 'none';
-        });
-        // Show onlineMenu for Online Game
-        const onlineMenu = document.getElementById('onlineMenu');
-        const hostGameBtn = document.getElementById('hostGameBtn');
-        if (onlineGameBtn && onlineMenu && mainMenu) {
-            onlineGameBtn.addEventListener('click', () => {
-                firstMenu.classList.add('hidden');
-                firstMenu.setAttribute('aria-hidden', 'true');
-                mainMenu.classList.add('hidden');
-                mainMenu.setAttribute('aria-hidden', 'true');
-                onlineMenu.classList.remove('hidden');
-                onlineMenu.setAttribute('aria-hidden', 'false');
-            });
-        }
-        // Host Game button redirects to current online game menu (mainMenu with name input visible)
-        if (hostGameBtn && onlineMenu && mainMenu) {
-            hostGameBtn.addEventListener('click', () => {
-                onlineMenu.classList.add('hidden');
-                onlineMenu.setAttribute('aria-hidden', 'true');
-                mainMenu.classList.remove('hidden');
-                mainMenu.setAttribute('aria-hidden', 'false');
-                // Show name input
-                const nameInput = document.getElementById('playerName');
-                if (nameInput) nameInput.style.display = '';
-            });
-        }
-    }
 
     // Sanitize player name: replace spaces with underscores, remove non-alphanumerics, limit to 16
     if (playerNameInput) {
@@ -401,8 +461,6 @@ if (onlinePlayerNameInput) {
     });
 
     // Starting color cycler: init to green and cycle through playerColors on click
-    let startingColorIndex = playerColors.indexOf('green');
-    if (startingColorIndex < 0) startingColorIndex = 0;
 
     buildPlayerBoxes();
     // Make the player slider keyboard-accessible
@@ -492,27 +550,6 @@ if (onlinePlayerNameInput) {
                 updateAIPreview();
             }
         });
-    }
-
-    // Decide initial menu visibility: only open menu if no players/size params OR menu param is present
-    const initialParams = new URLSearchParams(window.location.search);
-    const hasPlayersOrSize = initialParams.has('players') || initialParams.has('size');
-    const isMenu = initialParams.has('menu');
-    if (hasPlayersOrSize && !isMenu) {
-        // hide menu when explicit game params provided (and not in menu mode)
-        if (menu) menu.style.display = 'none';
-    } else {
-        if (menu) menu.style.display = '';
-        updateRandomTip();
-        // Reflect URL-provided ai_depth in the preview when opening menu
-        updateAIPreview();
-        // Ensure the URL reflects menu state so back-button can navigate in-app
-        if (!isMenu) {
-            const params = new URLSearchParams(window.location.search);
-            params.set('menu', 'true');
-            const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-            window.history.replaceState(null, '', newUrl);
-        }
     }
 
     // Handle browser navigation to toggle between menu and game instead of leaving the app
@@ -611,7 +648,7 @@ if (onlinePlayerNameInput) {
     // Global keyboard shortcuts when the menu is visible
     document.addEventListener('keydown', (e) => {
         // Only handle when menu is visible
-        if (!menu || menu.style.display === 'none') return;
+    if (!mainMenu || mainMenu.classList.contains('hidden')) return;
 
         // Only allow slider/grid shortcuts if those elements are present and visible in the current menu
         const slider = document.getElementById('playerBoxSlider');
@@ -888,7 +925,7 @@ if (onlinePlayerNameInput) {
         gameColors = computeSelectedColors(p);
 
         // Hide menu and start a fresh game with the chosen settings
-        if (menu) menu.style.display = 'none';
+    if (mainMenu) mainMenu.classList.add('hidden');
         trainMode = false;
         recreateGrid(s, p);
     });
@@ -921,7 +958,7 @@ if (onlinePlayerNameInput) {
             gameColors = computeSelectedColors(p);
 
             // Hide menu and start train mode immediately
-            if (menu) menu.style.display = 'none';
+            if (mainMenu) mainMenu.classList.add('hidden');
             trainMode = true;
             // Apply the chosen AI depth immediately for this session
             try { aiDepth = Math.max(1, parseInt(String(aiPreviewValue), 10)); } catch { /* ignore */ }
@@ -941,7 +978,7 @@ if (onlinePlayerNameInput) {
         const hasPS = params.has('players') || params.has('size');
         const showMenu = params.has('menu') || !hasPS;
         if (showMenu) {
-            if (menu) menu.style.display = '';
+    if (mainMenu) mainMenu.classList.remove('hidden');
             updateRandomTip();
             // When returning to the menu, reflect current chosen color on the background
             setMenuBodyColor();
@@ -960,7 +997,7 @@ if (onlinePlayerNameInput) {
         const p = clampPlayers(parseInt(params.get('players') || '', 10) || 2);
         let s = parseInt(params.get('size') || '', 10);
         if (!Number.isInteger(s)) s = Math.max(3, 3 + p);
-    if (menu) menu.style.display = 'none';
+    if (mainMenu) mainMenu.classList.add('hidden');
     // Enable train mode if any AI-related parameter exists in the URL
     trainMode = params.has('ai_depth') || params.has('ai_k');
         // Update AI depth from URL if provided
@@ -1345,7 +1382,7 @@ if (onlinePlayerNameInput) {
      * @returns {void}
      */
     function setMenuBodyColor() {
-        if (!menu || menu.style.display === 'none') return;
+    if (!mainMenu || mainMenu.classList.contains('hidden')) return;
         const colorKey = playerColors[startingColorIndex] || 'green';
         document.body.className = colorKey;
     }
@@ -1583,7 +1620,7 @@ if (onlinePlayerNameInput) {
         // Keyboard navigation for game grid
         document.addEventListener('keydown', (e) => {
             // Only handle when menu is hidden (game mode)
-            if (menu && menu.style.display !== 'none') return;
+            if (mainMenu && !mainMenu.classList.contains('hidden')) return;
             const gridEl = document.querySelector('.grid');
             if (!gridEl) return;
             const key = e.key;
@@ -1671,7 +1708,7 @@ if (onlinePlayerNameInput) {
 
         // Add Enter/Space key activation for focused .cell elements in game mode
         document.addEventListener('keydown', (e) => {
-            if (menu && menu.style.display !== 'none') return;
+            if (mainMenu && !mainMenu.classList.contains('hidden')) return;
             const gridEl = document.querySelector('.grid');
             if (!gridEl) return;
             const key = e.key;
@@ -1852,7 +1889,7 @@ if (onlinePlayerNameInput) {
      */
     function processExplosions() {
         // If the menu is visible, stop looping (prevents background chains while in menu)
-        if (menu && menu.style.display !== 'none') {
+    if (mainMenu && !mainMenu.classList.contains('hidden')) {
             stopExplosionLoop();
             return;
         }
@@ -1939,7 +1976,7 @@ if (onlinePlayerNameInput) {
 
         explosionTimerId = setTimeout(() => {
             // Stop if the menu is visible
-            if (menu && menu.style.display !== 'none') {
+            if (mainMenu && !mainMenu.classList.contains('hidden')) {
                 stopExplosionLoop();
                 return;
             }
@@ -2286,13 +2323,13 @@ if (onlinePlayerNameInput) {
                 // Clear focus from any grid cell before showing the menu
                 clearCellFocus();
                 // Open the menu by adding menu=true to the URL
-                const params = new URLSearchParams(window.location.search);
-                params.set('menu', 'true');
-                const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+                const urlParams = new URLSearchParams(window.location.search);
+                urlParams.set('menu', 'true');
+                const newUrl = `${window.location.pathname}?${urlParams.toString()}${window.location.hash || ''}`;
                 // Update the URL without reloading the page
                 window.history.replaceState(null, '', newUrl);
                 // Show the menu overlay
-                if (menu) menu.style.display = '';
+                if (mainMenu) mainMenu.classList.remove('hidden');
                 updateRandomTip();
                 // When showing the menu, exit fullscreen to restore browser UI if needed
                 exitFullscreenIfPossible();
@@ -2321,11 +2358,11 @@ if (onlinePlayerNameInput) {
         if (gameWon || isProcessing) return;
         if (currentPlayer === humanPlayer) return;
         // If the menu is open/visible, do not run AI moves
-        if (menu && menu.style.display !== 'none') return;
+    if (mainMenu && !mainMenu.classList.contains('hidden')) return;
 
         setTimeout(() => {
             if (isProcessing || gameWon || currentPlayer === humanPlayer) return;
-            if (menu && menu.style.display !== 'none') return;
+            if (mainMenu && !mainMenu.classList.contains('hidden')) return;
             aiMakeMoveFor(currentPlayer);
         }, 350);
     }

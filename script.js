@@ -179,7 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const gridDecBtn = document.getElementById('gridDec');
     const gridIncBtn = document.getElementById('gridInc');
     const aiPreviewCell = document.getElementById('aiPreviewCell');
-    const playerGridWrapper = document.querySelector('.menu-grid');
+    const menuGrid = document.querySelector('.menu-grid');
     // Initialize AI preview value from URL (?ai_depth=) if present, else 1; clamp to 1..5 for UI
     let aiPreviewValue = 1;
     {
@@ -612,7 +612,7 @@ if (onlinePlayerNameInput) {
     document.addEventListener('keydown', (e) => {
         // Only handle when menu is visible
         if (!menu || menu.style.display === 'none') return;
-/*
+
         // Only allow slider/grid shortcuts if those elements are present and visible in the current menu
         const slider = document.getElementById('playerBoxSlider');
         const gridDec = document.getElementById('gridDec');
@@ -627,7 +627,7 @@ if (onlinePlayerNameInput) {
         if (!sliderVisible && !gridVisible && restrictKeys.includes(e.key)) {
             return;
         }
-*/
+
         const ae = document.activeElement;
         const tag = ae && ae.tagName && ae.tagName.toLowerCase();
         const isEditable = !!(ae && (tag === 'input' || tag === 'textarea' || ae.isContentEditable));
@@ -684,19 +684,46 @@ if (onlinePlayerNameInput) {
 
         // Helper to move focus spatially within the menu-grid from a given origin element
         const tryMoveFocusFrom = (fromEl, direction) => {
-            if (!playerGridWrapper) return false;
+            console.log('[tryMoveFocusFrom] called', { fromEl, direction });
+            if (!(fromEl instanceof HTMLElement)) {
+                console.log('[tryMoveFocusFrom] fromEl is not an HTMLElement', { fromEl });
+                return false;
+            }
+            // Find the closest .menu-grid ancestor for this element
+            const localMenuGrid = fromEl.closest('.menu-grid');
+            if (!localMenuGrid) {
+                console.log('[tryMoveFocusFrom] No .menu-grid ancestor found for fromEl', { fromEl });
+                return false;
+            }
             // Only attempt spatial nav if the origin is inside the wrapper
-            if (!(fromEl instanceof HTMLElement) || !playerGridWrapper.contains(fromEl)) return false;
+            if (!localMenuGrid.contains(fromEl)) {
+                let parentContainer = fromEl.parentElement;
+                let containerInfo = parentContainer ? parentContainer : fromEl;
+                console.log('[tryMoveFocusFrom] fromEl not inside its closest menuGrid', {
+                    fromEl,
+                    parentContainer: containerInfo,
+                    parentSelector: parentContainer ? parentContainer.className || parentContainer.id || parentContainer.tagName : null,
+                    localMenuGrid,
+                    parentIsMenuGrid: parentContainer === localMenuGrid,
+                    menuGridIsSameNode: localMenuGrid.isSameNode && parentContainer ? localMenuGrid.isSameNode(parentContainer) : undefined
+                });
+                return false;
+            }
             const focusableSelector = 'button,[role="button"],[role="slider"],a[href],input:not([type="hidden"]),select,textarea,[tabindex]:not([tabindex="-1"])';
-            const all = Array.from(playerGridWrapper.querySelectorAll(focusableSelector));
+            const all = Array.from(localMenuGrid.querySelectorAll(focusableSelector));
+            console.log('[tryMoveFocusFrom] found focusable elements', all);
             // Include disabled/aria-disabled in the list so current element can still navigate away
             const focusables = all.filter(el => {
                 if (!(el instanceof HTMLElement)) return false;
                 const r = el.getBoundingClientRect();
                 return r.width > 0 && r.height > 0;
             });
-            if (focusables.length === 0) return false;
-            if (!focusables.includes(fromEl)) return false;
+            console.log('[tryMoveFocusFrom] filtered focusables', focusables);
+            if (focusables.length === 0) { console.log('[tryMoveFocusFrom] no focusables'); return false; }
+            if (!focusables.includes(fromEl)) {
+                console.log('[tryMoveFocusFrom] fromEl not in focusables', { fromEl });
+                return false;
+            }
 
             const curRect = fromEl.getBoundingClientRect();
             const originX = curRect.left + 1; // left edge origin for multi-cell elements
@@ -767,10 +794,12 @@ if (onlinePlayerNameInput) {
                     }
                 }
             }
+            console.log('[tryMoveFocusFrom] best candidate', best);
             if (best) {
-                try { best.focus(); } catch { /* ignore */ }
+                try { best.focus(); console.log('[tryMoveFocusFrom] focused', best); } catch { /* ignore */ }
                 return true;
             }
+            console.log('[tryMoveFocusFrom] no candidate found');
             return false;
         };
         // Convenience wrapper using the currently focused element as origin

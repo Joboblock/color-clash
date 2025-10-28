@@ -224,6 +224,29 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- Main behaviour preserved, but simplified ---
+    /**
+     * Set main menu mode: 'local', 'host', or 'train'.
+     * Adjusts header, button visibility, and player name input.
+     * @param {'local'|'host'|'train'} mode
+     */
+    function setMainMenuMode(mode) {
+        const mainMenu = document.getElementById('mainMenu');
+        const header = mainMenu ? mainMenu.querySelector('.game-header-panel') : null;
+        const startBtn = document.getElementById('startBtn');
+        const trainBtn = document.getElementById('trainBtn');
+        const playerNameInput = document.getElementById('playerName');
+        if (!mainMenu) return;
+        if (header) {
+            if (mode === 'train') header.textContent = 'Train Mode';
+            else if (mode === 'host') header.textContent = 'Online Game';
+            else header.textContent = 'Color Clash';
+        }
+        if (startBtn) startBtn.style.display = (mode === 'train' || mode === 'host') ? 'none' : '';
+        if (trainBtn) trainBtn.style.display = (mode === 'train') ? '' : 'none';
+        if (playerNameInput) playerNameInput.style.display = (mode === 'host') ? '' : 'none';
+        const aiStrengthTile = document.getElementById('aiStrengthTile');
+        if (aiStrengthTile) aiStrengthTile.style.display = (mode === 'train') ? '' : 'none';
+    }
     if (hasPlayersOrSize && !isMenu) {
         // hide menu when explicit game params provided (and not in menu mode)
         setHidden(firstMenu, true);
@@ -264,7 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 localGameBtn.addEventListener('click', () => {
                     setHidden(firstMenu, true);
                     setHidden(mainMenu, false);
-                    if (playerNameInput) playerNameInput.style.display = 'none';
+                    setMainMenuMode('local');
                 });
 
                 // Show onlineMenu for Online Game
@@ -284,8 +307,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         setHidden(onlineMenu, true);
                         setHidden(mainMenu, false);
                         if (playerNameInput) playerNameInput.style.display = '';
+                        // Mark mainMenu as opened by host for close logic
+                        mainMenu.dataset.openedBy = 'host';
                     });
                 }
+                // Train Mode button logic
+                trainMainBtn.addEventListener('click', () => {
+                    setHidden(firstMenu, true);
+                    setHidden(mainMenu, false);
+                    setMainMenuMode('train');
+                });
             }
         } else {
             // If firstMenu is absent, ensure mainMenu visibility (fall back)
@@ -298,21 +329,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const menu = document.getElementById(menuId);
         const firstMenu = document.getElementById('firstMenu');
         const onlineMenu = document.getElementById('onlineMenu');
-        // Exception: if closing mainMenu and name input is visible, go to onlineMenu
-        if (menuId === 'mainMenu') {
-            const nameInput = document.getElementById('playerName');
-            if (nameInput && nameInput.style.display !== 'none') {
-                // Redirect to onlineMenu
-                if (menu && onlineMenu) {
-                    menu.classList.add('hidden');
-                    menu.setAttribute('aria-hidden', 'true');
-                    onlineMenu.classList.remove('hidden');
-                    onlineMenu.setAttribute('aria-hidden', 'false');
-                    return;
-                }
-            }
+    setMainMenuMode('local'); // Always restore default UI when closing mainMenu
+        // Exception: if mainMenu was opened by hostGameBtn, redirect to onlineMenu
+        if (menuId === 'mainMenu' && menu && onlineMenu && menu.dataset.openedBy === 'host') {
+            menu.classList.add('hidden');
+            menu.setAttribute('aria-hidden', 'true');
+            onlineMenu.classList.remove('hidden');
+            onlineMenu.setAttribute('aria-hidden', 'false');
+            menu.dataset.openedBy = '';
+            return;
         }
-        // Default: go to firstMenu
+        // Default: always redirect to firstMenu
         if (menu && firstMenu) {
             menu.classList.add('hidden');
             menu.setAttribute('aria-hidden', 'true');
@@ -329,6 +356,8 @@ document.addEventListener('DOMContentLoaded', () => {
         onlineTopRightBtn.addEventListener('click', () => handleMenuClose('onlineMenu'));
     }
     // --- Main Menu Logic ---
+
+    // Helper to toggle Train Mode UI state in mainMenu
 
     // Sanitize player name: replace spaces with underscores, remove non-alphanumerics, limit to 16
     if (playerNameInput) {

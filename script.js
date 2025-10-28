@@ -643,266 +643,196 @@ if (onlinePlayerNameInput) {
         }
     }
     makeAccessibleButton(gridDecBtn);
-    makeAccessibleButton(gridIncBtn);
+    // Utility: check if any menu overlay is open
+    function isAnyMenuOpen() {
+        const menus = [mainMenu, firstMenu, document.getElementById('onlineMenu')];
+        return menus.some(m => m && !m.classList.contains('hidden'));
+    }
 
-    // Global keyboard shortcuts when the menu is visible
-    document.addEventListener('keydown', (e) => {
-        // Only handle when menu is visible
-    if (!mainMenu || mainMenu.classList.contains('hidden')) return;
-
-        // Only allow slider/grid shortcuts if those elements are present and visible in the current menu
-        const slider = document.getElementById('playerBoxSlider');
-        const gridDec = document.getElementById('gridDec');
-        const gridInc = document.getElementById('gridInc');
-        const sliderVisible = slider && slider.offsetParent !== null;
-        const gridVisible = gridDec && gridDec.offsetParent !== null && gridInc && gridInc.offsetParent !== null;
-
-        // If neither slider nor grid controls are visible, block shortcuts for player count and grid size
-        const restrictKeys = [
-            'ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D', 'Home', 'End', '+', '=', '-',
-        ];
-        if (!sliderVisible && !gridVisible && restrictKeys.includes(e.key)) {
-            return;
-        }
-
-        const ae = document.activeElement;
-        const tag = ae && ae.tagName && ae.tagName.toLowerCase();
-        const isEditable = !!(ae && (tag === 'input' || tag === 'textarea' || ae.isContentEditable));
-
-        // ESC should blur the currently focused element (not just inputs)
-        if (e.key === 'Escape') {
-            try { if (ae && typeof ae.blur === 'function') ae.blur(); } catch { /* ignore */ }
-            e.preventDefault();
-            return;
-        }
-
-        // If focused element is editable:
-        //  - WASD should always be typing (do not intercept)
-        //  - Arrow keys: if the editable is empty -> allow menu navigation; otherwise let arrow keys act inside the field
-        // If nothing editable is focused, map WASD -> Arrows and handle navigation normally.
-
-        // If editable and user pressed a WASD key => don't intercept (allow typing)
-        const lower = (k) => (typeof k === 'string' ? k.toLowerCase() : k);
-        const isWasd = ['w', 'a', 's', 'd'].includes(lower(e.key));
-        if (isEditable && isWasd) {
-            // Let the character be inserted into the field
-            return;
-        }
-
-        // Determine whether Arrow keys should be allowed when an editable has focus and is empty
-        let allowArrowFromEmptyEditable = false;
-        if (isEditable) {
-            if (tag === 'input' || tag === 'textarea') {
-                const val = (ae.value || '').trim();
-                allowArrowFromEmptyEditable = val.length === 0;
-            } else if (ae.isContentEditable) {
-                const txt = (ae.textContent || '').trim();
-                allowArrowFromEmptyEditable = txt.length === 0;
-            }
-        }
-
-        // If focus is editable and arrows should NOT be hijacked, bail out (let browser handle caret movement)
-        const isArrowKey = (k) => (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown');
-        if (isEditable && !allowArrowFromEmptyEditable && isArrowKey(e.key)) {
-            // User is editing text and the field isn't empty -> do not intercept arrows
-            return;
-        }
-
-        // Now perform WASD -> Arrow mapping, but only for non-editable focus (or editable empty case where we want to navigate)
-        let mappedKey = e.key;
-        // Only map WASD when the event isn't intended for typing (i.e. not inside an input/textarea/contentEditable)
-        // For empty editable where we decided to allow arrow navigation, mapping should still be applied if user used WASD (but we earlier returned on WASD when editable).
-        if (!isEditable) {
-            if (mappedKey === 'w' || mappedKey === 'W') mappedKey = 'ArrowUp';
-            else if (mappedKey === 'a' || mappedKey === 'A') mappedKey = 'ArrowLeft';
-            else if (mappedKey === 's' || mappedKey === 'S') mappedKey = 'ArrowDown';
-            else if (mappedKey === 'd' || mappedKey === 'D') mappedKey = 'ArrowRight';
-        }
-
-        // Helper to move focus spatially within the menu-grid from a given origin element
-        const tryMoveFocusFrom = (fromEl, direction) => {
-            console.log('[tryMoveFocusFrom] called', { fromEl, direction });
-            if (!(fromEl instanceof HTMLElement)) {
-                console.log('[tryMoveFocusFrom] fromEl is not an HTMLElement', { fromEl });
-                return false;
-            }
-            // Find the closest .menu-grid ancestor for this element
-            const localMenuGrid = fromEl.closest('.menu-grid');
-            if (!localMenuGrid) {
-                console.log('[tryMoveFocusFrom] No .menu-grid ancestor found for fromEl', { fromEl });
-                return false;
-            }
-            // Only attempt spatial nav if the origin is inside the wrapper
-            if (!localMenuGrid.contains(fromEl)) {
-                let parentContainer = fromEl.parentElement;
-                let containerInfo = parentContainer ? parentContainer : fromEl;
-                console.log('[tryMoveFocusFrom] fromEl not inside its closest menuGrid', {
-                    fromEl,
-                    parentContainer: containerInfo,
-                    parentSelector: parentContainer ? parentContainer.className || parentContainer.id || parentContainer.tagName : null,
-                    localMenuGrid,
-                    parentIsMenuGrid: parentContainer === localMenuGrid,
-                    menuGridIsSameNode: localMenuGrid.isSameNode && parentContainer ? localMenuGrid.isSameNode(parentContainer) : undefined
-                });
-                return false;
-            }
-            const focusableSelector = 'button,[role="button"],[role="slider"],a[href],input:not([type="hidden"]),select,textarea,[tabindex]:not([tabindex="-1"])';
-            const all = Array.from(localMenuGrid.querySelectorAll(focusableSelector));
-            console.log('[tryMoveFocusFrom] found focusable elements', all);
-            // Include disabled/aria-disabled in the list so current element can still navigate away
-            const focusables = all.filter(el => {
-                if (!(el instanceof HTMLElement)) return false;
-                const r = el.getBoundingClientRect();
-                return r.width > 0 && r.height > 0;
-            });
-            console.log('[tryMoveFocusFrom] filtered focusables', focusables);
-            if (focusables.length === 0) { console.log('[tryMoveFocusFrom] no focusables'); return false; }
-            if (!focusables.includes(fromEl)) {
-                console.log('[tryMoveFocusFrom] fromEl not in focusables', { fromEl });
-                return false;
-            }
-
-            const curRect = fromEl.getBoundingClientRect();
-            const originX = curRect.left + 1; // left edge origin for multi-cell elements
-            const originY = curRect.top + curRect.height / 2;
-
-            // Overlap helpers: ensure candidates are reasonably aligned on the orthogonal axis
-            const verticalOverlapFrac = (r1, r2) => {
-                const overlap = Math.max(0, Math.min(r1.bottom, r2.bottom) - Math.max(r1.top, r2.top));
-                const base = Math.min(r1.height || 1, r2.height || 1);
-                return overlap / base;
-            };
-            const horizontalOverlapFrac = (r1, r2) => {
-                const overlap = Math.max(0, Math.min(r1.right, r2.right) - Math.max(r1.left, r2.left));
-                const base = Math.min(r1.width || 1, r2.width || 1);
-                return overlap / base;
-            };
-
-            let best = null;
-            let bestPrimary = Infinity; // distance along the intended axis
-            let bestSecondary = Infinity; // tie-breaker: orthogonal distance
-            const tol = 0.5; // px tolerance for near-equal comparisons
-            const edgeTol = 2; // px tolerance for edge comparisons
-            const minOverlap = 0.35; // require at least ~35% overlap on the orthogonal axis
-
-            for (const el of focusables) {
-                if (el === fromEl) continue;
-                // Skip disabled/aria-disabled targets
-                if (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true') continue;
-                const r = el.getBoundingClientRect();
-                const centerX = r.left + r.width / 2;
-                const centerY = r.top + r.height / 2;
-
-                if (direction === 'right') {
-                    // must be generally to the right and vertically aligned
-                    const primary = r.left - curRect.right; // >= 0 to the right
-                    if (primary < -edgeTol) continue;
-                    if (verticalOverlapFrac(curRect, r) < minOverlap) continue;
-                    const secondary = Math.abs(centerY - originY);
-                    if (primary < bestPrimary - tol || (Math.abs(primary - bestPrimary) <= tol && secondary < bestSecondary)) {
-                        best = el; bestPrimary = primary; bestSecondary = secondary;
-                    }
-                } else if (direction === 'left') {
-                    // must be generally to the left and vertically aligned
-                    const primary = curRect.left - r.right; // >= 0 to the left
-                    if (primary < -edgeTol) continue;
-                    if (verticalOverlapFrac(curRect, r) < minOverlap) continue;
-                    const secondary = Math.abs(centerY - originY);
-                    if (primary < bestPrimary - tol || (Math.abs(primary - bestPrimary) <= tol && secondary < bestSecondary)) {
-                        best = el; bestPrimary = primary; bestSecondary = secondary;
-                    }
-                } else if (direction === 'up') {
-                    // must be generally above and horizontally aligned
-                    const primary = curRect.top - r.bottom; // >= 0 above
-                    if (primary < -edgeTol) continue;
-                    if (horizontalOverlapFrac(curRect, r) < minOverlap) continue;
-                    const secondary = Math.abs(centerX - originX);
-                    if (primary < bestPrimary - tol || (Math.abs(primary - bestPrimary) <= tol && secondary < bestSecondary)) {
-                        best = el; bestPrimary = primary; bestSecondary = secondary;
-                    }
-                } else if (direction === 'down') {
-                    // must be generally below and horizontally aligned
-                    const primary = r.top - curRect.bottom; // >= 0 below
-                    if (primary < -edgeTol) continue;
-                    if (horizontalOverlapFrac(curRect, r) < minOverlap) continue;
-                    const secondary = Math.abs(centerX - originX);
-                    if (primary < bestPrimary - tol || (Math.abs(primary - bestPrimary) <= tol && secondary < bestSecondary)) {
-                        best = el; bestPrimary = primary; bestSecondary = secondary;
-                    }
-                }
-            }
-            console.log('[tryMoveFocusFrom] best candidate', best);
-            if (best) {
-                try { best.focus(); console.log('[tryMoveFocusFrom] focused', best); } catch { /* ignore */ }
+    // Angle-based menu focus navigation
+    function menuAngleFocusNav(e) {
+        // Handle +/- shortcut for grid size when grid size buttons are visible
+        if ((e.key === '+' || e.key === '=' || e.key === '-') && gridDecBtn && gridIncBtn && gridDecBtn.offsetParent !== null && gridIncBtn.offsetParent !== null) {
+            if (e.key === '+' || e.key === '=') {
+                e.preventDefault();
+                gridIncBtn.click();
+                return true;
+            } else if (e.key === '-') {
+                e.preventDefault();
+                gridDecBtn.click();
                 return true;
             }
-            console.log('[tryMoveFocusFrom] no candidate found');
-            return false;
-        };
-        // Convenience wrapper using the currently focused element as origin
-        const tryMoveFocus = (direction) => tryMoveFocusFrom(ae, direction);
-
-        let k = e.key;
-        if (k === 'w' || k === 'W') k = 'ArrowUp';
-        else if (k === 'a' || k === 'A') k = 'ArrowLeft';
-        else if (k === 's' || k === 'S') k = 'ArrowDown';
-        else if (k === 'd' || k === 'D') k = 'ArrowRight';
-        if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
-            // Determine if effectively nothing is focused (browser reports <body> or <html>)
-            const noFocus = !ae || ae === document.body || ae === document.documentElement;
-
-            // If nothing is focused, act as if starting from the slider
-            if (noFocus) {
-                e.preventDefault();
-                if (playerBoxSlider) {
-                    if (k === 'ArrowUp' || k === 'ArrowDown') {
-                        const dirUD = k === 'ArrowUp' ? 'up' : 'down';
-                        const moved = tryMoveFocusFrom(playerBoxSlider, dirUD);
-                        if (!moved) {
-                            // fallback: just focus the slider
-                            try { playerBoxSlider.focus(); } catch { /* ignore */ }
-                        }
-                    } else {
-                        // Left/Right: focus slider and nudge by one
-                        try { playerBoxSlider.focus(); } catch { /* ignore */ }
-                        const delta = (k === 'ArrowLeft') ? -1 : 1;
-                        onMenuPlayerCountChanged(clampPlayers(menuPlayerCount + delta));
-                    }
-                }
-                return;
-            }
-
-            // If focus is already on the slider, let its built-in behavior handle left/right
-            if (ae === playerBoxSlider && (k === 'ArrowLeft' || k === 'ArrowRight')) return;
-
-            // Try spatial navigation first when focus is inside the grid wrapper
-            const dir = k === 'ArrowLeft' ? 'left' : k === 'ArrowRight' ? 'right' : k === 'ArrowUp' ? 'up' : 'down';
-            const moved = tryMoveFocus(dir);
-            if (moved) { e.preventDefault(); return; }
-            // Otherwise, do nothing (no auto-fallback) when something is focused
-            return;
-        } else if (k === 'Home') {
-            e.preventDefault();
-            onMenuPlayerCountChanged(2);
-        } else if (k === 'End') {
-            e.preventDefault();
-            onMenuPlayerCountChanged(maxPlayers);
-        } else if (k === '+' || k === '=') {
-            // '+' can arrive as '=' without Shift on some layouts
-            e.preventDefault();
-            adjustGridSize(1);
-        } else if (k === '-') {
-            e.preventDefault();
-            adjustGridSize(-1);
-        } else if (/^[1-9]$/.test(k)) {
-            // Number shortcuts: 1-9 select player count, clamped to [2..maxPlayers]
-            e.preventDefault();
-            const requested = parseInt(k, 10);
-            onMenuPlayerCountChanged(clampPlayers(requested));
-            // Optionally move focus to the slider to reflect selection context
-            try { playerBoxSlider && playerBoxSlider.focus(); } catch { /* ignore */ }
         }
+
+        // Handle left/right or a/d shortcut to change player slider when nothing is focused
+        if ((e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A' || e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') && playerBoxSlider && (!document.activeElement || document.activeElement === document.body || document.activeElement === document.documentElement)) {
+            let newCount = menuPlayerCount;
+            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+                newCount = clampPlayers(menuPlayerCount - 1);
+            } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+                newCount = clampPlayers(menuPlayerCount + 1);
+            }
+            if (newCount !== menuPlayerCount) {
+                e.preventDefault();
+                onMenuPlayerCountChanged(newCount);
+                try { playerBoxSlider.focus(); } catch {}
+                return true;
+            }
+        }
+        if (!isAnyMenuOpen()) return false;
+        let mappedKey = e.key;
+        if (mappedKey === 'w' || mappedKey === 'W') mappedKey = 'ArrowUp';
+        else if (mappedKey === 'a' || mappedKey === 'A') mappedKey = 'ArrowLeft';
+        else if (mappedKey === 's' || mappedKey === 'S') mappedKey = 'ArrowDown';
+        else if (mappedKey === 'd' || mappedKey === 'D') mappedKey = 'ArrowRight';
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(mappedKey)) return false;
+        const menus = [mainMenu, firstMenu, document.getElementById('onlineMenu')];
+        const openMenu = menus.find(m => m && !m.classList.contains('hidden'));
+        if (!openMenu) return false;
+        const focusableSelector = 'button,[role="button"],[role="slider"],a[href],input:not([type="hidden"]),select,textarea,[tabindex]:not([tabindex="-1"])';
+        const focusables = Array.from(openMenu.querySelectorAll(focusableSelector)).filter(el => {
+            if (!(el instanceof HTMLElement)) return false;
+            // Exclude elements inside the tips area
+            if (menuHint && menuHint.contains(el)) return false;
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && !el.hasAttribute('disabled') && el.getAttribute('aria-disabled') !== 'true';
+        });
+        if (focusables.length === 0) return false;
+        const focused = document.activeElement;
+        if (!focused || !openMenu.contains(focused)) {
+            e.preventDefault();
+            focusables[0].focus();
+            return true;
+        }
+        // Prevent left/right navigation from moving focus when slider is focused
+        if ((mappedKey === 'ArrowLeft' || mappedKey === 'ArrowRight') && focused === playerBoxSlider) {
+            return false;
+        }
+        const curRect = focused.getBoundingClientRect();
+        let originX = curRect.left + curRect.width / 2;
+        let originY = curRect.top + curRect.height / 2;
+        // For up/down/left/right, use center and left/right midpoints for origin
+        const centerX = curRect.left + curRect.width / 2;
+        const centerY = curRect.top + curRect.height / 2;
+        const halfHeight = curRect.height / 2;
+        const originPoints = [
+            [centerX, centerY],
+            [curRect.left, centerY],
+            [curRect.right, centerY]
+        ];
+        let candidates = [];
+        let minAngle = Math.PI / 2;
+        for (const el of focusables) {
+            if (el === focused) continue;
+            const r = el.getBoundingClientRect();
+            // For each origin point, move target point towards it horizontally (up/down) or vertically (left/right)
+            let tCenterX = r.left + r.width / 2;
+            let tCenterY = r.top + r.height / 2;
+            for (const [ox, oy] of originPoints) {
+                let tX = tCenterX;
+                let tY = tCenterY;
+                if (mappedKey === 'ArrowUp' || mappedKey === 'ArrowDown') {
+                    // Move horizontally from target center towards this origin point
+                    const dx = ox - tCenterX;
+                    const maxMove = Math.min(Math.abs(dx), r.width / 2);
+                    tX = tCenterX + Math.sign(dx) * maxMove;
+                } else if (mappedKey === 'ArrowLeft' || mappedKey === 'ArrowRight') {
+                    // Move vertically from target center towards this origin point
+                    const dy = oy - tCenterY;
+                    const maxMove = Math.min(Math.abs(dy), r.height / 2);
+                    tY = tCenterY + Math.sign(dy) * maxMove;
+                }
+                const tx = tX, ty = tY;
+                const dx = tx - ox;
+                const dy = ty - oy;
+                let match = false;
+                if (mappedKey === 'ArrowLeft' && dx < 0) match = true;
+                if (mappedKey === 'ArrowRight' && dx > 0) match = true;
+                if (mappedKey === 'ArrowUp' && dy < 0) match = true;
+                if (mappedKey === 'ArrowDown' && dy > 0) match = true;
+                if (!match) continue;
+                const len = Math.sqrt(dx*dx + dy*dy);
+                const dir = mappedKey === 'ArrowLeft' ? [-1,0] : mappedKey === 'ArrowRight' ? [1,0] : mappedKey === 'ArrowUp' ? [0,-1] : [0,1];
+                const dot = (dx/len)*dir[0] + (dy/len)*dir[1];
+                const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
+                if (angle < minAngle) minAngle = angle;
+                candidates.push({el, angle, len, ox, oy, tx, ty});
+            }
+        }
+        // Debug logging: only log the best candidate for each element
+        if (candidates.length) {
+            const bestByElement = new Map();
+            candidates.forEach(c => {
+                const key = c.el;
+                if (!bestByElement.has(key) || c.angle < bestByElement.get(key).angle) {
+                    bestByElement.set(key, c);
+                }
+            });
+            console.log('[menuAngleFocusNav] Best candidates for each element:');
+            bestByElement.forEach((c, el) => {
+                console.log({
+                    element: el,
+                    angleDeg: (c.angle * 180 / Math.PI).toFixed(2),
+                    distance: c.len.toFixed(2),
+                    origin: {x: c.ox, y: c.oy},
+                    target: {x: c.tx, y: c.ty}
+                });
+            });
+        }
+        // Prefer closest element among those within 5° of the minimum angle
+        const angleThreshold = minAngle + (5 * Math.PI / 180);
+        let best = null;
+        let bestDist = Infinity;
+        for (const c of candidates) {
+            if (c.angle <= angleThreshold) {
+                if (c.len < bestDist) {
+                    best = c.el;
+                    bestDist = c.len;
+                }
+            }
+        }
+        if (best) {
+            e.preventDefault();
+            best.focus();
+            return true;
+        }
+        return false;
+    }
+
+    // Replace menu navigation handler
+// Global keydown handler for menu navigation (angle-based)
+document.addEventListener('keydown', (e) => {
+    if (!isAnyMenuOpen()) return;
+    // Prevent WASD navigation mapping when an editable element is focused
+    const ae = document.activeElement;
+    const tag = ae && ae.tagName && ae.tagName.toLowerCase();
+    const isEditable = !!(ae && (tag === 'input' || tag === 'textarea' || ae.isContentEditable));
+    const lower = (k) => (typeof k === 'string' ? k.toLowerCase() : k);
+    const isWasd = ['w', 'a', 's', 'd'].includes(lower(e.key));
+    if (isEditable && isWasd) {
+        // Let the character be inserted into the field
+        return;
+    }
+    // Only handle navigation keys for menus
+    if (menuAngleFocusNav(e)) return;
+    // Optionally: handle Enter/Space for menu button activation
+    const openMenus = [mainMenu, firstMenu, document.getElementById('onlineMenu')].filter(m => m && !m.classList.contains('hidden'));
+    if (!openMenus.length) return;
+    const openMenu = openMenus[0];
+    const focusableSelector = 'button,[role="button"],[role="slider"],a[href],input:not([type="hidden"]),select,textarea,[tabindex]:not([tabindex="-1"])';
+    const focusables = Array.from(openMenu.querySelectorAll(focusableSelector)).filter(el => {
+        if (!(el instanceof HTMLElement)) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && !el.hasAttribute('disabled') && el.getAttribute('aria-disabled') !== 'true';
     });
+    if (focusables.length === 0) return;
+    const focused = document.activeElement;
+    if ((e.key === 'Enter' || e.key === ' ') && focused && openMenu.contains(focused)) {
+        e.preventDefault();
+        focused.click && focused.click();
+        return;
+    }
+});
 
     startBtn.addEventListener('click', async () => {
         const p = clampPlayers(menuPlayerCount);
@@ -1619,8 +1549,8 @@ if (onlinePlayerNameInput) {
 
         // Keyboard navigation for game grid
         document.addEventListener('keydown', (e) => {
-            // Only handle when menu is hidden (game mode)
-            if (mainMenu && !mainMenu.classList.contains('hidden')) return;
+            // Block grid navigation if ANY menu is open
+            if (isAnyMenuOpen()) return;
             const gridEl = document.querySelector('.grid');
             if (!gridEl) return;
             const key = e.key;
@@ -1676,7 +1606,7 @@ if (onlinePlayerNameInput) {
                 'ArrowDown':  { vx: 0, vy: 1 }
             };
             const { vx, vy } = dirMap[mappedKey];
-            // Always pick the own cell with the smallest angle (<90°), tiebreak by distance
+            // Always pick the own cell with the smallest angle (<90°), tiebreaker by distance
             let minAngle = Math.PI / 2; // 90°
             let minDist = Infinity;
             let bestCell = null;
@@ -1708,7 +1638,7 @@ if (onlinePlayerNameInput) {
 
         // Add Enter/Space key activation for focused .cell elements in game mode
         document.addEventListener('keydown', (e) => {
-            if (mainMenu && !mainMenu.classList.contains('hidden')) return;
+            if (isAnyMenuOpen()) return;
             const gridEl = document.querySelector('.grid');
             if (!gridEl) return;
             const key = e.key;
@@ -2741,7 +2671,7 @@ if (onlinePlayerNameInput) {
         const evaluatedCandidates = [];
         for (const cand of candidates) {
             const owner = cand.owner; // must be a real player index
-            const applied = applyMoveAndSim(simGrid, simInitial, owner, cand.r, cand.c, cand.isInitial);
+            const applied = applyMoveAndSim(grid, initialPlacements, owner, cand.r, cand.c, cand.isInitial);
             const val = totalOwnedOnGrid(applied.grid, focusPlayerIndex);
 
             if (applied.runaway) {

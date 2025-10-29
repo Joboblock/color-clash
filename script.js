@@ -673,21 +673,6 @@ if (onlinePlayerNameInput) {
             }
         }
 
-        // Handle left/right or a/d shortcut to change player slider when nothing is focused
-        if ((e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A' || e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') && playerBoxSlider && playerBoxSlider.offsetParent !== null && (!document.activeElement || document.activeElement === document.body || document.activeElement === document.documentElement)) {
-            let newCount = menuPlayerCount;
-            if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
-                newCount = clampPlayers(menuPlayerCount - 1);
-            } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
-                newCount = clampPlayers(menuPlayerCount + 1);
-            }
-            if (newCount !== menuPlayerCount) {
-                e.preventDefault();
-                onMenuPlayerCountChanged(newCount);
-                try { playerBoxSlider.focus(); } catch { /* empty */ }
-                return true;
-            }
-        }
         if (!isAnyMenuOpen()) return false;
         let mappedKey = e.key;
         if (mappedKey === 'w' || mappedKey === 'W') mappedKey = 'ArrowUp';

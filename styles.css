@@ -1,3 +1,49 @@
+/* Scrollable room list for online menu */
+.scrollable-room-list {
+    max-height: min(40vh, 420px); /* responsive: up to 40% of viewport height, max 420px */
+    overflow-y: auto;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.12);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.room-list-item {
+    padding: 10px 18px;
+    border-bottom: 1px solid #ddd;
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 12px;
+    font-size: 1rem;
+    background: none;
+    transition: background 0.15s;
+}
+.join-btn {
+    margin-right: auto;
+}
+.room-name {
+    margin-left: 0;
+    margin-right: 18px;
+    font-weight: 600;
+    color: #222;
+    white-space: nowrap;
+}
+.room-player-count {
+    margin-left: 8px;
+    font-weight: 400;
+    color: #555;
+    white-space: nowrap;
+
+}
+.room-list-item:last-child {
+    border-bottom: none;
+}
+.room-list-item:hover {
+    background: rgba(95,149,213,0.08);
+}
 /* General style for player name input fields */
 .player-name-input {
     width: 100%;

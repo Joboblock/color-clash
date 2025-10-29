@@ -9,15 +9,36 @@
                     <input id="onlinePlayerName" class="player-name-input" type="text" placeholder="Player name (3–16)" aria-label="Player name" maxlength="16" inputmode="latin" autocapitalize="none" autocomplete="off" spellcheck="false" style="grid-column:2/8;" />
                     <div class="online-room-list" style="grid-column:1/-1;width:100%;max-width:340px;margin-bottom:18px;">
                         <div class="room-list-title" style="font-weight:700;margin-bottom:8px;">Joinable Rooms</div>
-                        <ul id="roomList" style="list-style:none;padding:0;margin:0;">
-                            <li class="room-list-item" style="padding:10px 0;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;">
-                                <span>Room #1 (2/4)</span><button class="btn secondary" style="font-size:0.95rem;padding:6px 14px;">Join</button>
+                        <ul id="roomList" class="scrollable-room-list">
+                            <li class="room-list-item">
+                                <button class="btn secondary join-btn">Join</button>
+                                <span class="room-name">Room #1</span>
+                                <span class="room-player-count">(2/4)</span>
                             </li>
-                            <li class="room-list-item" style="padding:10px 0;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;align-items:center;">
-                                <span>Room #2 (1/4)</span><button class="btn secondary" style="font-size:0.95rem;padding:6px 14px;">Join</button>
+                            <li class="room-list-item">
+                                <button class="btn secondary join-btn">Join</button>
+                                <span class="room-name">Room #2</span>
+                                <span class="room-player-count">(1/4)</span>
                             </li>
-                            <li class="room-list-item" style="padding:10px 0;display:flex;justify-content:space-between;align-items:center;">
-                                <span>Room #3 (3/4)</span><button class="btn secondary" style="font-size:0.95rem;padding:6px 14px;">Join</button>
+                            <li class="room-list-item">
+                                <button class="btn secondary join-btn">Join</button>
+                                <span class="room-name">Room #3</span>
+                                <span class="room-player-count">(3/4)</span>
+                            </li>
+                            <li class="room-list-item">
+                                <button class="btn secondary join-btn">Join</button>
+                                <span class="room-name">Room #4</span>
+                                <span class="room-player-count">(0/4)</span>
+                            </li>
+                            <li class="room-list-item">
+                                <button class="btn secondary join-btn">Join</button>
+                                <span class="room-name">Room #5</span>
+                                <span class="room-player-count">(4/4)</span>
+                            </li>
+                            <li class="room-list-item">
+                                <button class="btn secondary join-btn">Join</button>
+                                <span class="room-name">Room #6</span>
+                                <span class="room-player-count">(1/4)</span>
                             </li>
                         </ul>
                     </div>

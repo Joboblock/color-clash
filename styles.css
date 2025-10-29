@@ -410,6 +410,8 @@ body {
 
 /* AI Strength preview tile: place at far right of row 3 */
 .menu-grid .ai-preview-tile {
+    user-select: none;
+    -webkit-user-select: none;
     grid-column: 8; /* rightmost column */
     grid-row: 3;
     display: grid;

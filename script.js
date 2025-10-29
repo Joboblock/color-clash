@@ -1,4 +1,113 @@
 document.addEventListener('DOMContentLoaded', () => {
+    function showModalError(html) {
+        let modal = document.getElementById('modalError');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'modalError';
+            modal.style.position = 'fixed';
+            modal.style.left = '0';
+            modal.style.top = '0';
+            modal.style.width = '100vw';
+            modal.style.height = '100vh';
+            modal.style.background = 'rgba(0,0,0,0.5)';
+            modal.style.display = 'flex';
+            modal.style.alignItems = 'center';
+            modal.style.justifyContent = 'center';
+            modal.style.zIndex = '9999';
+            modal.innerHTML = '<div style="background:#fff;padding:24px 32px;border-radius:10px;max-width:90vw;box-shadow:0 4px 24px rgba(0,0,0,0.18);font-size:1.1em;text-align:center;">' + html + '<br><br><button id="modalErrorClose" style="margin-top:12px;padding:8px 18px;font-size:1em;">Close</button></div>';
+            document.body.appendChild(modal);
+            modal.querySelector('#modalErrorClose').onclick = () => {
+                modal.remove();
+            };
+        }
+    }
+
+    // Multiplayer room logic
+    let ws;
+    let hostedRoom = null;
+    const roomListElement = document.getElementById('roomList');
+    const hostGameBtn = document.getElementById('hostGameBtn');
+
+    function connectWebSocket() {
+        if (ws && ws.readyState === WebSocket.OPEN) return;
+        ws = new WebSocket('ws://localhost:3000');
+        ws.onopen = () => {
+            console.debug('[WebSocket] Connected, requesting room list');
+            ws.send(JSON.stringify({ type: 'list' }));
+        };
+        ws.onmessage = (event) => {
+            let msg;
+            try { msg = JSON.parse(event.data); } catch { return; }
+            console.debug('[WebSocket] Received:', msg);
+            if (msg.type === 'hosted') {
+                hostedRoom = msg.room;
+                console.debug('[Host] Room hosted:', hostedRoom);
+            } else if (msg.type === 'roomlist') {
+                console.debug('[RoomList] Updating room list:', msg.rooms);
+                updateRoomList(msg.rooms);
+            } else if (msg.type === 'joined') {
+                console.debug('[Join] Joined room:', msg.room);
+                // Optionally handle joined room
+            } else if (msg.type === 'error') {
+                console.debug('[Error]', msg.error);
+                alert(msg.error);
+            }
+        };
+    }
+
+    function updateRoomList(rooms) {
+        roomListElement.innerHTML = '';
+        Object.keys(rooms).forEach(roomName => {
+            const li = document.createElement('li');
+            li.className = 'room-list-item';
+            const btn = document.createElement('button');
+            btn.className = 'btn secondary join-btn';
+            btn.textContent = 'Join';
+            btn.onclick = () => joinRoom(roomName);
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'room-name';
+            nameSpan.textContent = roomName;
+            const countSpan = document.createElement('span');
+            countSpan.className = 'room-player-count';
+            countSpan.textContent = '(1/2)'; // Only host/guest supported
+            li.appendChild(btn);
+            li.appendChild(nameSpan);
+            li.appendChild(countSpan);
+            roomListElement.appendChild(li);
+        });
+    }
+
+    function hostRoom() {
+        const name = onlinePlayerNameInput.value.trim() || 'Room_' + Math.floor(Math.random()*1000);
+        function sendHost() {
+            try {
+                console.debug('[Host] Hosting room:', name);
+                ws.send(JSON.stringify({ type: 'host', name }));
+            } catch (err) {
+                console.error('[Host] Error hosting room:', err);
+                if (err && err.stack) console.error(err.stack);
+            }
+        }
+        connectWebSocket();
+        if (ws.readyState === WebSocket.OPEN) {
+            sendHost();
+        } else {
+            ws.addEventListener('open', sendHost, { once: true });
+        }
+    }
+
+    function joinRoom(roomName) {
+        connectWebSocket();
+        console.debug('[Join] Joining room:', roomName);
+        ws.send(JSON.stringify({ type: 'join', name: roomName }));
+    }
+
+    if (hostGameBtn) {
+        // Remove direct hostRoom binding from hostGameBtn
+    }
+
+    connectWebSocket();
+    // ...existing code...
     // Declare name input fields before sync function
     const onlinePlayerNameInput = document.getElementById('onlinePlayerName');
     // Utility: synchronize all player name fields
@@ -312,11 +421,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 const onlineMenu = document.getElementById('onlineMenu');
                 const hostGameBtn = document.getElementById('hostGameBtn');
                 if (onlineGameBtn && onlineMenu && mainMenu) {
-                    onlineGameBtn.addEventListener('click', () => {
-                        setHidden(firstMenu, true);
-                        setHidden(mainMenu, true);
-                        setHidden(onlineMenu, false);
-                    });
+                        onlineGameBtn.addEventListener('click', (e) => {
+                            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                                e.preventDefault();
+                                showModalError('Cannot connect to server. There is currently no multiplayer server.<br>If you want one, support the project by <a href="https://github.com/Joboblock/color-clash" target="_blank" rel="noopener">giving it a star on GitHub</a>.');
+                                return;
+                            }
+                            setHidden(firstMenu, true);
+                            setHidden(mainMenu, true);
+                            setHidden(onlineMenu, false);
+                        });
                 }
 
                 // Host Game button returns to mainMenu and shows name input
@@ -862,7 +976,8 @@ document.addEventListener('keydown', (e) => {
             trainMode = false;
             recreateGrid(s, p);
         } else if (mode === 'host') {
-            // Do nothing for now
+            // Host the room when clicking the start button in host mode
+            hostRoom();
         } else if (mode === 'train') {
             await requestFullscreenIfMobile();
             const params = new URLSearchParams(window.location.search);

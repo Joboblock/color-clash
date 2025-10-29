@@ -588,11 +588,17 @@ if (onlinePlayerNameInput) {
         onlineMenuColorCycle.tabIndex = 0;
         // Initialize color on load
         applyMenuColorBox(playerColors[startingColorIndex]);
+        const onlineMenu = document.getElementById('onlineMenu');
         onlineMenuColorCycle.addEventListener('click', () => {
             cycleStartingColor();
             const idx = startingColorIndex;
             previewShiftLeftThenSnap(() => applyPlayerBoxColorsForIndex(idx));
             updateAIPreview();
+            // Change background color for online menu
+            if (onlineMenu && !onlineMenu.classList.contains('hidden')) {
+                const colorKey = playerColors[startingColorIndex] || 'green';
+                document.body.className = colorKey;
+            }
         });
     }
 

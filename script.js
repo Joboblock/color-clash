@@ -232,8 +232,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function setMainMenuMode(mode) {
         const mainMenu = document.getElementById('mainMenu');
         const header = mainMenu ? mainMenu.querySelector('.game-header-panel') : null;
-        const startBtn = document.getElementById('startBtn');
-        const trainBtn = document.getElementById('trainBtn');
+    const startBtn = document.getElementById('startBtn');
         const playerNameInput = document.getElementById('playerName');
         if (!mainMenu) return;
         if (header) {
@@ -241,8 +240,12 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (mode === 'host') header.textContent = 'Online Game';
             else header.textContent = 'Color Clash';
         }
-        if (startBtn) startBtn.style.display = (mode === 'train' || mode === 'host') ? 'none' : '';
-        if (trainBtn) trainBtn.style.display = (mode === 'train') ? '' : 'none';
+        if (startBtn) {
+            startBtn.style.display = '';
+            if (mode === 'train') startBtn.textContent = 'Train';
+            else if (mode === 'host') startBtn.textContent = 'Host';
+            else startBtn.textContent = 'Start';
+        }
         if (playerNameInput) playerNameInput.style.display = (mode === 'host') ? '' : 'none';
         const aiStrengthTile = document.getElementById('aiStrengthTile');
         if (aiStrengthTile) aiStrengthTile.style.display = (mode === 'train') ? '' : 'none';
@@ -306,7 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     hostGameBtn.addEventListener('click', () => {
                         setHidden(onlineMenu, true);
                         setHidden(mainMenu, false);
-                        if (playerNameInput) playerNameInput.style.display = '';
+                        setMainMenuMode('host');
                         // Mark mainMenu as opened by host for close logic
                         mainMenu.dataset.openedBy = 'host';
                     });
@@ -838,29 +841,41 @@ document.addEventListener('keydown', (e) => {
 });
 
     startBtn.addEventListener('click', async () => {
+        // Determine current menu mode from button text
+        const mode = startBtn.textContent.toLowerCase();
         const p = clampPlayers(menuPlayerCount);
         let s = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : 3;
 
-        // Enter fullscreen on mobile from the same user gesture
-        await requestFullscreenIfMobile();
-
-        // Update URL without reloading (keep behavior discoverable/shareable)
-        const params = new URLSearchParams(window.location.search);
-        params.delete('menu');
-        params.delete('train');
-        params.set('players', String(p));
-        params.set('size', String(s));
-        const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-        // push a new history entry so Back returns to the menu instead of previous/blank
-        window.history.pushState({ mode: 'play', players: p, size: s }, '', newUrl);
-
-        // Set the active game palette from the UI selection
-        gameColors = computeSelectedColors(p);
-
-        // Hide menu and start a fresh game with the chosen settings
-    if (mainMenu) mainMenu.classList.add('hidden');
-        trainMode = false;
-        recreateGrid(s, p);
+        if (mode === 'start') {
+            await requestFullscreenIfMobile();
+            const params = new URLSearchParams(window.location.search);
+            params.delete('menu');
+            params.delete('train');
+            params.set('players', String(p));
+            params.set('size', String(s));
+            const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+            window.history.pushState({ mode: 'play', players: p, size: s }, '', newUrl);
+            gameColors = computeSelectedColors(p);
+            if (mainMenu) mainMenu.classList.add('hidden');
+            trainMode = false;
+            recreateGrid(s, p);
+        } else if (mode === 'host') {
+            // Do nothing for now
+        } else if (mode === 'train') {
+            await requestFullscreenIfMobile();
+            const params = new URLSearchParams(window.location.search);
+            params.delete('menu');
+            params.set('players', String(p));
+            params.set('size', String(s));
+            params.set('ai_depth', String(aiPreviewValue));
+            const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+            window.history.pushState({ mode: 'ai', players: p, size: s }, '', newUrl);
+            gameColors = computeSelectedColors(p);
+            if (mainMenu) mainMenu.classList.add('hidden');
+            trainMode = true;
+            try { aiDepth = Math.max(1, parseInt(String(aiPreviewValue), 10)); } catch { /* ignore */ }
+            recreateGrid(s, p);
+        }
     });
 
     // Train button handler

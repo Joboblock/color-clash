@@ -780,26 +780,7 @@ if (onlinePlayerNameInput) {
                 candidates.push({el, angle, len, ox, oy, tx, ty});
             }
         }
-        // Debug logging: only log the best candidate for each element
-        if (candidates.length) {
-            const bestByElement = new Map();
-            candidates.forEach(c => {
-                const key = c.el;
-                if (!bestByElement.has(key) || c.angle < bestByElement.get(key).angle) {
-                    bestByElement.set(key, c);
-                }
-            });
-            console.log('[menuAngleFocusNav] Best candidates for each element:');
-            bestByElement.forEach((c, el) => {
-                console.log({
-                    element: el,
-                    angleDeg: (c.angle * 180 / Math.PI).toFixed(2),
-                    distance: c.len.toFixed(2),
-                    origin: {x: c.ox, y: c.oy},
-                    target: {x: c.tx, y: c.ty}
-                });
-            });
-        }
+
         // Prefer closest element among those within 5° of the minimum angle
         const angleThreshold = minAngle + (5 * Math.PI / 180);
         let best = null;
@@ -1403,7 +1384,7 @@ document.addEventListener('keydown', (e) => {
             playerBoxSlider.removeChild(cycler);
         }
 
-        // Remove existing player boxes only
+    // Remove existing player boxes only
     Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box')).forEach(n => n.remove());
 
         for (let count = 1; count <= maxPlayers; count++) {

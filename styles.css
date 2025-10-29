@@ -18,6 +18,7 @@
 /* Main menu big buttons */
 .menu-main-btn {
     width: 260px;
+    min-width: 220px;
     max-width: 90vw;
     margin: 12px 0;
     font-size: 1.4rem;
@@ -29,6 +30,7 @@
     background: #5f95d5;
     color: #fff;
     transition: background 0.18s, color 0.18s;
+    white-space: nowrap;
 }
 .menu-main-btn:active {
     background: #3a6ca8;
@@ -422,16 +424,19 @@ body {
 
 .menu-grid .ai-preview-tile .ai-preview-label {
     grid-column: 1 / -1;
-    justify-self: start;
+    /* bind label to the right edge so overflow extends leftwards
+       when the text is wider than the tile. */
+    justify-self: end;
     align-self: start;
+    position: relative;
+    z-index: 2; /* render above adjacent tiles when overflowing */
     font-weight: 800;
     font-size: clamp(0.8rem, 2.4vmin, 1rem);
     color: #222;
     margin-bottom: var(--player-gap);
     white-space: nowrap;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    max-width: none; /* allow label to be wider than its grid column */
+    overflow: visible; /* let it extend beyond the grid towards the left */
 }
 
 .menu-grid .grid-preview-cells {

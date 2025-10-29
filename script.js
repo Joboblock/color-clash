@@ -1,4 +1,19 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // Declare name input fields before sync function
+    const onlinePlayerNameInput = document.getElementById('onlinePlayerName');
+    // Utility: synchronize all player name fields
+    function syncPlayerNameFields(newName) {
+        const name = window.sanitizeName(newName || '');
+        if (playerNameInput) {
+            playerNameInput.value = name;
+            window.reflectValidity(playerNameInput, name);
+        }
+        if (onlinePlayerNameInput) {
+            onlinePlayerNameInput.value = name;
+            window.reflectValidity(onlinePlayerNameInput, name);
+        }
+        // Add more fields here if needed
+    }
     const gridElement = document.querySelector('.grid');
     
     /**
@@ -364,7 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Sanitize player name: replace spaces with underscores, remove non-alphanumerics, limit to 16
     if (playerNameInput) {
-    try { playerNameInput.maxLength = 16; } catch { /* ignore */ }
+        try { playerNameInput.maxLength = 16; } catch { /* ignore */ }
         // Shared name sanitization and validity functions
         window.sanitizeName = (raw) => {
             if (typeof raw !== 'string') return '';
@@ -385,6 +400,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 inputEl.removeAttribute('title');
             }
         };
+        // Load player name from localStorage if available
+        const savedName = localStorage.getItem('playerName');
+        if (savedName) {
+            syncPlayerNameFields(savedName);
+        } else {
+            syncPlayerNameFields(playerNameInput.value || '');
+        }
         const handleSanitize = (e) => {
             const v = e.target.value;
             const cleaned = window.sanitizeName(v);
@@ -394,6 +416,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 try { e.target.setSelectionRange(pos, pos); } catch { /* ignore */ }
             }
             window.reflectValidity(e.target, e.target.value);
+            // Save player name to localStorage and sync all fields
+            localStorage.setItem('playerName', e.target.value);
+            syncPlayerNameFields(e.target.value);
         };
         playerNameInput.addEventListener('input', handleSanitize);
         playerNameInput.addEventListener('blur', handleSanitize);
@@ -404,14 +429,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 playerNameInput.blur();
             }
         });
-        playerNameInput.value = window.sanitizeName(playerNameInput.value || '');
-        window.reflectValidity(playerNameInput, playerNameInput.value);
     }
 
 // Online menu name input restrictions (reuse shared logic)
-const onlinePlayerNameInput = document.getElementById('onlinePlayerName');
 if (onlinePlayerNameInput) {
     try { onlinePlayerNameInput.maxLength = 16; } catch { /* ignore */ }
+    // Load player name from localStorage if available
+    const savedName = localStorage.getItem('playerName');
+    if (savedName) {
+        syncPlayerNameFields(savedName);
+    } else {
+        syncPlayerNameFields(onlinePlayerNameInput.value || '');
+    }
     const handleSanitize = (e) => {
         const v = e.target.value;
         const cleaned = window.sanitizeName(v);
@@ -421,6 +450,9 @@ if (onlinePlayerNameInput) {
             try { e.target.setSelectionRange(pos, pos); } catch { /* ignore */ }
         }
         window.reflectValidity(e.target, e.target.value);
+        // Save player name to localStorage and sync all fields
+        localStorage.setItem('playerName', e.target.value);
+        syncPlayerNameFields(e.target.value);
     };
     onlinePlayerNameInput.addEventListener('input', handleSanitize);
     onlinePlayerNameInput.addEventListener('blur', handleSanitize);
@@ -431,8 +463,6 @@ if (onlinePlayerNameInput) {
             onlinePlayerNameInput.blur();
         }
     });
-    onlinePlayerNameInput.value = window.sanitizeName(onlinePlayerNameInput.value || '');
-    window.reflectValidity(onlinePlayerNameInput, onlinePlayerNameInput.value);
 }
 
     // set dynamic bounds

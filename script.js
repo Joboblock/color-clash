@@ -97,38 +97,62 @@ document.addEventListener('DOMContentLoaded', () => {
             else full.push([roomName, info]);
         }
         const ordered = [...my, ...joinable, ...full];
-        ordered.forEach(([roomName, info]) => {
-            const currentPlayers = Number.isFinite(info.currentPlayers) ? info.currentPlayers : 0;
-            const maxPlayers = Number.isFinite(info.maxPlayers) ? info.maxPlayers : 2;
+        if (ordered.length === 0) {
+            // Show placeholder empty room
             const li = document.createElement('li');
             li.className = 'room-list-item';
             const btn = document.createElement('button');
-            const isMine = roomName === myJoinedRoom;
-            const isFull = currentPlayers >= maxPlayers;
             btn.classList.add('room-btn');
-            if (isMine) {
-                btn.classList.add('leave');
-                btn.textContent = 'Leave';
-                btn.onclick = () => leaveRoom(roomName);
-            } else if (isFull) {
-                btn.classList.add('full');
-                btn.textContent = 'Full';
-                btn.disabled = true;
-            } else {
-                btn.textContent = 'Join';
-                btn.onclick = () => joinRoom(roomName);
-            }
+            btn.textContent = 'Host';
+            btn.onclick = () => {
+                // Host a game with maxPlayers = 2
+                const debugPlayerName = (localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player').trim();
+                ws.send(JSON.stringify({ type: 'host', roomName: debugPlayerName, maxPlayers: 2, debugName: debugPlayerName }));
+            };
             const nameSpan = document.createElement('span');
             nameSpan.className = 'room-name';
-            nameSpan.textContent = roomName;
+            nameSpan.textContent = 'Empty Game';
             const countSpan = document.createElement('span');
             countSpan.className = 'room-player-count';
-            countSpan.textContent = `(${currentPlayers}/${maxPlayers})`;
+            countSpan.textContent = '(0/2)';
             li.appendChild(btn);
             li.appendChild(nameSpan);
             li.appendChild(countSpan);
             roomListElement.appendChild(li);
-        });
+        } else {
+            ordered.forEach(([roomName, info]) => {
+                const currentPlayers = Number.isFinite(info.currentPlayers) ? info.currentPlayers : 0;
+                const maxPlayers = Number.isFinite(info.maxPlayers) ? info.maxPlayers : 2;
+                const li = document.createElement('li');
+                li.className = 'room-list-item';
+                const btn = document.createElement('button');
+                const isMine = roomName === myJoinedRoom;
+                const isFull = currentPlayers >= maxPlayers;
+                btn.classList.add('room-btn');
+                if (isMine) {
+                    btn.classList.add('leave');
+                    btn.textContent = 'Leave';
+                    btn.onclick = () => leaveRoom(roomName);
+                } else if (isFull) {
+                    btn.classList.add('full');
+                    btn.textContent = 'Full';
+                    btn.disabled = true;
+                } else {
+                    btn.textContent = 'Join';
+                    btn.onclick = () => joinRoom(roomName);
+                }
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'room-name';
+                nameSpan.textContent = `${roomName}'s Game`;
+                const countSpan = document.createElement('span');
+                countSpan.className = 'room-player-count';
+                countSpan.textContent = `(${currentPlayers}/${maxPlayers})`;
+                li.appendChild(btn);
+                li.appendChild(nameSpan);
+                li.appendChild(countSpan);
+                roomListElement.appendChild(li);
+            });
+        }
     }
 
     function hostRoom() {

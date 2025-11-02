@@ -24,25 +24,25 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if (msg.type === 'host' && msg.name) {
-      if (rooms[msg.name]) {
+    if (msg.type === 'host' && msg.roomName) {
+      if (rooms[msg.roomName]) {
         ws.send(JSON.stringify({ type: 'error', error: 'Room already exists' }));
         return;
       }
       // Default to 2 unless provided by host (optional)
-      const provided = Number.isFinite(msg.players) ? Math.floor(Number(msg.players)) : 2;
+      const provided = Number.isFinite(msg.maxPlayers) ? Math.floor(Number(msg.maxPlayers)) : 2;
       const clamped = clampPlayers(provided);
-      // For debug: use debugName if present, otherwise fallback
-      const playerName = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : (typeof msg.player === 'string' && msg.player ? String(msg.player) : 'Player');
-      rooms[msg.name] = {
+  // Use debugName if present, otherwise default to 'Player'
+  const playerName = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
+      rooms[msg.roomName] = {
         maxPlayers: clamped,
         participants: [ { ws, name: playerName, isHost: true } ]
       };
-      connectionMeta.set(ws, { roomName: msg.name, name: playerName });
-      ws.send(JSON.stringify({ type: 'hosted', room: msg.name, maxPlayers: clamped, player: playerName }));
+      connectionMeta.set(ws, { roomName: msg.roomName, name: playerName });
+      ws.send(JSON.stringify({ type: 'hosted', room: msg.roomName, maxPlayers: clamped, player: playerName }));
       broadcastRoomList();
-    } else if (msg.type === 'join' && msg.name) {
-      const room = rooms[msg.name];
+    } else if (msg.type === 'join' && msg.roomName) {
+      const room = rooms[msg.roomName];
       if (!room) {
         ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
         return;
@@ -73,17 +73,17 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ type: 'error', error: 'Room is full' }));
         return;
       }
-  // For debug: use debugName if present, otherwise fallback
-  const playerName = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : (typeof msg.player === 'string' && msg.player ? String(msg.player) : 'Player');
+  // Use debugName if present, otherwise default to 'Player'
+  const playerName = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
   room.participants.push({ ws, name: playerName, isHost: false });
-  connectionMeta.set(ws, { roomName: msg.name, name: playerName });
+    connectionMeta.set(ws, { roomName: msg.roomName, name: playerName });
 
-      ws.send(JSON.stringify({ type: 'joined', room: msg.name, maxPlayers: room.maxPlayers, players: room.participants.map(p => ({ name: p.name })) }));
+        ws.send(JSON.stringify({ type: 'joined', room: msg.roomName, maxPlayers: room.maxPlayers, players: room.participants.map(p => ({ name: p.name })) }));
       // Notify existing participants about the new joiner (optional)
       room.participants.forEach(p => {
         if (p.ws !== ws && p.ws.readyState === 1) {
           try {
-            p.ws.send(JSON.stringify({ type: 'roomupdate', room: msg.name, players: room.participants.map(pp => ({ name: pp.name })) }));
+              p.ws.send(JSON.stringify({ type: 'roomupdate', room: msg.roomName, players: room.participants.map(pp => ({ name: pp.name })) }));
           } catch {
             // ignore send errors on best-effort notifications
           }

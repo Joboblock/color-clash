@@ -105,15 +105,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const btn = document.createElement('button');
             const isMine = roomName === myJoinedRoom;
             const isFull = currentPlayers >= maxPlayers;
+            btn.classList.add('room-btn');
             if (isMine) {
-                btn.className = 'btn danger leave-btn';
+                btn.classList.add('leave');
                 btn.textContent = 'Leave';
                 btn.onclick = () => leaveRoom(roomName);
+            } else if (isFull) {
+                btn.classList.add('full');
+                btn.textContent = 'Full';
+                btn.disabled = true;
             } else {
-                btn.className = 'btn secondary join-btn';
-                btn.textContent = isFull ? 'Full' : 'Join';
-                btn.disabled = !!isFull;
-                if (!isFull) btn.onclick = () => joinRoom(roomName);
+                btn.textContent = 'Join';
+                btn.onclick = () => joinRoom(roomName);
             }
             const nameSpan = document.createElement('span');
             nameSpan.className = 'room-name';
@@ -137,7 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const debugPlayerName = (localStorage.getItem('playerName') || onlinePlayerNameInput.value || 'Player').trim();
                 // Send selected player count for maxPlayers
                 const selectedPlayers = Math.max(2, Math.min(playerColors.length, Math.floor(menuPlayerCount || 2)));
-                ws.send(JSON.stringify({ type: 'host', name, players: selectedPlayers, debugName: debugPlayerName }));
+                ws.send(JSON.stringify({ type: 'host', roomName: name, maxPlayers: selectedPlayers, debugName: debugPlayerName }));
             } catch (err) {
                 console.error('[Host] Error hosting room:', err);
                 if (err && err.stack) console.error(err.stack);
@@ -156,13 +159,13 @@ document.addEventListener('DOMContentLoaded', () => {
         console.debug('[Join] Joining room:', roomName);
         // For debug: send player name, but do not use for logic
         const debugPlayerName = (localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player').trim();
-        ws.send(JSON.stringify({ type: 'join', name: roomName, debugName: debugPlayerName }));
+    ws.send(JSON.stringify({ type: 'join', roomName: roomName, debugName: debugPlayerName }));
     }
 
     function leaveRoom(roomName) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         console.debug('[Leave] Leaving room:', roomName);
-        ws.send(JSON.stringify({ type: 'leave', name: roomName }));
+    ws.send(JSON.stringify({ type: 'leave', roomName: roomName }));
     }
 
     if (hostGameBtn) {

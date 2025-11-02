@@ -1,3 +1,25 @@
+/* Extra button types for room actions */
+.room-btn {
+    /* Inherit join-btn formatting, but allow color override */
+    margin-right: auto;
+    background: #e3e8f0;
+    color: #333;
+    border: 1px solid rgba(0,0,0,0.08);
+    font-weight: 700;
+    padding: 10px 18px;
+    border-radius: 12px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.room-btn.leave {
+    background: #e74c3c;
+    color: #fff;
+}
+.room-btn.full {
+    background: #444;
+    color: #ccc;
+}
 /* Scrollable room list for online menu */
 .scrollable-room-list {
     max-height: min(40vh, 420px); /* responsive: up to 40% of viewport height, max 420px */
@@ -13,13 +35,8 @@
     padding: 10px 18px;
     border-bottom: 1px solid #ddd;
     display: flex;
-    flex-direction: row;
-    justify-content: flex-start;
     align-items: center;
     gap: 12px;
-    font-size: 1rem;
-    background: none;
-    transition: background 0.15s;
 }
 .join-btn {
     margin-right: auto;

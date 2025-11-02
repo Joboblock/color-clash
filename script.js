@@ -42,6 +42,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 hostedRoom = msg.room;
                 myJoinedRoom = msg.room;
                 console.debug(`[Host] Room hosted: ${hostedRoom}`);
+                // On successful hosting, return to Online game menu
+                const onlineMenu = document.getElementById('onlineMenu');
+                const mainMenu = document.getElementById('mainMenu');
+                if (onlineMenu && mainMenu) {
+                    // hide mainMenu (Host Game menu)
+                    mainMenu.classList.add('hidden');
+                    mainMenu.setAttribute('aria-hidden', 'true');
+                    // show onlineMenu
+                    onlineMenu.classList.remove('hidden');
+                    onlineMenu.setAttribute('aria-hidden', 'false');
+                    // clear marker
+                    try { mainMenu.dataset.openedBy = ''; } catch { /* ignore */ }
+                }
             } else if (msg.type === 'roomlist') {
                 // If roomlist includes player names, log them
                 Object.entries(msg.rooms || {}).forEach(([roomName, info]) => {
@@ -509,7 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Show onlineMenu for Online Game
                 const onlineMenu = document.getElementById('onlineMenu');
-                const hostGameBtn = document.getElementById('hostGameBtn');
+                const hostCustomGameBtn = document.getElementById('hostCustomGameBtn');
                 if (onlineGameBtn && onlineMenu && mainMenu) {
                         onlineGameBtn.addEventListener('click', (e) => {
                             if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -524,8 +537,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // Host Game button returns to mainMenu and shows name input
-                if (hostGameBtn && onlineMenu && mainMenu) {
-                    hostGameBtn.addEventListener('click', () => {
+                if (hostCustomGameBtn && onlineMenu && mainMenu) {
+                    hostCustomGameBtn.addEventListener('click', () => {
                         setHidden(onlineMenu, true);
                         setHidden(mainMenu, false);
                         setMainMenuMode('host');

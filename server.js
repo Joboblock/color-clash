@@ -25,6 +25,27 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === 'host' && msg.roomName) {
+      // If this connection is already in a room, remove it from that room first
+      const metaExisting = connectionMeta.get(ws);
+      if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
+        const prevRoom = rooms[metaExisting.roomName];
+        prevRoom.participants = prevRoom.participants.filter(p => p.ws !== ws);
+        if (prevRoom.participants.length === 0) {
+          delete rooms[metaExisting.roomName];
+        } else {
+          // notify previous room
+          prevRoom.participants.forEach(p => {
+            if (p.ws.readyState === 1) {
+              try {
+                p.ws.send(JSON.stringify({ type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.map(pp => ({ name: pp.name })) }));
+              } catch {
+                // ignore
+              }
+            }
+          });
+        }
+        connectionMeta.delete(ws);
+      }
       if (rooms[msg.roomName]) {
         ws.send(JSON.stringify({ type: 'error', error: 'Room already exists' }));
         return;
@@ -32,8 +53,8 @@ wss.on('connection', (ws) => {
       // Default to 2 unless provided by host (optional)
       const provided = Number.isFinite(msg.maxPlayers) ? Math.floor(Number(msg.maxPlayers)) : 2;
       const clamped = clampPlayers(provided);
-  // Use debugName if present, otherwise default to 'Player'
-  const playerName = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
+      // Use debugName if present, otherwise default to 'Player'
+      const playerName = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
       rooms[msg.roomName] = {
         maxPlayers: clamped,
         participants: [ { ws, name: playerName, isHost: true } ]

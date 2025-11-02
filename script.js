@@ -38,16 +38,40 @@ document.addEventListener('DOMContentLoaded', () => {
         ws.onmessage = (event) => {
             let msg;
             try { msg = JSON.parse(event.data); } catch { return; }
-            console.debug('[WebSocket] Received:', msg);
             if (msg.type === 'hosted') {
                 hostedRoom = msg.room;
-                console.debug('[Host] Room hosted:', hostedRoom);
+                myJoinedRoom = msg.room;
+                console.debug(`[Host] Room hosted: ${hostedRoom}`);
             } else if (msg.type === 'roomlist') {
-                console.debug('[RoomList] Updating room list:', msg.rooms);
+                // If roomlist includes player names, log them
+                Object.entries(msg.rooms || {}).forEach(([roomName, info]) => {
+                    if (info && Array.isArray(info.players)) {
+                        const names = info.players.map(p => p.name).join(', ');
+                        console.debug(`[RoomList] Room: ${roomName} | Players: ${names} (${info.currentPlayers}/${info.maxPlayers})`);
+                    } else {
+                        console.debug(`[RoomList] Room: ${roomName} | Players: ? (${info.currentPlayers}/${info.maxPlayers})`);
+                    }
+                });
                 updateRoomList(msg.rooms);
             } else if (msg.type === 'joined') {
-                console.debug('[Join] Joined room:', msg.room);
-                // Optionally handle joined room
+                // If joined includes player names, log them
+                if (msg.players && Array.isArray(msg.players)) {
+                    const names = msg.players.map(p => p.name).join(', ');
+                    console.debug(`[Join] Joined room: ${msg.room} | Players: ${names}`);
+                } else {
+                    console.debug(`[Join] Joined room: ${msg.room}`);
+                }
+                myJoinedRoom = msg.room;
+            } else if (msg.type === 'left') {
+                console.debug('[Leave] Left room:', msg.room);
+                if (!msg.room || msg.room === myJoinedRoom) myJoinedRoom = null;
+            } else if (msg.type === 'roomupdate') {
+                if (msg.players && Array.isArray(msg.players)) {
+                    const names = msg.players.map(p => p.name).join(', ');
+                    console.debug(`[RoomUpdate] Room: ${msg.room} | Players: ${names}`);
+                } else {
+                    console.debug(`[RoomUpdate] Room: ${msg.room}`);
+                }
             } else if (msg.type === 'error') {
                 console.debug('[Error]', msg.error);
                 alert(msg.error);
@@ -55,21 +79,48 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    let myJoinedRoom = null; // track the room this tab is in
+
     function updateRoomList(rooms) {
         roomListElement.innerHTML = '';
-        Object.keys(rooms).forEach(roomName => {
+        const entries = Object.entries(rooms || {});
+        // Partition: my room, joinable, full
+        const my = [];
+        const joinable = [];
+        const full = [];
+        for (const [roomName, infoRaw] of entries) {
+            const info = infoRaw || {};
+            const currentPlayers = Number.isFinite(info.currentPlayers) ? info.currentPlayers : 0;
+            const maxPlayers = Number.isFinite(info.maxPlayers) ? info.maxPlayers : 2;
+            if (roomName === myJoinedRoom) my.push([roomName, info]);
+            else if (currentPlayers < maxPlayers) joinable.push([roomName, info]);
+            else full.push([roomName, info]);
+        }
+        const ordered = [...my, ...joinable, ...full];
+        ordered.forEach(([roomName, info]) => {
+            const currentPlayers = Number.isFinite(info.currentPlayers) ? info.currentPlayers : 0;
+            const maxPlayers = Number.isFinite(info.maxPlayers) ? info.maxPlayers : 2;
             const li = document.createElement('li');
             li.className = 'room-list-item';
             const btn = document.createElement('button');
-            btn.className = 'btn secondary join-btn';
-            btn.textContent = 'Join';
-            btn.onclick = () => joinRoom(roomName);
+            const isMine = roomName === myJoinedRoom;
+            const isFull = currentPlayers >= maxPlayers;
+            if (isMine) {
+                btn.className = 'btn danger leave-btn';
+                btn.textContent = 'Leave';
+                btn.onclick = () => leaveRoom(roomName);
+            } else {
+                btn.className = 'btn secondary join-btn';
+                btn.textContent = isFull ? 'Full' : 'Join';
+                btn.disabled = !!isFull;
+                if (!isFull) btn.onclick = () => joinRoom(roomName);
+            }
             const nameSpan = document.createElement('span');
             nameSpan.className = 'room-name';
             nameSpan.textContent = roomName;
             const countSpan = document.createElement('span');
             countSpan.className = 'room-player-count';
-            countSpan.textContent = '(1/2)'; // Only host/guest supported
+            countSpan.textContent = `(${currentPlayers}/${maxPlayers})`;
             li.appendChild(btn);
             li.appendChild(nameSpan);
             li.appendChild(countSpan);
@@ -82,7 +133,11 @@ document.addEventListener('DOMContentLoaded', () => {
         function sendHost() {
             try {
                 console.debug('[Host] Hosting room:', name);
-                ws.send(JSON.stringify({ type: 'host', name }));
+                // For debug: send player name, but do not use for logic
+                const debugPlayerName = (localStorage.getItem('playerName') || onlinePlayerNameInput.value || 'Player').trim();
+                // Send selected player count for maxPlayers
+                const selectedPlayers = Math.max(2, Math.min(playerColors.length, Math.floor(menuPlayerCount || 2)));
+                ws.send(JSON.stringify({ type: 'host', name, players: selectedPlayers, debugName: debugPlayerName }));
             } catch (err) {
                 console.error('[Host] Error hosting room:', err);
                 if (err && err.stack) console.error(err.stack);
@@ -99,7 +154,15 @@ document.addEventListener('DOMContentLoaded', () => {
     function joinRoom(roomName) {
         connectWebSocket();
         console.debug('[Join] Joining room:', roomName);
-        ws.send(JSON.stringify({ type: 'join', name: roomName }));
+        // For debug: send player name, but do not use for logic
+        const debugPlayerName = (localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player').trim();
+        ws.send(JSON.stringify({ type: 'join', name: roomName, debugName: debugPlayerName }));
+    }
+
+    function leaveRoom(roomName) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        console.debug('[Leave] Leaving room:', roomName);
+        ws.send(JSON.stringify({ type: 'leave', name: roomName }));
     }
 
     if (hostGameBtn) {

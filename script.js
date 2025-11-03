@@ -151,11 +151,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     const applyNow = () => {
                         // Suppress re-broadcast while replaying the remote move locally
-                        suppressNetworkSend = true;
-                        pendingMove = null;
                         currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
                         handleClick(r, c);
-                        suppressNetworkSend = false;
                     };
                     if (isProcessing) {
                         // If we're mid-explosions, retry until clear (bounded)
@@ -172,7 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 } catch (err) {
                     console.error('[Online] Error applying remote move', err);
-                    suppressNetworkSend = false;
+                    // ...existing code...
                 }
             } else if (msg.type === 'error') {
                 console.debug('[Error]', msg.error);
@@ -436,9 +433,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let onlineGameActive = false;
     let onlinePlayers = [];
     let myOnlineIndex = -1;
-    let suppressNetworkSend = false;
+    // let suppressNetworkSend = false; // unused after instant send
     /** @type {{row:number,col:number}|null} */
-    let pendingMove = null;
+    // let pendingMove = null; // unused after instant send
     
     /**
      * Delegated grid click handler. Uses event.target.closest('.cell') to
@@ -456,7 +453,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (onlineGameActive) {
                 if (currentPlayer !== myOnlineIndex) return;
                 if (!isValidLocalMove(row, col, myOnlineIndex)) return;
-                pendingMove = { row, col };
+                // Send move instantly to server
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'move',
+                        row,
+                        col,
+                        fromIndex: myOnlineIndex,
+                        nextIndex: (myOnlineIndex + 1) % playerCount,
+                        color: activeColors()[myOnlineIndex]
+                    }));
+                }
+                // ...existing code...
                 handleClick(row, col);
                 return;
             }
@@ -2117,7 +2125,18 @@ document.addEventListener('keydown', (e) => {
                     if (currentPlayer !== myOnlineIndex) return;
                     if (!isValidLocalMove(row, col, myOnlineIndex)) return;
                     e.preventDefault();
-                    pendingMove = { row, col };
+                    // Send move instantly to server
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            type: 'move',
+                            row,
+                            col,
+                            fromIndex: myOnlineIndex,
+                            nextIndex: (myOnlineIndex + 1) % playerCount,
+                            color: activeColors()[myOnlineIndex]
+                        }));
+                    }
+                    // ...existing code...
                     handleClick(row, col);
                     return;
                 }
@@ -2562,7 +2581,7 @@ document.addEventListener('keydown', (e) => {
      * @returns {void} updates currentPlayer and grid visuals.
      */
     function switchPlayer() {
-        const prevIndex = currentPlayer;
+    // const prevIndex = currentPlayer; // unused after instant send
         do {
             currentPlayer = (currentPlayer + 1) % playerCount;
         } while (!hasCells(currentPlayer) && initialPlacements.every(placement => placement));
@@ -2574,23 +2593,9 @@ document.addEventListener('keydown', (e) => {
         restorePlayerFocus();
         // If in train mode, possibly trigger AI move for non-human players
         maybeTriggerAIMove();
-        // Online: after determining next player, if this client originated a pending move, send it now
-        try {
-            if (onlineGameActive && pendingMove && !suppressNetworkSend && prevIndex === myOnlineIndex) {
-                const payload = {
-                    type: 'move',
-                    row: pendingMove.row,
-                    col: pendingMove.col,
-                    fromIndex: prevIndex,
-                    nextIndex: currentPlayer,
-                    color: activeColors()[prevIndex]
-                };
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify(payload));
-                }
-            }
-        } catch { /* ignore */ }
-        finally { pendingMove = null; }
+        // ...existing code...
+        // Online: sending move is now handled instantly in click/keyboard handler
+    // ...existing code...
     }
 
     /**

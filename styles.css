@@ -1,3 +1,13 @@
+/* Center Host Custom button vertically in online menu */
+.host-custom-btn-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    grid-column: 1 / -1;
+}
+#hostCustomGameBtn {
+    margin-top: 0;
+}
 /* Extra button types for room actions */
 .room-btn {
     /* Inherit join-btn formatting, but allow color override */
@@ -97,6 +107,12 @@
 }
 .menu-main-btn:active {
     background: #3a6ca8;
+}
+.menu-main-btn:disabled {
+    background: #9aa9bf;
+    color: #eef1f6;
+    cursor: not-allowed;
+    opacity: 0.75;
 }
 .menu-main-btn:focus-visible {
     outline: var(--focus-ring-width) solid var(--focus-ring-color);

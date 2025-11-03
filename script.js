@@ -26,7 +26,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let ws;
     let hostedRoom = null;
     const roomListElement = document.getElementById('roomList');
-    const hostGameBtn = document.getElementById('hostGameBtn');
+    // Online bottom action button in online menu
+    const hostCustomGameBtnRef = document.getElementById('hostCustomGameBtn');
 
     function connectWebSocket() {
         if (ws && ws.readyState === WebSocket.OPEN) return;
@@ -41,6 +42,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (msg.type === 'hosted') {
                 hostedRoom = msg.room;
                 myJoinedRoom = msg.room;
+                myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
+                myRoomCurrentPlayers = 1; // host is the first participant
                 console.debug(`[Host] Room hosted: ${hostedRoom}`);
                 // On successful hosting, return to Online game menu
                 const onlineMenu = document.getElementById('onlineMenu');
@@ -55,6 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     // clear marker
                     try { mainMenu.dataset.openedBy = ''; } catch { /* ignore */ }
                 }
+                updateStartButtonState();
             } else if (msg.type === 'roomlist') {
                 // If roomlist includes player names, log them
                 Object.entries(msg.rooms || {}).forEach(([roomName, info]) => {
@@ -66,6 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
                 updateRoomList(msg.rooms);
+                updateStartButtonState(msg.rooms);
             } else if (msg.type === 'joined') {
                 // If joined includes player names, log them
                 if (msg.players && Array.isArray(msg.players)) {
@@ -75,15 +80,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.debug(`[Join] Joined room: ${msg.room}`);
                 }
                 myJoinedRoom = msg.room;
+                // Track my room occupancy and capacity
+                myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
+                if (Array.isArray(msg.players)) myRoomCurrentPlayers = msg.players.length;
+                updateStartButtonState();
             } else if (msg.type === 'left') {
                 console.debug('[Leave] Left room:', msg.room);
                 if (!msg.room || msg.room === myJoinedRoom) myJoinedRoom = null;
+                myRoomMaxPlayers = null; myRoomCurrentPlayers = 0;
+                updateStartButtonState();
             } else if (msg.type === 'roomupdate') {
                 if (msg.players && Array.isArray(msg.players)) {
                     const names = msg.players.map(p => p.name).join(', ');
                     console.debug(`[RoomUpdate] Room: ${msg.room} | Players: ${names}`);
                 } else {
                     console.debug(`[RoomUpdate] Room: ${msg.room}`);
+                }
+                if (msg.room && msg.room === myJoinedRoom && Array.isArray(msg.players)) {
+                    myRoomCurrentPlayers = msg.players.length;
+                    updateStartButtonState();
                 }
             } else if (msg.type === 'error') {
                 console.debug('[Error]', msg.error);
@@ -93,6 +108,37 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     let myJoinedRoom = null; // track the room this tab is in
+    let myRoomMaxPlayers = null; // capacity of the room I'm in
+    let myRoomCurrentPlayers = 0; // current players in my room
+
+    /**
+     * Toggle the online bottom button between "Host Custom" and "Start Game" depending on room state.
+     * Enabled when I'm in a full room (current >= max), disabled if not full; otherwise shows Host Custom.
+     * @param {Record<string, {currentPlayers:number, maxPlayers:number}>} [rooms]
+     */
+    function updateStartButtonState(rooms) {
+        const btn = document.getElementById('hostCustomGameBtn');
+        if (!btn) return;
+        // Refresh known room stats from latest rooms list
+        if (rooms && myJoinedRoom && rooms[myJoinedRoom]) {
+            const info = rooms[myJoinedRoom];
+            if (Number.isFinite(info.maxPlayers)) myRoomMaxPlayers = info.maxPlayers;
+            if (Number.isFinite(info.currentPlayers)) myRoomCurrentPlayers = info.currentPlayers;
+        }
+        const inRoom = !!myJoinedRoom;
+        const isFull = inRoom && Number.isFinite(myRoomMaxPlayers) && myRoomCurrentPlayers >= myRoomMaxPlayers;
+        if (inRoom) {
+            btn.textContent = 'Start Game';
+            btn.disabled = !isFull;
+            btn.classList.add('start-mode');
+            btn.setAttribute('aria-disabled', isFull ? 'false' : 'true');
+        } else {
+            btn.textContent = 'Host Custom';
+            btn.disabled = false;
+            btn.classList.remove('start-mode');
+            btn.removeAttribute('aria-disabled');
+        }
+    }
 
     function updateRoomList(rooms) {
         roomListElement.innerHTML = '';
@@ -205,8 +251,28 @@ document.addEventListener('DOMContentLoaded', () => {
     ws.send(JSON.stringify({ type: 'leave', roomName: roomName }));
     }
 
-    if (hostGameBtn) {
-        // Remove direct hostRoom binding from hostGameBtn
+    // Wire Host Custom / Start Game button behavior in the online menu
+    if (hostCustomGameBtnRef) {
+        hostCustomGameBtnRef.addEventListener('click', (e) => {
+            const btn = e.currentTarget;
+            // If we're in Start Game mode and enabled, trigger online start (stub)
+            if (btn.classList && btn.classList.contains('start-mode') && !btn.disabled) {
+                // Placeholder: starting an online game would be implemented here
+                console.debug('[Online] Start Game clicked for room:', myJoinedRoom);
+                // TODO: send a start signal or transition to gameplay view when implemented
+                return;
+            }
+            // Otherwise behave as Host Custom -> open mainMenu in host mode
+            const onlineMenu = document.getElementById('onlineMenu');
+            const mainMenu = document.getElementById('mainMenu');
+            if (onlineMenu && mainMenu) {
+                setHidden(onlineMenu, true);
+                setHidden(mainMenu, false);
+                setMainMenuMode('host');
+                // Mark mainMenu as opened by host for close logic
+                mainMenu.dataset.openedBy = 'host';
+            }
+        });
     }
 
     connectWebSocket();
@@ -522,7 +588,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Show onlineMenu for Online Game
                 const onlineMenu = document.getElementById('onlineMenu');
-                const hostCustomGameBtn = document.getElementById('hostCustomGameBtn');
                 if (onlineGameBtn && onlineMenu && mainMenu) {
                         onlineGameBtn.addEventListener('click', (e) => {
                             if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -533,19 +598,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             setHidden(firstMenu, true);
                             setHidden(mainMenu, true);
                             setHidden(onlineMenu, false);
+                            // Reflect current room status on the action button
+                            updateStartButtonState();
                         });
                 }
 
-                // Host Game button returns to mainMenu and shows name input
-                if (hostCustomGameBtn && onlineMenu && mainMenu) {
-                    hostCustomGameBtn.addEventListener('click', () => {
-                        setHidden(onlineMenu, true);
-                        setHidden(mainMenu, false);
-                        setMainMenuMode('host');
-                        // Mark mainMenu as opened by host for close logic
-                        mainMenu.dataset.openedBy = 'host';
-                    });
-                }
+                // Host Custom/Start Game button is handled globally; no per-init binding here
                 // Train Mode button logic
                 trainMainBtn.addEventListener('click', () => {
                     setHidden(firstMenu, true);

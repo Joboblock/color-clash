@@ -113,6 +113,63 @@ wss.on('connection', (ws) => {
       broadcastRoomList();
     } else if (msg.type === 'list') {
       ws.send(JSON.stringify({ type: 'roomlist', rooms: getRoomList() }));
+    } else if (msg.type === 'start') {
+      // Only the host can start; use their current room from connectionMeta
+      const meta = connectionMeta.get(ws);
+      if (!meta || !meta.roomName) {
+        ws.send(JSON.stringify({ type: 'error', error: 'Not in a room' }));
+        return;
+      }
+      const room = rooms[meta.roomName];
+      if (!room) {
+        ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
+        return;
+      }
+      // Verify host
+      const isHost = room.participants.length && room.participants[0].ws === ws;
+      if (!isHost) {
+        ws.send(JSON.stringify({ type: 'error', error: 'Only the host can start the game' }));
+        return;
+      }
+      // Optionally enforce full room
+      const playerCount = room.participants.length;
+      const mustBeFull = true;
+      if (mustBeFull && playerCount < room.maxPlayers) {
+        ws.send(JSON.stringify({ type: 'error', error: 'Room is not full yet' }));
+        return;
+      }
+      const players = room.participants.map(p => p.name);
+      const gridSize = Math.max(3, playerCount + 3);
+      // Broadcast start to all participants
+      room.participants.forEach(p => {
+        if (p.ws.readyState === 1) {
+          try {
+            p.ws.send(JSON.stringify({ type: 'started', room: meta.roomName, players, gridSize }));
+          } catch {
+            // ignore
+          }
+        }
+      });
+    } else if (msg.type === 'move') {
+      const meta = connectionMeta.get(ws);
+      if (!meta || !meta.roomName) return;
+      const room = rooms[meta.roomName];
+      if (!room) return;
+      // Re-broadcast move to all participants (including sender) for consistency
+      const payload = {
+        type: 'move',
+        room: meta.roomName,
+        row: Number(msg.row),
+        col: Number(msg.col),
+        fromIndex: Number(msg.fromIndex),
+        nextIndex: Number(msg.nextIndex),
+        color: typeof msg.color === 'string' ? msg.color : undefined,
+      };
+      room.participants.forEach(p => {
+        if (p.ws.readyState === 1) {
+          try { p.ws.send(JSON.stringify(payload)); } catch { /* ignore */ }
+        }
+      });
     } else if (msg.type === 'leave') {
       const meta = connectionMeta.get(ws);
       if (!meta) {

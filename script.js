@@ -74,6 +74,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 updateRoomList(msg.rooms);
                 updateStartButtonState(msg.rooms);
+            } else if (msg.type === 'started') {
+                // Online game start: close menus and start a game with N players and grid size = N + 3
+                try {
+                    onlineGameActive = true;
+                    onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
+                    myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
+                    const p = Math.max(2, Math.min(playerColors.length, onlinePlayers.length || 2));
+                    const s = Math.max(3, p + 3);
+                    // Colors: host green, others follow playerColors order
+                    gameColors = playerColors.slice(0, p);
+                    playerCount = p;
+                    gridSize = s;
+                    document.documentElement.style.setProperty('--grid-size', gridSize);
+                    // Hide any open menu overlays
+                    const firstMenu = document.getElementById('firstMenu');
+                    const mainMenu = document.getElementById('mainMenu');
+                    const onlineMenu = document.getElementById('onlineMenu');
+                    if (firstMenu) setHidden(firstMenu, true);
+                    if (mainMenu) setHidden(mainMenu, true);
+                    if (onlineMenu) setHidden(onlineMenu, true);
+                    // Ensure non-train mode and start the grid
+                    trainMode = false;
+                    recreateGrid(s, p);
+                    // Host (index 0) starts
+                    currentPlayer = 0;
+                    document.body.className = activeColors()[currentPlayer];
+                    updateGrid();
+                } catch (err) {
+                    console.error('[Online] Failed to start online game', err);
+                }
             } else if (msg.type === 'joined') {
                 // If joined includes player names, log them
                 if (msg.players && Array.isArray(msg.players)) {
@@ -106,6 +136,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     myRoomCurrentPlayers = msg.players.length;
                     myRoomPlayers = msg.players;
                     updateStartButtonState();
+                }
+            } else if (msg.type === 'move') {
+                // Apply a remote move
+                try {
+                    if (!onlineGameActive) return;
+                    if (msg.room && msg.room !== myJoinedRoom) return;
+                    const r = Number(msg.row), c = Number(msg.col);
+                    const fromIdx = Number(msg.fromIndex);
+                    if (!Number.isInteger(r) || !Number.isInteger(c)) return;
+                    // Suppress echo-back
+                    suppressNetworkSend = true;
+                    pendingMove = null;
+                    // Set current player to the sender and apply the move
+                    currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
+                    handleClick(r, c);
+                    suppressNetworkSend = false;
+                } catch (err) {
+                    console.error('[Online] Error applying remote move', err);
+                    suppressNetworkSend = false;
                 }
             } else if (msg.type === 'error') {
                 console.debug('[Error]', msg.error);
@@ -328,9 +377,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const btn = e.currentTarget;
             // If we're in Start Game mode and enabled, trigger online start (stub)
             if (btn.classList && btn.classList.contains('start-mode') && !btn.disabled) {
-                // Placeholder: starting an online game would be implemented here
-                console.debug('[Online] Start Game clicked for room:', myJoinedRoom);
-                // TODO: send a start signal or transition to gameplay view when implemented
+                // Host starts the online game
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    try { ws.send(JSON.stringify({ type: 'start' })); } catch { /* ignore */ }
+                }
                 return;
             }
             // Otherwise behave as Host Custom -> open mainMenu in host mode
@@ -364,6 +414,13 @@ document.addEventListener('DOMContentLoaded', () => {
         // Add more fields here if needed
     }
     const gridElement = document.querySelector('.grid');
+    // Online game state and guards
+    let onlineGameActive = false;
+    let onlinePlayers = [];
+    let myOnlineIndex = -1;
+    let suppressNetworkSend = false;
+    /** @type {{row:number,col:number}|null} */
+    let pendingMove = null;
     
     /**
      * Delegated grid click handler. Uses event.target.closest('.cell') to
@@ -377,6 +434,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = parseInt(el.dataset.row, 10);
         const col = parseInt(el.dataset.col, 10);
         if (Number.isInteger(row) && Number.isInteger(col)) {
+            // In online mode, only the active player may act; record move for network send
+            if (onlineGameActive) {
+                if (currentPlayer !== myOnlineIndex) return;
+                pendingMove = { row, col };
+            }
             handleClick(row, col);
         }
     }
@@ -2470,6 +2532,7 @@ document.addEventListener('keydown', (e) => {
      * @returns {void} updates currentPlayer and grid visuals.
      */
     function switchPlayer() {
+        const prevIndex = currentPlayer;
         do {
             currentPlayer = (currentPlayer + 1) % playerCount;
         } while (!hasCells(currentPlayer) && initialPlacements.every(placement => placement));
@@ -2481,6 +2544,23 @@ document.addEventListener('keydown', (e) => {
         restorePlayerFocus();
         // If in train mode, possibly trigger AI move for non-human players
         maybeTriggerAIMove();
+        // Online: after determining next player, if this client originated a pending move, send it now
+        try {
+            if (onlineGameActive && pendingMove && !suppressNetworkSend && prevIndex === myOnlineIndex) {
+                const payload = {
+                    type: 'move',
+                    row: pendingMove.row,
+                    col: pendingMove.col,
+                    fromIndex: prevIndex,
+                    nextIndex: currentPlayer,
+                    color: activeColors()[prevIndex]
+                };
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify(payload));
+                }
+            }
+        } catch { /* ignore */ }
+        finally { pendingMove = null; }
     }
 
     /**

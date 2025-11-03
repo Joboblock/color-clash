@@ -138,20 +138,38 @@ document.addEventListener('DOMContentLoaded', () => {
                     updateStartButtonState();
                 }
             } else if (msg.type === 'move') {
-                // Apply a remote move
+                // Apply a remote move (ignore our own echo; queue if processing)
                 try {
                     if (!onlineGameActive) return;
                     if (msg.room && msg.room !== myJoinedRoom) return;
                     const r = Number(msg.row), c = Number(msg.col);
                     const fromIdx = Number(msg.fromIndex);
                     if (!Number.isInteger(r) || !Number.isInteger(c)) return;
-                    // Suppress echo-back
-                    suppressNetworkSend = true;
-                    pendingMove = null;
-                    // Set current player to the sender and apply the move
-                    currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
-                    handleClick(r, c);
-                    suppressNetworkSend = false;
+                    // Don't re-apply our own move
+                    if (fromIdx === myOnlineIndex) {
+                        return;
+                    }
+                    const applyNow = () => {
+                        // Suppress re-broadcast while replaying the remote move locally
+                        suppressNetworkSend = true;
+                        pendingMove = null;
+                        currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
+                        handleClick(r, c);
+                        suppressNetworkSend = false;
+                    };
+                    if (isProcessing) {
+                        // If we're mid-explosions, retry until clear (bounded)
+                        const startTs = Date.now();
+                        const tryApply = () => {
+                            if (!onlineGameActive) return; // room closed
+                            if (!isProcessing) { applyNow(); return; }
+                            if (Date.now() - startTs > 4000) { console.warn('[Online] Dropping deferred move after timeout'); return; }
+                            setTimeout(tryApply, 100);
+                        };
+                        tryApply();
+                    } else {
+                        applyNow();
+                    }
                 } catch (err) {
                     console.error('[Online] Error applying remote move', err);
                     suppressNetworkSend = false;
@@ -434,11 +452,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = parseInt(el.dataset.row, 10);
         const col = parseInt(el.dataset.col, 10);
         if (Number.isInteger(row) && Number.isInteger(col)) {
-            // In online mode, only the active player may act; record move for network send
+            // In online mode, only the active player may act and only valid moves can be sent
             if (onlineGameActive) {
                 if (currentPlayer !== myOnlineIndex) return;
+                if (!isValidLocalMove(row, col, myOnlineIndex)) return;
                 pendingMove = { row, col };
+                handleClick(row, col);
+                return;
             }
+            // Local / train mode: proceed as usual
             handleClick(row, col);
         }
     }
@@ -2091,6 +2113,14 @@ document.addEventListener('keydown', (e) => {
             const col = parseInt(focused.dataset.col, 10);
                 // Prevent keyboard activation if AI is processing or it's not the human player's turn
                 if (typeof isProcessing !== 'undefined' && isProcessing) return;
+                if (onlineGameActive) {
+                    if (currentPlayer !== myOnlineIndex) return;
+                    if (!isValidLocalMove(row, col, myOnlineIndex)) return;
+                    e.preventDefault();
+                    pendingMove = { row, col };
+                    handleClick(row, col);
+                    return;
+                }
                 if (typeof trainMode !== 'undefined' && trainMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
                 if (Number.isInteger(row) && Number.isInteger(col)) {
                     e.preventDefault();
@@ -2604,6 +2634,26 @@ document.addEventListener('keydown', (e) => {
      */
     function getPlayerColor(row, col) {
         return grid[row][col].player;
+    }
+
+    /**
+     * Determine if a move is valid for the given player under current rules.
+     * - During that player's initial placement phase: must be an empty cell and not violate placement rules.
+     * - Otherwise: must be a cell owned by that player (increment).
+     * @param {number} row
+     * @param {number} col
+     * @param {number} playerIndex
+     * @returns {boolean}
+     */
+    function isValidLocalMove(row, col, playerIndex) {
+        if (!Number.isInteger(row) || !Number.isInteger(col)) return false;
+        if (!Array.isArray(initialPlacements) || playerIndex < 0 || playerIndex >= playerCount) return false;
+        // Initial placement for this player
+        if (!initialPlacements[playerIndex]) {
+            return grid[row][col].value === 0 && !isInitialPlacementInvalid(row, col);
+        }
+        // Regular move: must click own cell
+        return grid[row][col].value > 0 && getPlayerColor(row, col) === activeColors()[playerIndex];
     }
 
     /**

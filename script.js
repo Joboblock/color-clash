@@ -44,6 +44,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 myJoinedRoom = msg.room;
                 myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
                 myRoomCurrentPlayers = 1; // host is the first participant
+                if (typeof msg.player === 'string' && msg.player) {
+                    myPlayerName = msg.player;
+                }
                 console.debug(`[Host] Room hosted: ${hostedRoom}`);
                 // On successful hosting, return to Online game menu
                 const onlineMenu = document.getElementById('onlineMenu');
@@ -82,12 +85,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 myJoinedRoom = msg.room;
                 // Track my room occupancy and capacity
                 myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
-                if (Array.isArray(msg.players)) myRoomCurrentPlayers = msg.players.length;
+                if (Array.isArray(msg.players)) {
+                    myRoomCurrentPlayers = msg.players.length;
+                    myRoomPlayers = msg.players;
+                }
                 updateStartButtonState();
             } else if (msg.type === 'left') {
                 console.debug('[Leave] Left room:', msg.room);
                 if (!msg.room || msg.room === myJoinedRoom) myJoinedRoom = null;
-                myRoomMaxPlayers = null; myRoomCurrentPlayers = 0;
+                myRoomMaxPlayers = null; myRoomCurrentPlayers = 0; myRoomPlayers = [];
                 updateStartButtonState();
             } else if (msg.type === 'roomupdate') {
                 if (msg.players && Array.isArray(msg.players)) {
@@ -98,6 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (msg.room && msg.room === myJoinedRoom && Array.isArray(msg.players)) {
                     myRoomCurrentPlayers = msg.players.length;
+                    myRoomPlayers = msg.players;
                     updateStartButtonState();
                 }
             } else if (msg.type === 'error') {
@@ -110,6 +117,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let myJoinedRoom = null; // track the room this tab is in
     let myRoomMaxPlayers = null; // capacity of the room I'm in
     let myRoomCurrentPlayers = 0; // current players in my room
+    let myRoomPlayers = []; // last known players (first is host)
+    let myPlayerName = null; // this client's player name used to join/host
 
     /**
      * Toggle the online bottom button between "Host Custom" and "Start Game" depending on room state.
@@ -124,23 +133,44 @@ document.addEventListener('DOMContentLoaded', () => {
             const info = rooms[myJoinedRoom];
             if (Number.isFinite(info.maxPlayers)) myRoomMaxPlayers = info.maxPlayers;
             if (Number.isFinite(info.currentPlayers)) myRoomCurrentPlayers = info.currentPlayers;
+            if (Array.isArray(info.players)) myRoomPlayers = info.players;
         }
         const inRoom = !!myJoinedRoom;
         const isFull = inRoom && Number.isFinite(myRoomMaxPlayers) && myRoomCurrentPlayers >= myRoomMaxPlayers;
-        if (inRoom) {
-            btn.textContent = 'Start Game';
-            btn.disabled = !isFull;
-            btn.classList.add('start-mode');
-            btn.setAttribute('aria-disabled', isFull ? 'false' : 'true');
-        } else {
+        // Determine host name: prefer roomlist hostName, else first player in myRoomPlayers
+        let hostName = null;
+        if (rooms && myJoinedRoom && rooms[myJoinedRoom] && rooms[myJoinedRoom].hostName) {
+            hostName = rooms[myJoinedRoom].hostName;
+        } else if (Array.isArray(myRoomPlayers) && myRoomPlayers[0] && myRoomPlayers[0].name) {
+            hostName = myRoomPlayers[0].name;
+        }
+        const amHost = inRoom && myPlayerName && hostName && (myPlayerName === hostName);
+        if (!inRoom) {
+            // Not in a room: show Host Custom (enabled)
             btn.textContent = 'Host Custom';
             btn.disabled = false;
             btn.classList.remove('start-mode');
             btn.removeAttribute('aria-disabled');
+            btn.title = '';
+        } else if (amHost) {
+            // I'm the host: show Start Game; enabled iff room is full
+            btn.textContent = 'Start Game';
+            btn.disabled = !isFull;
+            btn.classList.add('start-mode');
+            btn.setAttribute('aria-disabled', isFull ? 'false' : 'true');
+            btn.title = isFull ? '' : 'Waiting for players to join';
+        } else {
+            // I'm not the host: show Host Custom but disabled
+            btn.textContent = 'Host Custom';
+            btn.disabled = true;
+            btn.classList.remove('start-mode');
+            btn.setAttribute('aria-disabled', 'true');
+            btn.title = 'Only the host can start the game';
         }
     }
 
     function updateRoomList(rooms) {
+        window.lastRoomList = rooms;
         roomListElement.innerHTML = '';
         const entries = Object.entries(rooms || {});
         // Partition: my room, joinable, full
@@ -218,9 +248,29 @@ document.addEventListener('DOMContentLoaded', () => {
         const name = onlinePlayerNameInput.value.trim() || 'Room_' + Math.floor(Math.random()*1000);
         function sendHost() {
             try {
-                console.debug('[Host] Hosting room:', name);
                 // For debug: send player name, but do not use for logic
-                const debugPlayerName = (localStorage.getItem('playerName') || onlinePlayerNameInput.value || 'Player').trim();
+                let debugPlayerName = (localStorage.getItem('playerName') || onlinePlayerNameInput.value || 'Player').trim();
+                // Check for duplicate names in the room list
+                let rooms = window.lastRoomList || {};
+                let takenNames = [];
+                if (rooms[name] && Array.isArray(rooms[name].players)) {
+                    takenNames = rooms[name].players.map(p => p.name);
+                }
+                let baseName = debugPlayerName;
+                let suffix = 1;
+                let candidate = baseName;
+                while (takenNames.includes(candidate) && suffix <= 11) {
+                    // Ensure max 16 chars
+                    let maxLen = 16 - String(suffix).length;
+                    candidate = baseName.slice(0, maxLen) + String(suffix);
+                    suffix++;
+                }
+                if (takenNames.includes(candidate)) {
+                    showModalError('All name variants are taken in this room. Please choose a different name.');
+                    return;
+                }
+                debugPlayerName = candidate;
+                myPlayerName = debugPlayerName;
                 // Send selected player count for maxPlayers
                 const selectedPlayers = Math.max(2, Math.min(playerColors.length, Math.floor(menuPlayerCount || 2)));
                 ws.send(JSON.stringify({ type: 'host', roomName: name, maxPlayers: selectedPlayers, debugName: debugPlayerName }));
@@ -241,8 +291,29 @@ document.addEventListener('DOMContentLoaded', () => {
         connectWebSocket();
         console.debug('[Join] Joining room:', roomName);
         // For debug: send player name, but do not use for logic
-        const debugPlayerName = (localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player').trim();
-    ws.send(JSON.stringify({ type: 'join', roomName: roomName, debugName: debugPlayerName }));
+        let debugPlayerName = (localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player').trim();
+        // Check for duplicate names in the room list
+        let rooms = window.lastRoomList || {};
+        let takenNames = [];
+        if (rooms[roomName] && Array.isArray(rooms[roomName].players)) {
+            takenNames = rooms[roomName].players.map(p => p.name);
+        }
+        let baseName = debugPlayerName;
+        let suffix = 1;
+        let candidate = baseName;
+        while (takenNames.includes(candidate) && suffix <= 11) {
+            // Ensure max 16 chars
+            let maxLen = 16 - String(suffix).length;
+            candidate = baseName.slice(0, maxLen) + String(suffix);
+            suffix++;
+        }
+        if (takenNames.includes(candidate)) {
+            showModalError('All name variants are taken in this room. Please choose a different name.');
+            return;
+        }
+        debugPlayerName = candidate;
+        myPlayerName = debugPlayerName;
+        ws.send(JSON.stringify({ type: 'join', roomName: roomName, debugName: debugPlayerName }));
     }
 
     function leaveRoom(roomName) {

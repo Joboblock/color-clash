@@ -3213,7 +3213,7 @@ document.addEventListener('keydown', (e) => {
         const evaluatedCandidates = [];
         for (const cand of candidates) {
             const owner = cand.owner; // must be a real player index
-            const applied = applyMoveAndSim(grid, initialPlacements, owner, cand.r, cand.c, cand.isInitial);
+            const applied = applyMoveAndSim(simGrid, simInitial, owner, cand.r, cand.c, cand.isInitial);
             const val = totalOwnedOnGrid(applied.grid, focusPlayerIndex);
 
             if (applied.runaway) {

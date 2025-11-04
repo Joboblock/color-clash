@@ -2774,11 +2774,16 @@ document.addEventListener('keydown', (e) => {
                 const newUrl = `${window.location.pathname}?${urlParams.toString()}${window.location.hash || ''}`;
                 // Update the URL without reloading the page
                 window.history.replaceState(null, '', newUrl);
-                // Show the menu overlay
-                if (mainMenu) mainMenu.classList.remove('hidden');
-                updateRandomTip();
-                // When showing the menu, exit fullscreen to restore browser UI if needed
-                exitFullscreenIfPossible();
+                    // Show the appropriate menu overlay
+                    if (onlineGameActive) {
+                        const onlineMenu = document.getElementById('onlineMenu');
+                        if (onlineMenu) onlineMenu.classList.remove('hidden');
+                    } else {
+                        if (mainMenu) mainMenu.classList.remove('hidden');
+                        updateRandomTip();
+                    }
+                    // When showing the menu, exit fullscreen to restore browser UI if needed
+                    exitFullscreenIfPossible();
             }, delayGameEnd); //DELAY Game End
         }
     }

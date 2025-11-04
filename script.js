@@ -462,6 +462,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (Number.isInteger(row) && Number.isInteger(col)) {
             // In online mode, only the active player may act and only valid moves can be sent
             if (onlineGameActive) {
+                if (isProcessing) return; // Prevent sending moves while processing
                 if (currentPlayer !== myOnlineIndex) return;
                 if (!isValidLocalMove(row, col, myOnlineIndex)) return;
                 // Send move instantly to server

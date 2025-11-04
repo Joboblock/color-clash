@@ -7,7 +7,12 @@ const wss = new WebSocketServer({ port: PORT });
 // rooms = {
 //   [roomName]: {
 //     maxPlayers: number,
-//     participants: Array<{ ws: WebSocket, name: string, isHost: boolean }>
+//     participants: Array<{ ws: WebSocket, name: string, isHost: boolean }>,
+//     game?: {
+//       started: boolean,
+//       players: string[], // fixed order of names at start
+//       turnIndex: number   // whose turn it is (index in players)
+//     }
 //   }
 // }
 const rooms = {};
@@ -140,6 +145,12 @@ wss.on('connection', (ws) => {
       }
       const players = room.participants.map(p => p.name);
       const gridSize = Math.max(3, playerCount + 3);
+      // Initialize per-room game state for turn enforcement
+      room.game = {
+        started: true,
+        players: players.slice(),
+        turnIndex: 0
+      };
       // Broadcast start to all participants
       room.participants.forEach(p => {
         if (p.ws.readyState === 1) {
@@ -155,21 +166,54 @@ wss.on('connection', (ws) => {
       if (!meta || !meta.roomName) return;
       const room = rooms[meta.roomName];
       if (!room) return;
-      // Re-broadcast move to all participants (including sender) for consistency
+
+      // Enforce that a game has started and track turn order
+      if (!room.game || !room.game.started) {
+        try { ws.send(JSON.stringify({ type: 'error', error: 'Game not started' })); } catch (e) { /* ignore */ void e; }
+        return;
+      }
+
+      const r = Number(msg.row);
+      const c = Number(msg.col);
+      const players = Array.isArray(room.game.players) ? room.game.players : [];
+      const currentTurn = Number.isInteger(room.game.turnIndex) ? room.game.turnIndex : 0;
+      const senderName = meta.name;
+      const fromIndex = players.indexOf(senderName);
+
+      if (!Number.isInteger(r) || !Number.isInteger(c)) {
+        try { ws.send(JSON.stringify({ type: 'error', error: 'Invalid move coordinates' })); } catch (e) { /* ignore */ void e; }
+        return;
+      }
+      if (fromIndex < 0) {
+        try { ws.send(JSON.stringify({ type: 'error', error: 'Unknown player' })); } catch (e) { /* ignore */ void e; }
+        return;
+      }
+      if (fromIndex !== currentTurn) {
+        const expectedPlayer = players[currentTurn];
+        console.debug(`[Turn] Rejected move from ${senderName} (idx ${fromIndex}) - expected ${expectedPlayer} (idx ${currentTurn})`);
+        try { ws.send(JSON.stringify({ type: 'error', error: 'Not your turn', expectedIndex: currentTurn, expectedPlayer })); } catch (e) { /* ignore */ void e; }
+        return;
+      }
+
+      // Accept move: compute next turn and broadcast
+      const nextIndex = (fromIndex + 1) % Math.max(1, players.length);
       const payload = {
         type: 'move',
         room: meta.roomName,
-        row: Number(msg.row),
-        col: Number(msg.col),
-        fromIndex: Number(msg.fromIndex),
-        nextIndex: Number(msg.nextIndex),
+        row: r,
+        col: c,
+        fromIndex,
+        nextIndex,
         color: typeof msg.color === 'string' ? msg.color : undefined,
       };
+
+      console.debug(`[Turn] Accepted move from ${senderName} (idx ${fromIndex}) -> (${r},${c}). Next: ${players[nextIndex]} (idx ${nextIndex})`);
       room.participants.forEach(p => {
         if (p.ws.readyState === 1) {
           try { p.ws.send(JSON.stringify(payload)); } catch { /* ignore */ }
         }
       });
+      room.game.turnIndex = nextIndex;
     } else if (msg.type === 'leave') {
       const meta = connectionMeta.get(ws);
       if (!meta) {

@@ -77,6 +77,10 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (msg.type === 'started') {
                 // Online game start: close menus and start a game with N players and grid size = N + 3
                 try {
+                    console.debug('[Online] Game started:', {
+                        players: Array.isArray(msg.players) ? msg.players : [],
+                        gridSize: Math.max(3, (Array.isArray(msg.players) ? msg.players.length : 2) + 3)
+                    });
                     onlineGameActive = true;
                     onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
                     myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
@@ -149,6 +153,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (fromIdx === myOnlineIndex) {
                         return;
                     }
+                    console.debug('[Online] Move received:', {
+                        fromPlayer: fromIdx,
+                        color: activeColors()[fromIdx],
+                        row: r,
+                        col: c,
+                        room: msg.room
+                    });
                     const applyNow = () => {
                         // Suppress re-broadcast while replaying the remote move locally
                         currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
@@ -2229,9 +2240,18 @@ document.addEventListener('keydown', (e) => {
     function handleClick(row, col) {
         if (isProcessing || gameWon) return;
 
-    const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
-    // Save last focused cell for current player
-    playerLastFocus[currentPlayer] = { row, col };
+        // Debug log for every move
+        console.debug('[Move]', {
+            player: activeColors()[currentPlayer],
+            playerIndex: currentPlayer,
+            row,
+            col,
+            online: onlineGameActive
+        });
+
+        const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+        // Save last focused cell for current player
+        playerLastFocus[currentPlayer] = { row, col };
         const cellColor = getPlayerColor(row, col);
 
         if (!initialPlacements[currentPlayer]) {
@@ -2776,6 +2796,7 @@ document.addEventListener('keydown', (e) => {
                 window.history.replaceState(null, '', newUrl);
                     // Show the appropriate menu overlay
                     if (onlineGameActive) {
+                        console.debug('[Online] Game ended: winner =', activeColors().find((color, idx) => playerCells[idx] > 0));
                         const onlineMenu = document.getElementById('onlineMenu');
                         if (onlineMenu) onlineMenu.classList.remove('hidden');
                     } else {

@@ -878,6 +878,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 playerNameInput.blur();
             }
+            // Only allow arrow navigation out if input is empty
+            if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && playerNameInput.value === '') {
+                // Allow default behavior (navigation)
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                // Prevent navigation if not empty
+                e.stopPropagation();
+            }
         });
     }
 
@@ -911,6 +918,13 @@ if (onlinePlayerNameInput) {
         if (e.key === 'Enter') {
             e.preventDefault();
             onlinePlayerNameInput.blur();
+        }
+        // Only allow arrow navigation out if input is empty
+        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && onlinePlayerNameInput.value === '') {
+            // Allow default behavior (navigation)
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            // Prevent navigation if not empty
+            e.stopPropagation();
         }
     });
 }

@@ -207,7 +207,7 @@ wss.on('connection', (ws) => {
                 }
             });
             broadcastRoomList();
-        } else if (msg.type === 'reconnect' && msg.roomName && typeof msg.debugName === 'string') {
+    } else if (msg.type === 'reconnect' && msg.roomName && typeof msg.debugName === 'string') {
             const room = rooms[msg.roomName];
             if (!room) {
                 ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
@@ -231,10 +231,22 @@ wss.on('connection', (ws) => {
             participant.ws = ws;
             participant.connected = true;
             connectionMeta.set(ws, { roomName: msg.roomName, name });
-            // Acknowledge
-            try {
-                ws.send(JSON.stringify({ type: 'rejoined', room: msg.roomName, maxPlayers: room.maxPlayers, players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })) }));
-            } catch { /* ignore */ }
+            // Compute missed moves since last seen sequence for this player
+            const lastSeq = (room._lastSeqByName && room._lastSeqByName.get(name)) || 0;
+            const recentMoves = (room.game && Array.isArray(room.game.recentMoves))
+                ? room.game.recentMoves.filter(m => (m.seq || 0) > lastSeq)
+                : [];
+            const rejoinPayload = {
+                type: 'rejoined',
+                room: msg.roomName,
+                maxPlayers: room.maxPlayers,
+                players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
+                started: !!(room.game && room.game.started),
+                turnIndex: room.game && Number.isInteger(room.game.turnIndex) ? room.game.turnIndex : 0,
+                colors: room.game && Array.isArray(room.game.colors) ? room.game.colors : undefined,
+                recentMoves
+            };
+            try { ws.send(JSON.stringify(rejoinPayload)); } catch { /* ignore */ }
             // Notify others of updated connected roster
             room.participants.forEach(p => {
                 if (p.ws !== ws && p.ws.readyState === 1) {
@@ -314,8 +326,11 @@ wss.on('connection', (ws) => {
                     started: true,
                     players: players.slice(),
                     turnIndex: 0,
-                    colors: assigned.slice()
+                    colors: assigned.slice(),
+                    moveSeq: 0,
+                    recentMoves: []
                 };
+                if (!r._lastSeqByName) r._lastSeqByName = new Map();
                 // Broadcast start to all participants with authoritative colors
                 const startPayload = JSON.stringify({ type: 'started', room: meta.roomName, players, gridSize, colors: assigned });
                 r.participants.forEach(p => {
@@ -379,10 +394,22 @@ wss.on('connection', (ws) => {
                 color: assignedColor,
             };
 
+            // Sequence and buffer this move for catch-up on reconnect
+            try {
+                if (room.game) {
+                    room.game.moveSeq = (room.game.moveSeq || 0) + 1;
+                    const moveRecord = { seq: room.game.moveSeq, room: meta.roomName, row: r, col: c, fromIndex, nextIndex, color: assignedColor };
+                    if (!Array.isArray(room.game.recentMoves)) room.game.recentMoves = [];
+                    const bufferSize = Math.max(1, (Array.isArray(room.game.players) ? room.game.players.length : 2) - 1);
+                    room.game.recentMoves.push(moveRecord);
+                    if (room.game.recentMoves.length > bufferSize) room.game.recentMoves.shift();
+                }
+            } catch { /* ignore buffering errors */ }
+
             console.debug(`[Turn] Accepted move from ${senderName} (idx ${fromIndex}) -> (${r},${c}). Next: ${players[nextIndex]} (idx ${nextIndex})`);
             room.participants.forEach(p => {
                 if (p.ws.readyState === 1) {
-                    try { p.ws.send(JSON.stringify(payload)); } catch { /* ignore */ }
+                    try { p.ws.send(JSON.stringify({ ...payload, seq: room.game?.moveSeq })); } catch { /* ignore */ }
                 }
             });
             room.game.turnIndex = nextIndex;
@@ -416,8 +443,11 @@ wss.on('connection', (ws) => {
                     started: true,
                     players: players.slice(),
                     turnIndex: 0,
-                    colors: assigned.slice()
+                    colors: assigned.slice(),
+                    moveSeq: 0,
+                    recentMoves: []
                 };
+                if (!room._lastSeqByName) room._lastSeqByName = new Map();
                 const startPayload = JSON.stringify({ type: 'started', room: meta.roomName, players, gridSize, colors: assigned });
                 room.participants.forEach(p => {
                     if (p.ws.readyState === 1) {
@@ -470,6 +500,13 @@ wss.on('connection', (ws) => {
         const participant = room.participants.find(p => p.name === name);
         if (participant) {
             participant.connected = false;
+            // Record last seen sequence for reconnect catch-up
+            try {
+                if (room.game) {
+                    if (!room._lastSeqByName) room._lastSeqByName = new Map();
+                    room._lastSeqByName.set(name, room.game.moveSeq || 0);
+                }
+            } catch { /* ignore */ }
             if (!room._disconnectTimers) room._disconnectTimers = new Map();
             // Clear any existing timer for this name
             if (room._disconnectTimers.has(name)) {

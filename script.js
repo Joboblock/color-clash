@@ -307,6 +307,37 @@ document.addEventListener('DOMContentLoaded', () => {
                     myRoomCurrentPlayers = msg.players.length;
                 }
                 myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
+                // If server provides recent missed moves, apply them in order
+                try {
+                    const missed = Array.isArray(msg.recentMoves) ? msg.recentMoves.slice() : [];
+                    if (missed.length) {
+                        // Ensure chronological order by sequence if present
+                        missed.sort((a,b) => (Number(a.seq)||0) - (Number(b.seq)||0));
+                        let idx = 0;
+                        const applyNext = () => {
+                            if (idx >= missed.length) { updateStartButtonState(); return; }
+                            const m = missed[idx];
+                            const r = Number(m.row), c = Number(m.col), fromIdx = Number(m.fromIndex);
+                            if (!Number.isInteger(r) || !Number.isInteger(c) || !Number.isInteger(fromIdx)) { idx++; applyNext(); return; }
+                            const doApply = () => {
+                                if (!onlineGameActive) { // if somehow not active, skip safe
+                                    idx++; applyNext(); return;
+                                }
+                                currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
+                                handleClick(r, c);
+                                idx++;
+                                // allow UI/explosions to process next tick
+                                setTimeout(applyNext, 0);
+                            };
+                            if (isProcessing) {
+                                setTimeout(applyNext, 100);
+                            } else {
+                                doApply();
+                            }
+                        };
+                        applyNext();
+                    }
+                } catch (e) { console.warn('[Online] Failed to apply catch-up moves', e); }
                 updateStartButtonState();
             } else if (msg.type === 'error') {
                 console.debug('[Error]', msg.error);

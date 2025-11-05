@@ -1,25 +1,25 @@
 // Player name length limit (base, not including suffix)
 const PLAYER_NAME_LENGTH = 12;
 document.addEventListener('DOMContentLoaded', () => {
-// Shared name sanitization and validity functions (top-level)
-function sanitizeName(raw) {
-    if (typeof raw !== 'string') return '';
-    let s = raw.replace(/\s+/g, '_');
-    s = s.replace(/[^A-Za-z0-9_]/g, '');
-    if (s.length > PLAYER_NAME_LENGTH) s = s.slice(0, PLAYER_NAME_LENGTH);
-    return s;
-}
-
-function reflectValidity(inputEl, val) {
-    const tooShort = val.length > 0 && val.length < 3;
-    if (tooShort) {
-        inputEl.classList.add('invalid');
-        inputEl.setAttribute('aria-invalid', 'true');
-    } else {
-        inputEl.classList.remove('invalid');
-        inputEl.removeAttribute('aria-invalid');
+    // Shared name sanitization and validity functions (top-level)
+    function sanitizeName(raw) {
+        if (typeof raw !== 'string') return '';
+        let s = raw.replace(/\s+/g, '_');
+        s = s.replace(/[^A-Za-z0-9_]/g, '');
+        if (s.length > PLAYER_NAME_LENGTH) s = s.slice(0, PLAYER_NAME_LENGTH);
+        return s;
     }
-}
+
+    function reflectValidity(inputEl, val) {
+        const tooShort = val.length > 0 && val.length < 3;
+        if (tooShort) {
+            inputEl.classList.add('invalid');
+            inputEl.setAttribute('aria-invalid', 'true');
+        } else {
+            inputEl.classList.remove('invalid');
+            inputEl.removeAttribute('aria-invalid');
+        }
+    }
     function showModalError(html) {
         let modal = document.getElementById('modalError');
         if (!modal) {
@@ -341,7 +341,7 @@ function reflectValidity(inputEl, val) {
     }
 
     function hostRoom() {
-        const name = onlinePlayerNameInput.value.trim() || 'Room_' + Math.floor(Math.random()*1000);
+        const name = onlinePlayerNameInput.value.trim() || 'Room_' + Math.floor(Math.random() * 1000);
         function sendHost() {
             try {
                 // For debug: send player name, but do not use for logic
@@ -385,7 +385,7 @@ function reflectValidity(inputEl, val) {
         connectWebSocket();
         console.debug('[Join] Joining room:', roomName);
         // For debug: send player name, but do not use for logic
-    let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player'));
+        let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player'));
         // Check for duplicate names in the room list
         let rooms = window.lastRoomList || {};
         let takenNames = [];
@@ -411,7 +411,7 @@ function reflectValidity(inputEl, val) {
     function leaveRoom(roomName) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         console.debug('[Leave] Leaving room:', roomName);
-    ws.send(JSON.stringify({ type: 'leave', roomName: roomName }));
+        ws.send(JSON.stringify({ type: 'leave', roomName: roomName }));
     }
 
     // Wire Host Custom / Start Game button behavior in the online menu
@@ -464,7 +464,7 @@ function reflectValidity(inputEl, val) {
     // let suppressNetworkSend = false; // unused after instant send
     /** @type {{row:number,col:number}|null} */
     // let pendingMove = null; // unused after instant send
-    
+
     /**
      * Delegated grid click handler. Uses event.target.closest('.cell') to
      * resolve the clicked cell and routes to handleClick(row, col).
@@ -514,7 +514,7 @@ function reflectValidity(inputEl, val) {
     function onBodyPointerDown(ev) {
         if (!isMobileDevice()) return;
         // Only active during gameplay (menu hidden)
-    if (mainMenu && !mainMenu.classList.contains('hidden')) return;
+        if (mainMenu && !mainMenu.classList.contains('hidden')) return;
         // Ignore taps inside the grid
         const target = ev.target;
         if (target && (target === gridElement || target.closest('.grid'))) return;
@@ -616,7 +616,7 @@ function reflectValidity(inputEl, val) {
     function activeColors() {
         return (gameColors && gameColors.length) ? gameColors : playerColors;
     }
-    
+
     // Get and cap player count at the number of available colors
     let playerCount = parseInt(getQueryParam('players')) || 2;
     playerCount = Math.min(playerCount, playerColors.length);  // Cap at available colors
@@ -650,7 +650,7 @@ function reflectValidity(inputEl, val) {
     }
 
 
-//#region Menu Stuff
+    //#region Menu Logic
     const menuHint = document.querySelector('.menu-hint');
     // removed hidden native range input; visual slider maintains menuPlayerCount
     let menuPlayerCount = playerCount; // current selection from visual slider
@@ -717,7 +717,7 @@ function reflectValidity(inputEl, val) {
     function setMainMenuMode(mode) {
         const mainMenu = document.getElementById('mainMenu');
         const header = mainMenu ? mainMenu.querySelector('.game-header-panel') : null;
-    const startBtn = document.getElementById('startBtn');
+        const startBtn = document.getElementById('startBtn');
         const playerNameInput = document.getElementById('playerName');
         if (!mainMenu) return;
         if (header) {
@@ -781,18 +781,18 @@ function reflectValidity(inputEl, val) {
                 // Show onlineMenu for Online Game
                 const onlineMenu = document.getElementById('onlineMenu');
                 if (onlineGameBtn && onlineMenu && mainMenu) {
-                        onlineGameBtn.addEventListener('click', (e) => {
-                            if (!ws || ws.readyState !== WebSocket.OPEN) {
-                                e.preventDefault();
-                                showModalError('Cannot connect to server. There is currently no multiplayer server.<br>If you want one, support the project by <a href="https://github.com/Joboblock/color-clash" target="_blank" rel="noopener">giving it a star on GitHub</a>.');
-                                return;
-                            }
-                            setHidden(firstMenu, true);
-                            setHidden(mainMenu, true);
-                            setHidden(onlineMenu, false);
-                            // Reflect current room status on the action button
-                            updateStartButtonState();
-                        });
+                    onlineGameBtn.addEventListener('click', (e) => {
+                        if (!ws || ws.readyState !== WebSocket.OPEN) {
+                            e.preventDefault();
+                            showModalError('Cannot connect to server. There is currently no multiplayer server.<br>If you want one, support the project by <a href="https://github.com/Joboblock/color-clash" target="_blank" rel="noopener">giving it a star on GitHub</a>.');
+                            return;
+                        }
+                        setHidden(firstMenu, true);
+                        setHidden(mainMenu, true);
+                        setHidden(onlineMenu, false);
+                        // Reflect current room status on the action button
+                        updateStartButtonState();
+                    });
                 }
 
                 // Host Custom/Start Game button is handled globally; no per-init binding here
@@ -814,7 +814,7 @@ function reflectValidity(inputEl, val) {
         const menu = document.getElementById(menuId);
         const firstMenu = document.getElementById('firstMenu');
         const onlineMenu = document.getElementById('onlineMenu');
-    setMainMenuMode('local'); // Always restore default UI when closing mainMenu
+        setMainMenuMode('local'); // Always restore default UI when closing mainMenu
         // Exception: if mainMenu was opened by hostGameBtn, redirect to onlineMenu
         if (menuId === 'mainMenu' && menu && onlineMenu && menu.dataset.openedBy === 'host') {
             menu.classList.add('hidden');
@@ -904,46 +904,46 @@ function reflectValidity(inputEl, val) {
         });
     }
 
-// Online menu name input restrictions (reuse shared logic)
-if (onlinePlayerNameInput) {
-    try { onlinePlayerNameInput.maxLength = PLAYER_NAME_LENGTH; } catch { /* ignore */ }
-    // Load player name from localStorage if available
-    const savedName = localStorage.getItem('playerName');
-    if (savedName) {
-        syncPlayerNameFields(savedName);
-    } else {
-        syncPlayerNameFields(onlinePlayerNameInput.value || '');
+    // Online menu name input restrictions (reuse shared logic)
+    if (onlinePlayerNameInput) {
+        try { onlinePlayerNameInput.maxLength = PLAYER_NAME_LENGTH; } catch { /* ignore */ }
+        // Load player name from localStorage if available
+        const savedName = localStorage.getItem('playerName');
+        if (savedName) {
+            syncPlayerNameFields(savedName);
+        } else {
+            syncPlayerNameFields(onlinePlayerNameInput.value || '');
+        }
+        const handleSanitize = (e) => {
+            const v = e.target.value;
+            const cleaned = sanitizeName(v);
+            if (v !== cleaned) {
+                const pos = Math.min(cleaned.length, PLAYER_NAME_LENGTH);
+                e.target.value = cleaned;
+                try { e.target.setSelectionRange(pos, pos); } catch { /* ignore */ }
+            }
+            reflectValidity(e.target, e.target.value);
+            // Save player name to localStorage and sync all fields
+            localStorage.setItem('playerName', e.target.value);
+            syncPlayerNameFields(e.target.value);
+        };
+        onlinePlayerNameInput.addEventListener('input', handleSanitize);
+        onlinePlayerNameInput.addEventListener('blur', handleSanitize);
+        onlinePlayerNameInput.addEventListener('change', handleSanitize);
+        onlinePlayerNameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                onlinePlayerNameInput.blur();
+            }
+            // Only allow arrow navigation out if input is empty
+            if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && onlinePlayerNameInput.value === '') {
+                // Allow default behavior (navigation)
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                // Prevent navigation if not empty
+                e.stopPropagation();
+            }
+        });
     }
-    const handleSanitize = (e) => {
-        const v = e.target.value;
-        const cleaned = sanitizeName(v);
-        if (v !== cleaned) {
-            const pos = Math.min(cleaned.length, PLAYER_NAME_LENGTH);
-            e.target.value = cleaned;
-            try { e.target.setSelectionRange(pos, pos); } catch { /* ignore */ }
-        }
-        reflectValidity(e.target, e.target.value);
-        // Save player name to localStorage and sync all fields
-        localStorage.setItem('playerName', e.target.value);
-        syncPlayerNameFields(e.target.value);
-    };
-    onlinePlayerNameInput.addEventListener('input', handleSanitize);
-    onlinePlayerNameInput.addEventListener('blur', handleSanitize);
-    onlinePlayerNameInput.addEventListener('change', handleSanitize);
-    onlinePlayerNameInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            onlinePlayerNameInput.blur();
-        }
-        // Only allow arrow navigation out if input is empty
-        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && onlinePlayerNameInput.value === '') {
-            // Allow default behavior (navigation)
-        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-            // Prevent navigation if not empty
-            e.stopPropagation();
-        }
-    });
-}
 
     // set dynamic bounds
     const maxPlayers = playerColors.length;
@@ -983,7 +983,7 @@ if (onlinePlayerNameInput) {
         }
         return tips;
     }
-    
+
     // Cache for computed shadows used by the slider animation
     let sliderShadowCache = null; // { inactive: string, active: string }
     // Track the currently running slider preview animation to allow instant finalize on re-trigger
@@ -1123,7 +1123,7 @@ if (onlinePlayerNameInput) {
 
     playerBoxSlider.addEventListener('pointerup', (e) => {
         isDragging = false;
-    try { playerBoxSlider.releasePointerCapture(e.pointerId); } catch (e2) { /* empty */ void e2; }
+        try { playerBoxSlider.releasePointerCapture(e.pointerId); } catch (e2) { /* empty */ void e2; }
     });
 
     // Also handle pointercancel/leave
@@ -1156,7 +1156,7 @@ if (onlinePlayerNameInput) {
         if (!gridValueEl) return;
         gridValueEl.classList.remove('bump');
         // force reflow to restart animation
-    void gridValueEl.offsetWidth;
+        void gridValueEl.offsetWidth;
         gridValueEl.classList.add('bump');
     }
 
@@ -1277,12 +1277,12 @@ if (onlinePlayerNameInput) {
                 if (mappedKey === 'ArrowUp' && dy < 0) match = true;
                 if (mappedKey === 'ArrowDown' && dy > 0) match = true;
                 if (!match) continue;
-                const len = Math.sqrt(dx*dx + dy*dy);
-                const dir = mappedKey === 'ArrowLeft' ? [-1,0] : mappedKey === 'ArrowRight' ? [1,0] : mappedKey === 'ArrowUp' ? [0,-1] : [0,1];
-                const dot = (dx/len)*dir[0] + (dy/len)*dir[1];
+                const len = Math.sqrt(dx * dx + dy * dy);
+                const dir = mappedKey === 'ArrowLeft' ? [-1, 0] : mappedKey === 'ArrowRight' ? [1, 0] : mappedKey === 'ArrowUp' ? [0, -1] : [0, 1];
+                const dot = (dx / len) * dir[0] + (dy / len) * dir[1];
                 const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
                 if (angle < minAngle) minAngle = angle;
-                candidates.push({el, angle, len, ox, oy, tx, ty});
+                candidates.push({ el, angle, len, ox, oy, tx, ty });
             }
         }
 
@@ -1307,39 +1307,39 @@ if (onlinePlayerNameInput) {
     }
 
     // Replace menu navigation handler
-// Global keydown handler for menu navigation (angle-based)
-document.addEventListener('keydown', (e) => {
-    if (!isAnyMenuOpen()) return;
-    // Prevent WASD navigation mapping when an editable element is focused
-    const ae = document.activeElement;
-    const tag = ae && ae.tagName && ae.tagName.toLowerCase();
-    const isEditable = !!(ae && (tag === 'input' || tag === 'textarea' || ae.isContentEditable));
-    const lower = (k) => (typeof k === 'string' ? k.toLowerCase() : k);
-    const isWasd = ['w', 'a', 's', 'd'].includes(lower(e.key));
-    if (isEditable && isWasd) {
-        // Let the character be inserted into the field
-        return;
-    }
-    // Only handle navigation keys for menus
-    if (menuAngleFocusNav(e)) return;
-    // Optionally: handle Enter/Space for menu button activation
-    const openMenus = [mainMenu, firstMenu, document.getElementById('onlineMenu')].filter(m => m && !m.classList.contains('hidden'));
-    if (!openMenus.length) return;
-    const openMenu = openMenus[0];
-    const focusableSelector = 'button,[role="button"],[role="slider"],a[href],input:not([type="hidden"]),select,textarea,[tabindex]:not([tabindex="-1"])';
-    const focusables = Array.from(openMenu.querySelectorAll(focusableSelector)).filter(el => {
-        if (!(el instanceof HTMLElement)) return false;
-        const r = el.getBoundingClientRect();
-        return r.width > 0 && r.height > 0 && !el.hasAttribute('disabled') && el.getAttribute('aria-disabled') !== 'true';
+    // Global keydown handler for menu navigation (angle-based)
+    document.addEventListener('keydown', (e) => {
+        if (!isAnyMenuOpen()) return;
+        // Prevent WASD navigation mapping when an editable element is focused
+        const ae = document.activeElement;
+        const tag = ae && ae.tagName && ae.tagName.toLowerCase();
+        const isEditable = !!(ae && (tag === 'input' || tag === 'textarea' || ae.isContentEditable));
+        const lower = (k) => (typeof k === 'string' ? k.toLowerCase() : k);
+        const isWasd = ['w', 'a', 's', 'd'].includes(lower(e.key));
+        if (isEditable && isWasd) {
+            // Let the character be inserted into the field
+            return;
+        }
+        // Only handle navigation keys for menus
+        if (menuAngleFocusNav(e)) return;
+        // Optionally: handle Enter/Space for menu button activation
+        const openMenus = [mainMenu, firstMenu, document.getElementById('onlineMenu')].filter(m => m && !m.classList.contains('hidden'));
+        if (!openMenus.length) return;
+        const openMenu = openMenus[0];
+        const focusableSelector = 'button,[role="button"],[role="slider"],a[href],input:not([type="hidden"]),select,textarea,[tabindex]:not([tabindex="-1"])';
+        const focusables = Array.from(openMenu.querySelectorAll(focusableSelector)).filter(el => {
+            if (!(el instanceof HTMLElement)) return false;
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && !el.hasAttribute('disabled') && el.getAttribute('aria-disabled') !== 'true';
+        });
+        if (focusables.length === 0) return;
+        const focused = document.activeElement;
+        if ((e.key === 'Enter' || e.key === ' ') && focused && openMenu.contains(focused)) {
+            e.preventDefault();
+            focused.click && focused.click();
+            return;
+        }
     });
-    if (focusables.length === 0) return;
-    const focused = document.activeElement;
-    if ((e.key === 'Enter' || e.key === ' ') && focused && openMenu.contains(focused)) {
-        e.preventDefault();
-        focused.click && focused.click();
-        return;
-    }
-});
 
     startBtn.addEventListener('click', async () => {
         // Determine current menu mode from button text
@@ -1415,10 +1415,10 @@ document.addEventListener('keydown', (e) => {
             recreateGrid(s, p);
         });
     }
-//#endregion
+    //#endregion
 
 
-//#region Menu Functions
+    //#region Menu Functions
     /**
      * Sync menu/game UI from current URL state (back/forward navigation handler).
      * @returns {void}
@@ -1428,7 +1428,7 @@ document.addEventListener('keydown', (e) => {
         const hasPS = params.has('players') || params.has('size');
         const showMenu = params.has('menu') || !hasPS;
         if (showMenu) {
-    if (mainMenu) mainMenu.classList.remove('hidden');
+            if (mainMenu) mainMenu.classList.remove('hidden');
             updateRandomTip();
             // When returning to the menu, reflect current chosen color on the background
             setMenuBodyColor();
@@ -1447,9 +1447,9 @@ document.addEventListener('keydown', (e) => {
         const p = clampPlayers(parseInt(params.get('players') || '', 10) || 2);
         let s = parseInt(params.get('size') || '', 10);
         if (!Number.isInteger(s)) s = Math.max(3, 3 + p);
-    if (mainMenu) mainMenu.classList.add('hidden');
-    // Enable train mode if any AI-related parameter exists in the URL
-    trainMode = params.has('ai_depth') || params.has('ai_k');
+        if (mainMenu) mainMenu.classList.add('hidden');
+        // Enable train mode if any AI-related parameter exists in the URL
+        trainMode = params.has('ai_depth') || params.has('ai_k');
         // Update AI depth from URL if provided
         const ad = parseInt(params.get('ai_depth') || '', 10);
         if (!Number.isNaN(ad) && ad >= 1) {
@@ -1498,9 +1498,9 @@ document.addEventListener('keydown', (e) => {
      * @returns {void}
      */
     function updateRandomTip() {
-    if (!menuHint) return;
-    const tip = pickWeightedTip(getDeviceTips());
-    if (tip && tip.html) menuHint.innerHTML = tip.text; else menuHint.textContent = tip ? tip.text : '';
+        if (!menuHint) return;
+        const tip = pickWeightedTip(getDeviceTips());
+        if (tip && tip.html) menuHint.innerHTML = tip.text; else menuHint.textContent = tip ? tip.text : '';
     }
 
     // --- FLIP helpers for player slider boxes ---
@@ -1553,7 +1553,8 @@ document.addEventListener('keydown', (e) => {
             document.body.removeChild(probeContainer);
             sliderShadowCache = { inactive: csInactive, active: csActive };
             return sliderShadowCache;
-        } catch (e) { void e;
+        } catch (e) {
+            void e;
             sliderShadowCache = { inactive: '0 4px 10px rgba(0,0,0,0.12)', active: '0 8px 20px rgba(0,0,0,0.18)' };
             return sliderShadowCache;
         }
@@ -1588,9 +1589,9 @@ document.addEventListener('keydown', (e) => {
         }
 
         const container = sliderCells || playerBoxSlider;
-    if (!container) { mutateFn && mutateFn(); return; }
+        if (!container) { mutateFn && mutateFn(); return; }
         const els = Array.from(container.querySelectorAll('.box'));
-    if (els.length === 0) { mutateFn && mutateFn(); return; }
+        if (els.length === 0) { mutateFn && mutateFn(); return; }
 
         const releaseLock = beginSliderAnimation(delayAnimation);
 
@@ -1610,7 +1611,7 @@ document.addEventListener('keydown', (e) => {
                 const outDur = outBase * 0.5;
                 const inDur = delayAnimation - outDur;
                 const fadeOut = el.animate(
-                    [ { transform: baseTransform, opacity: 1 }, { transform: baseTransform, opacity: 0 } ],
+                    [{ transform: baseTransform, opacity: 1 }, { transform: baseTransform, opacity: 0 }],
                     { duration: outDur, easing: 'linear', fill: 'forwards' }
                 );
 
@@ -1674,7 +1675,7 @@ document.addEventListener('keydown', (e) => {
             if (!fromColor || !toColor || fromColor === toColor) continue;
             try {
                 el.animate(
-                    [ { backgroundColor: fromColor }, { backgroundColor: toColor } ],
+                    [{ backgroundColor: fromColor }, { backgroundColor: toColor }],
                     { duration: delayAnimation, easing: 'ease', fill: 'none' }
                 );
             } catch (e) { /* ignore */ void e; }
@@ -1690,7 +1691,7 @@ document.addEventListener('keydown', (e) => {
             if (!fromShadow || !toShadow || fromShadow === toShadow) continue;
             try {
                 el.animate(
-                    [ { boxShadow: fromShadow }, { boxShadow: toShadow } ],
+                    [{ boxShadow: fromShadow }, { boxShadow: toShadow }],
                     { duration: delayAnimation, easing: 'ease', fill: 'none' }
                 );
             } catch (e) { /* ignore */ void e; }
@@ -1826,7 +1827,7 @@ document.addEventListener('keydown', (e) => {
      * @returns {void}
      */
     function setMenuBodyColor() {
-    if (!mainMenu || mainMenu.classList.contains('hidden')) return;
+        if (!mainMenu || mainMenu.classList.contains('hidden')) return;
         const colorKey = playerColors[startingColorIndex] || 'green';
         document.body.className = colorKey;
     }
@@ -1865,7 +1866,7 @@ document.addEventListener('keydown', (e) => {
         return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
     }
 
-    
+
     /**
      * Mix a hex color with white to produce a pastel RGB color.
      * @param {string} hex - base hex color.
@@ -1885,13 +1886,13 @@ document.addEventListener('keydown', (e) => {
      */
     function buildPlayerBoxes() {
         // Preserve the color cycler if it's inside the slider
-    const cycler = playerBoxSlider.querySelector('#menuColorCycle');
+        const cycler = playerBoxSlider.querySelector('#menuColorCycle');
         if (cycler && cycler.parentElement === playerBoxSlider) {
             playerBoxSlider.removeChild(cycler);
         }
 
-    // Remove existing player boxes only
-    Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box')).forEach(n => n.remove());
+        // Remove existing player boxes only
+        Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box')).forEach(n => n.remove());
 
         for (let count = 1; count <= maxPlayers; count++) {
             const box = document.createElement('div');
@@ -1918,7 +1919,7 @@ document.addEventListener('keydown', (e) => {
         }
 
         // Re-append the cycler; CSS grid places it to row 2, col 1
-    if (cycler) playerBoxSlider.appendChild(cycler);
+        if (cycler) playerBoxSlider.appendChild(cycler);
     }
 
     /**
@@ -1927,7 +1928,7 @@ document.addEventListener('keydown', (e) => {
      * @returns {void} updates aria attributes, internal selection, and grid if needed.
      */
     function highlightPlayerBoxes(count) {
-    (sliderCells || playerBoxSlider).querySelectorAll('.box').forEach((child) => {
+        (sliderCells || playerBoxSlider).querySelectorAll('.box').forEach((child) => {
             const boxCount = parseInt(child.dataset.count, 10);
             if (boxCount <= count) child.classList.add('active'); else child.classList.remove('active');
         });
@@ -1935,7 +1936,7 @@ document.addEventListener('keydown', (e) => {
         // update internal selection
         menuPlayerCount = count;
 
-    // Sizing/alignment handled purely via CSS
+        // Sizing/alignment handled purely via CSS
 
         if (count !== playerCount) {
             const desiredSize = Math.max(3, count + 3);
@@ -1977,8 +1978,8 @@ document.addEventListener('keydown', (e) => {
      * @returns {void} updates selected player count via onMenuPlayerCountChanged.
      */
     function setPlayerCountFromPointer(clientX) {
-    // Only consider player boxes for mapping, skip the color cycler
-    const children = Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box'));
+        // Only consider player boxes for mapping, skip the color cycler
+        const children = Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box'));
         if (children.length === 0) return;
         // find nearest box center to clientX
         let nearest = children[0];
@@ -2005,28 +2006,28 @@ document.addEventListener('keydown', (e) => {
     function onMenuPlayerCountChanged(newCount) {
         menuPlayerCount = newCount;
         const desiredSize = Math.max(3, newCount + 3);
-    // reflect desired size in display state and animate bump when it changes via player slider
-    const prevSize = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : null;
-    menuGridSizeVal = desiredSize;
-    if (gridValueEl) gridValueEl.textContent = String(desiredSize);
-    if (prevSize === null || desiredSize !== prevSize) {
-        bumpValueAnimation();
-    }
+        // reflect desired size in display state and animate bump when it changes via player slider
+        const prevSize = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : null;
+        menuGridSizeVal = desiredSize;
+        if (gridValueEl) gridValueEl.textContent = String(desiredSize);
+        if (prevSize === null || desiredSize !== prevSize) {
+            bumpValueAnimation();
+        }
         updateSizeBoundsForPlayers(newCount);
         // Direct slider interaction: immediately reflect active boxes without FLIP animation
         // (keeps original behavior of activating the nearest box and all to its left)
         highlightPlayerBoxes(newCount);
 
-    // Sizing/alignment handled purely via CSS
+        // Sizing/alignment handled purely via CSS
 
         if (newCount !== playerCount || desiredSize !== gridSize) {
             recreateGrid(desiredSize, newCount);
         }
     }
-//#endregion
+    //#endregion
 
 
-//#region Actual Game Logic
+    //#region Actual Game Logic
     let grid = [];
     let isProcessing = false;
     let performanceMode = false;
@@ -2061,137 +2062,137 @@ document.addEventListener('keydown', (e) => {
     // Initialize AI preview after initial color application
     updateAIPreview();
 
-        // Keyboard navigation for game grid
-        document.addEventListener('keydown', (e) => {
-            // Block grid navigation if ANY menu is open
-            if (isAnyMenuOpen()) return;
-            const gridEl = document.querySelector('.grid');
-            if (!gridEl) return;
-            const key = e.key;
-            // Move mapping first
-            let mappedKey = key;
-            if (mappedKey === 'w' || mappedKey === 'W') mappedKey = 'ArrowUp';
-            else if (mappedKey === 'a' || mappedKey === 'A') mappedKey = 'ArrowLeft';
-            else if (mappedKey === 's' || mappedKey === 'S') mappedKey = 'ArrowDown';
-            else if (mappedKey === 'd' || mappedKey === 'D') mappedKey = 'ArrowRight';
+    // Keyboard navigation for game grid
+    document.addEventListener('keydown', (e) => {
+        // Block grid navigation if ANY menu is open
+        if (isAnyMenuOpen()) return;
+        const gridEl = document.querySelector('.grid');
+        if (!gridEl) return;
+        const key = e.key;
+        // Move mapping first
+        let mappedKey = key;
+        if (mappedKey === 'w' || mappedKey === 'W') mappedKey = 'ArrowUp';
+        else if (mappedKey === 'a' || mappedKey === 'A') mappedKey = 'ArrowLeft';
+        else if (mappedKey === 's' || mappedKey === 'S') mappedKey = 'ArrowDown';
+        else if (mappedKey === 'd' || mappedKey === 'D') mappedKey = 'ArrowRight';
 
-            // Now filter based on mapped key
-            if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(mappedKey)) return;
+        // Now filter based on mapped key
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(mappedKey)) return;
 
-            // Get all cells
-            const cells = Array.from(gridEl.querySelectorAll('.cell[tabindex="0"]'));
-            if (!cells.length) return;
-            // Helper: get cell at row,col
-            const getCell = (row, col) => gridEl.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
-            // Helper: is cell owned by current player?
-            const isOwnCell = (cell) => {
-                if (!cell) return false;
-                // Initial placement: allow all cells
-                if (Array.isArray(initialPlacements) && initialPlacements.includes(false)) return true;
-                // Otherwise, check cell class for current player color
-                const colorKey = activeColors()[currentPlayer];
-                return cell.classList.contains(colorKey);
-            };
-            // Find currently focused cell
-            let focused = document.activeElement;
-            // If nothing is focused or not a .cell, fallback to center/any own cell
-            if (!focused || !focused.classList.contains('cell')) {
-                const size = Math.sqrt(cells.length);
-                const mid = Math.floor(size / 2);
-                let center = getCell(mid, mid);
-                if (!isOwnCell(center)) {
-                    center = cells.find(isOwnCell);
-                }
-                if (center) {
-                    e.preventDefault();
-                    center.focus();
-                }
-                return;
+        // Get all cells
+        const cells = Array.from(gridEl.querySelectorAll('.cell[tabindex="0"]'));
+        if (!cells.length) return;
+        // Helper: get cell at row,col
+        const getCell = (row, col) => gridEl.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+        // Helper: is cell owned by current player?
+        const isOwnCell = (cell) => {
+            if (!cell) return false;
+            // Initial placement: allow all cells
+            if (Array.isArray(initialPlacements) && initialPlacements.includes(false)) return true;
+            // Otherwise, check cell class for current player color
+            const colorKey = activeColors()[currentPlayer];
+            return cell.classList.contains(colorKey);
+        };
+        // Find currently focused cell
+        let focused = document.activeElement;
+        // If nothing is focused or not a .cell, fallback to center/any own cell
+        if (!focused || !focused.classList.contains('cell')) {
+            const size = Math.sqrt(cells.length);
+            const mid = Math.floor(size / 2);
+            let center = getCell(mid, mid);
+            if (!isOwnCell(center)) {
+                center = cells.find(isOwnCell);
             }
-            // If focused cell is not owned by player, allow arrow navigation to nearest own cell in that direction
-            const row = parseInt(focused.dataset.row, 10);
-            const col = parseInt(focused.dataset.col, 10);
-            let target = null;
-            // Direction vectors
-            const dirMap = {
-                'ArrowLeft':  { vx: -1, vy: 0 },
-                'ArrowRight': { vx: 1, vy: 0 },
-                'ArrowUp':    { vx: 0, vy: -1 },
-                'ArrowDown':  { vx: 0, vy: 1 }
-            };
-            const { vx, vy } = dirMap[mappedKey];
-            // Always pick the own cell with the smallest angle (<90°), tiebreaker by distance
-            let minAngle = Math.PI / 2; // 90°
-            let minDist = Infinity;
-            let bestCell = null;
-            for (const cell of cells) {
-                if (!isOwnCell(cell)) continue;
-                const r2 = parseInt(cell.dataset.row, 10);
-                const c2 = parseInt(cell.dataset.col, 10);
-                const dx = c2 - col;
-                const dy = r2 - row;
-                if (dx === 0 && dy === 0) continue;
-                // Normalize
-                const len = Math.sqrt(dx*dx + dy*dy);
-                const dot = (dx/len)*vx + (dy/len)*vy;
-                const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
-                if (angle < minAngle || (Math.abs(angle - minAngle) < 1e-6 && len < minDist)) {
-                    minAngle = angle;
-                    minDist = len;
-                    bestCell = cell;
-                }
-            }
-            if (bestCell) {
-                target = bestCell;
-            }
-            if (target) {
+            if (center) {
                 e.preventDefault();
-                target.focus();
+                center.focus();
             }
-        });
+            return;
+        }
+        // If focused cell is not owned by player, allow arrow navigation to nearest own cell in that direction
+        const row = parseInt(focused.dataset.row, 10);
+        const col = parseInt(focused.dataset.col, 10);
+        let target = null;
+        // Direction vectors
+        const dirMap = {
+            'ArrowLeft': { vx: -1, vy: 0 },
+            'ArrowRight': { vx: 1, vy: 0 },
+            'ArrowUp': { vx: 0, vy: -1 },
+            'ArrowDown': { vx: 0, vy: 1 }
+        };
+        const { vx, vy } = dirMap[mappedKey];
+        // Always pick the own cell with the smallest angle (<90°), tiebreaker by distance
+        let minAngle = Math.PI / 2; // 90°
+        let minDist = Infinity;
+        let bestCell = null;
+        for (const cell of cells) {
+            if (!isOwnCell(cell)) continue;
+            const r2 = parseInt(cell.dataset.row, 10);
+            const c2 = parseInt(cell.dataset.col, 10);
+            const dx = c2 - col;
+            const dy = r2 - row;
+            if (dx === 0 && dy === 0) continue;
+            // Normalize
+            const len = Math.sqrt(dx * dx + dy * dy);
+            const dot = (dx / len) * vx + (dy / len) * vy;
+            const angle = Math.acos(Math.max(-1, Math.min(1, dot)));
+            if (angle < minAngle || (Math.abs(angle - minAngle) < 1e-6 && len < minDist)) {
+                minAngle = angle;
+                minDist = len;
+                bestCell = cell;
+            }
+        }
+        if (bestCell) {
+            target = bestCell;
+        }
+        if (target) {
+            e.preventDefault();
+            target.focus();
+        }
+    });
 
-        // Add Enter/Space key activation for focused .cell elements in game mode
-        document.addEventListener('keydown', (e) => {
-            if (isAnyMenuOpen()) return;
-            const gridEl = document.querySelector('.grid');
-            if (!gridEl) return;
-            const key = e.key;
-            if (!(key === 'Enter' || key === ' ')) return;
-            const focused = document.activeElement;
-            if (!focused || !focused.classList.contains('cell')) return;
-            const row = parseInt(focused.dataset.row, 10);
-            const col = parseInt(focused.dataset.col, 10);
-                // Prevent keyboard activation if AI is processing or it's not the human player's turn
-                if (typeof isProcessing !== 'undefined' && isProcessing) return;
-                if (onlineGameActive) {
-                    if (currentPlayer !== myOnlineIndex) return;
-                    if (!isValidLocalMove(row, col, myOnlineIndex)) return;
-                    e.preventDefault();
-                    // Send move instantly to server
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({
-                            type: 'move',
-                            row,
-                            col,
-                            fromIndex: myOnlineIndex,
-                            nextIndex: (myOnlineIndex + 1) % playerCount,
-                            color: activeColors()[myOnlineIndex]
-                        }));
-                    }
-                    // ...existing code...
-                    handleClick(row, col);
-                    return;
-                }
-                if (typeof trainMode !== 'undefined' && trainMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
-                if (Number.isInteger(row) && Number.isInteger(col)) {
-                    e.preventDefault();
-                    handleClick(row, col);
-                }
-        });
-//#endregion
+    // Add Enter/Space key activation for focused .cell elements in game mode
+    document.addEventListener('keydown', (e) => {
+        if (isAnyMenuOpen()) return;
+        const gridEl = document.querySelector('.grid');
+        if (!gridEl) return;
+        const key = e.key;
+        if (!(key === 'Enter' || key === ' ')) return;
+        const focused = document.activeElement;
+        if (!focused || !focused.classList.contains('cell')) return;
+        const row = parseInt(focused.dataset.row, 10);
+        const col = parseInt(focused.dataset.col, 10);
+        // Prevent keyboard activation if AI is processing or it's not the human player's turn
+        if (typeof isProcessing !== 'undefined' && isProcessing) return;
+        if (onlineGameActive) {
+            if (currentPlayer !== myOnlineIndex) return;
+            if (!isValidLocalMove(row, col, myOnlineIndex)) return;
+            e.preventDefault();
+            // Send move instantly to server
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'move',
+                    row,
+                    col,
+                    fromIndex: myOnlineIndex,
+                    nextIndex: (myOnlineIndex + 1) % playerCount,
+                    color: activeColors()[myOnlineIndex]
+                }));
+            }
+            // ...existing code...
+            handleClick(row, col);
+            return;
+        }
+        if (typeof trainMode !== 'undefined' && trainMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
+        if (Number.isInteger(row) && Number.isInteger(col)) {
+            e.preventDefault();
+            handleClick(row, col);
+        }
+    });
+    //#endregion
 
 
-//#region Game Logic Functions
+    //#region Game Logic Functions
     /**
      * Rebuild the grid and reset game state for a given size and player count.
      * @param {number} newSize - grid dimension.
@@ -2255,7 +2256,7 @@ document.addEventListener('keydown', (e) => {
             // Ensure humanPlayer index is valid for current playerCount
             // (humanPlayer is 0 by design; defensive check)
             currentPlayer = Math.min(humanPlayer, playerCount - 1);
-        document.body.className = activeColors()[currentPlayer];
+            document.body.className = activeColors()[currentPlayer];
             updateGrid();
             // Trigger AI if the first randomly chosen currentPlayer isn't the human
             maybeTriggerAIMove();
@@ -2291,7 +2292,7 @@ document.addEventListener('keydown', (e) => {
             if (grid[row][col].value === 0) {
                 grid[row][col].value = initialPlacementValue;
                 grid[row][col].player = activeColors()[currentPlayer];
-                
+
                 cell.classList.add(activeColors()[currentPlayer]);
                 updateCell(row, col, 0, grid[row][col].player, true);
                 updateGrid();
@@ -2361,7 +2362,7 @@ document.addEventListener('keydown', (e) => {
      */
     function processExplosions() {
         // If the menu is visible, stop looping (prevents background chains while in menu)
-    if (mainMenu && !mainMenu.classList.contains('hidden')) {
+        if (mainMenu && !mainMenu.classList.contains('hidden')) {
             stopExplosionLoop();
             return;
         }
@@ -2403,7 +2404,7 @@ document.addEventListener('keydown', (e) => {
             const targetCells = [];
 
             // Determine if this explosion is from an initial placement
-            const isInitialPlacement = !initialPlacements.every(placement => placement); 
+            const isInitialPlacement = !initialPlacements.every(placement => placement);
 
             // Check all four directions
             if (row > 0) {
@@ -2429,7 +2430,7 @@ document.addEventListener('keydown', (e) => {
             } else if (isInitialPlacement) {
                 extraBackToOrigin++;  // Out of bounds (right)
             }
-            
+
             // Animate valid explosions
             animateInnerCircles(document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`), targetCells, player, explosionValue);
 
@@ -2546,8 +2547,8 @@ document.addEventListener('keydown', (e) => {
             (cellSize / 6) *
             (value === 1 ? 0
                 : value === 2 ? 1
-                : value === 3 ? 2 / Math.sqrt(3)
-                : Math.sqrt(2));
+                    : value === 3 ? 2 / Math.sqrt(3)
+                        : Math.sqrt(2));
         const angleStep = 360 / Math.max(value, 1);
 
         const existingCircles = Array.from(innerCircle.querySelectorAll('.value-circle'));
@@ -2632,7 +2633,7 @@ document.addEventListener('keydown', (e) => {
      * @returns {void} updates currentPlayer and grid visuals.
      */
     function switchPlayer() {
-    // const prevIndex = currentPlayer; // unused after instant send
+        // const prevIndex = currentPlayer; // unused after instant send
         do {
             currentPlayer = (currentPlayer + 1) % playerCount;
         } while (!hasCells(currentPlayer) && initialPlacements.every(placement => placement));
@@ -2646,7 +2647,7 @@ document.addEventListener('keydown', (e) => {
         maybeTriggerAIMove();
         // ...existing code...
         // Online: sending move is now handled instantly in click/keyboard handler
-    // ...existing code...
+        // ...existing code...
     }
 
     /**
@@ -2766,12 +2767,12 @@ document.addEventListener('keydown', (e) => {
      */
     function highlightInvalidInitialPositions() {
         clearInvalidHighlights();
-        
+
         invalidInitialPositions.forEach(pos => {
             const cell = document.querySelector(`.cell[data-row="${pos.r}"][data-col="${pos.c}"]`);
             cell.classList.add('invalid');
         });
-        
+
         for (let i = 0; i < gridSize; i++) {
             for (let j = 0; j < gridSize; j++) {
                 if (initialPlacements.some(placement => placement) && isInitialPlacementInvalid(i, j)) {
@@ -2825,24 +2826,24 @@ document.addEventListener('keydown', (e) => {
                 const newUrl = `${window.location.pathname}?${urlParams.toString()}${window.location.hash || ''}`;
                 // Update the URL without reloading the page
                 window.history.replaceState(null, '', newUrl);
-                    // Show the appropriate menu overlay
-                    if (onlineGameActive) {
-                        console.debug('[Online] Game ended: winner =', activeColors().find((color, idx) => playerCells[idx] > 0));
-                        const onlineMenu = document.getElementById('onlineMenu');
-                        if (onlineMenu) onlineMenu.classList.remove('hidden');
-                    } else {
-                        if (mainMenu) mainMenu.classList.remove('hidden');
-                        updateRandomTip();
-                    }
-                    // When showing the menu, exit fullscreen to restore browser UI if needed
-                    exitFullscreenIfPossible();
+                // Show the appropriate menu overlay
+                if (onlineGameActive) {
+                    console.debug('[Online] Game ended: winner =', activeColors().find((color, idx) => playerCells[idx] > 0));
+                    const onlineMenu = document.getElementById('onlineMenu');
+                    if (onlineMenu) onlineMenu.classList.remove('hidden');
+                } else {
+                    if (mainMenu) mainMenu.classList.remove('hidden');
+                    updateRandomTip();
+                }
+                // When showing the menu, exit fullscreen to restore browser UI if needed
+                exitFullscreenIfPossible();
             }, delayGameEnd); //DELAY Game End
         }
     }
-//#endregion
+    //#endregion
 
 
-//#region Training / AI helpers (dataRespect + debug)
+    //#region Training / AI helpers (dataRespect + debug)
     // AI debug mode
     const aiDebug = true;
     // Configure dataRespect branching factor K via URL param ai_k, default 3
@@ -2861,7 +2862,7 @@ document.addEventListener('keydown', (e) => {
         if (gameWon || isProcessing) return;
         if (currentPlayer === humanPlayer) return;
         // If the menu is open/visible, do not run AI moves
-    if (mainMenu && !mainMenu.classList.contains('hidden')) return;
+        if (mainMenu && !mainMenu.classList.contains('hidden')) return;
 
         setTimeout(() => {
             if (isProcessing || gameWon || currentPlayer === humanPlayer) return;
@@ -3100,7 +3101,7 @@ document.addEventListener('keydown', (e) => {
         panel.id = 'aiDebugPanel';
 
         const title = document.createElement('h4');
-    title.textContent = `AI dataRespect — player ${currentPlayer} (${activeColors()[currentPlayer]})`;
+        title.textContent = `AI dataRespect — player ${currentPlayer} (${activeColors()[currentPlayer]})`;
         panel.appendChild(title);
 
         const summary = document.createElement('div');
@@ -3256,7 +3257,7 @@ document.addEventListener('keydown', (e) => {
         }
 
         // Order: maximizing for focus turn, minimizing for coalition turn
-        evaluatedCandidates.sort((a, b) => ( isFocusTurn ? (b.value - a.value) : (a.value - b.value) ));
+        evaluatedCandidates.sort((a, b) => (isFocusTurn ? (b.value - a.value) : (a.value - b.value)));
 
         // Truncate to top K to limit branching
         const topCandidates = evaluatedCandidates.slice(0, Math.min(dataRespectK, evaluatedCandidates.length));
@@ -3443,9 +3444,9 @@ document.addEventListener('keydown', (e) => {
                     const cell = rg[r][c];
                     if (cell.player === aiColor) {
                         if (cell.value === nearVal) def++;
-                        const adj = [[r-1,c],[r+1,c],[r,c-1],[r,c+1]];
-                        for (const [ar,ac] of adj) {
-                            if (ar<0||ar>=gridSize||ac<0||ac>=gridSize) continue;
+                        const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+                        for (const [ar, ac] of adj) {
+                            if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
                             const adjCell = rg[ar][ac];
                             if (adjCell.player === playerColor && cell.value > adjCell.value) atk++;
                         }
@@ -3482,7 +3483,7 @@ document.addEventListener('keydown', (e) => {
         }
         if (!bestMoves || bestMoves.length === 0) bestMoves = topK.length ? [topK[0]] : [];
 
-    const chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
+        const chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
 
         if (aiDebug) {
             // reuse existing debug UI code paths: clearAIDebugUI + show highlights + panel info
@@ -3539,5 +3540,5 @@ document.addEventListener('keydown', (e) => {
         }
     }
 
-//#endregion
+    //#endregion
 });

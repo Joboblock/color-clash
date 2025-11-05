@@ -231,6 +231,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.debug(`[Join] Joined room: ${msg.room}`);
                 }
                 myJoinedRoom = msg.room;
+                if (typeof msg.player === 'string' && msg.player) {
+                    myPlayerName = msg.player;
+                }
                 // Track my room occupancy and capacity
                 myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
                 if (Array.isArray(msg.players)) {

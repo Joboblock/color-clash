@@ -160,7 +160,7 @@ wss.on('connection', (ws) => {
             connectionMeta.set(ws, { roomName: msg.roomName, name: playerName });
             ws.send(JSON.stringify({ type: 'hosted', room: msg.roomName, maxPlayers: clamped, player: playerName }));
             broadcastRoomList();
-        } else if (msg.type === 'join' && msg.roomName) {
+    } else if (msg.type === 'join' && msg.roomName) {
             const room = rooms[msg.roomName];
             if (!room) {
                 ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
@@ -196,7 +196,7 @@ wss.on('connection', (ws) => {
             room.participants.push({ ws, name: playerName, isHost: false, connected: true });
             connectionMeta.set(ws, { roomName: msg.roomName, name: playerName });
 
-            ws.send(JSON.stringify({ type: 'joined', room: msg.roomName, maxPlayers: room.maxPlayers, players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })) }));
+            ws.send(JSON.stringify({ type: 'joined', room: msg.roomName, maxPlayers: room.maxPlayers, player: playerName, players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })) }));
             // Notify existing participants about the new joiner (optional)
             room.participants.forEach(p => {
                 if (p.ws !== ws && p.ws.readyState === 1) {
@@ -213,7 +213,7 @@ wss.on('connection', (ws) => {
                 return;
             }
             const name = sanitizeBaseName(msg.debugName);
-            const participant = room.participants.find(p => p.name === name && p.connected === false);
+            const participant = room.participants.find(p => p.name === name);
             if (!participant) {
                 ws.send(JSON.stringify({ type: 'error', error: 'No disconnected session to reattach' }));
                 return;
@@ -224,6 +224,9 @@ wss.on('connection', (ws) => {
                 room._disconnectTimers.delete(name);
             }
             // Attach this socket and mark connected
+            if (participant.ws && participant.ws !== ws && participant.ws.readyState === 1) {
+                try { participant.ws.terminate(); } catch { /* ignore */ }
+            }
             participant.ws = ws;
             participant.connected = true;
             connectionMeta.set(ws, { roomName: msg.roomName, name });

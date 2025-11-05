@@ -110,7 +110,8 @@ const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'oran
 // Track which room a connection belongs to and the player's name (per tab)
 const connectionMeta = new Map(); // ws -> { roomName: string, name: string }
 // Allow brief disconnects to reattach by name before freeing the seat
-const GRACE_MS = 8000; // 8s grace window
+const LOBBY_GRACE_MS = 8000; // 8s grace window for lobby
+const GAME_GRACE_MS = 300000; // 5 min grace window for in-game
 
 wss.on('connection', (ws) => {
     ws.on('message', (raw) => {
@@ -474,6 +475,8 @@ wss.on('connection', (ws) => {
             if (room._disconnectTimers.has(name)) {
                 try { clearTimeout(room._disconnectTimers.get(name)); } catch { /* ignore */ }
             }
+            // Use longer grace if game started, else short lobby grace
+            const graceMs = (room.game && room.game.started) ? GAME_GRACE_MS : LOBBY_GRACE_MS;
             const timer = setTimeout(() => {
                 const rr = rooms[roomName];
                 if (!rr) return;
@@ -492,7 +495,7 @@ wss.on('connection', (ws) => {
                     broadcastRoomList();
                 }
                 if (rr && rr._disconnectTimers) rr._disconnectTimers.delete(name);
-            }, GRACE_MS);
+            }, graceMs);
             room._disconnectTimers.set(name, timer);
         }
         connectionMeta.delete(ws);

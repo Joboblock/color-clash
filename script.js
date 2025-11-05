@@ -50,13 +50,33 @@ document.addEventListener('DOMContentLoaded', () => {
     // Online bottom action button in online menu
     const hostCustomGameBtnRef = document.getElementById('hostCustomGameBtn');
 
+    function getConfiguredWebSocketUrl() {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const override = params.get('ws') || params.get('ws_base');
+            if (override) return override;
+            const meta = document.querySelector('meta[name="ws-base"]');
+            if (meta && meta.content) return meta.content;
+            if (typeof window.__WS_BASE_URL === 'string' && window.__WS_BASE_URL) {
+                return window.__WS_BASE_URL;
+            }
+            // If running from GitHub Pages (different origin), default to Cloud Run URL
+            if ((window.location.host || '').endsWith('github.io')) {
+                return 'wss://color-clash-192172087961.europe-west4.run.app/ws';
+            }
+            // Same-origin default
+            const isSecure = window.location.protocol === 'https:';
+            const proto = isSecure ? 'wss' : 'ws';
+            const host = window.location.host || 'localhost:8080';
+            return `${proto}://${host}/ws`;
+        } catch {
+            return 'ws://localhost:8080/ws';
+        }
+    }
+
     function connectWebSocket() {
         if (ws && ws.readyState === WebSocket.OPEN) return;
-        // Build WS URL based on current origin; fallback to localhost in file://
-        const isSecure = window.location.protocol === 'https:';
-        const proto = isSecure ? 'wss' : 'ws';
-        const host = window.location.host || 'localhost:8080';
-        const wsUrl = `${proto}://${host}/ws`;
+        const wsUrl = getConfiguredWebSocketUrl();
         ws = new WebSocket(wsUrl);
         ws.onopen = () => {
             console.debug('[WebSocket] Connected, requesting room list');

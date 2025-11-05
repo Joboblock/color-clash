@@ -873,7 +873,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             syncPlayerNameFields(playerNameInput.value || '');
         }
-        const handleSanitize = (e) => {
+        function handleSanitize(e) {
             const v = e.target.value;
             const cleaned = sanitizeName(v);
             if (v !== cleaned) {
@@ -885,23 +885,36 @@ document.addEventListener('DOMContentLoaded', () => {
             // Save player name to localStorage and sync all fields
             localStorage.setItem('playerName', e.target.value);
             syncPlayerNameFields(e.target.value);
-        };
-        playerNameInput.addEventListener('input', handleSanitize);
-        playerNameInput.addEventListener('blur', handleSanitize);
-        playerNameInput.addEventListener('change', handleSanitize);
-        playerNameInput.addEventListener('keydown', (e) => {
+        }
+        // Shared keydown handler for name inputs
+        function nameInputKeydownHandler(e) {
+            const el = e.target;
             if (e.key === 'Enter') {
                 e.preventDefault();
-                playerNameInput.blur();
+                el.blur();
+            } else if (e.key === ' ') {
+                e.preventDefault();
+                const start = el.selectionStart;
+                const end = el.selectionEnd;
+                const value = el.value;
+                if (value.length < PLAYER_NAME_LENGTH) {
+                    el.value = value.slice(0, start) + '_' + value.slice(end);
+                    el.setSelectionRange(start + 1, start + 1);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                }
             }
             // Only allow arrow navigation out if input is empty
-            if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && playerNameInput.value === '') {
+            if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && el.value === '') {
                 // Allow default behavior (navigation)
             } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                 // Prevent navigation if not empty
                 e.stopPropagation();
             }
-        });
+        }
+        playerNameInput.addEventListener('input', handleSanitize);
+        playerNameInput.addEventListener('blur', handleSanitize);
+        playerNameInput.addEventListener('change', handleSanitize);
+        playerNameInput.addEventListener('keydown', nameInputKeydownHandler);
     }
 
     // Online menu name input restrictions (reuse shared logic)
@@ -930,19 +943,32 @@ document.addEventListener('DOMContentLoaded', () => {
         onlinePlayerNameInput.addEventListener('input', handleSanitize);
         onlinePlayerNameInput.addEventListener('blur', handleSanitize);
         onlinePlayerNameInput.addEventListener('change', handleSanitize);
-        onlinePlayerNameInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                onlinePlayerNameInput.blur();
+        onlinePlayerNameInput.addEventListener('keydown', nameInputKeydownHandler);
+    // Shared keydown handler for name inputs
+    function nameInputKeydownHandler(e) {
+        const el = e.target;
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            el.blur();
+        } else if (e.key === ' ') {
+            e.preventDefault();
+            const start = el.selectionStart;
+            const end = el.selectionEnd;
+            const value = el.value;
+            if (value.length < PLAYER_NAME_LENGTH) {
+                el.value = value.slice(0, start) + '_' + value.slice(end);
+                el.setSelectionRange(start + 1, start + 1);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
             }
-            // Only allow arrow navigation out if input is empty
-            if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && onlinePlayerNameInput.value === '') {
-                // Allow default behavior (navigation)
-            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                // Prevent navigation if not empty
-                e.stopPropagation();
-            }
-        });
+        }
+        // Only allow arrow navigation out if input is empty
+        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && el.value === '') {
+            // Allow default behavior (navigation)
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            // Prevent navigation if not empty
+            e.stopPropagation();
+        }
+    }
     }
 
     // set dynamic bounds

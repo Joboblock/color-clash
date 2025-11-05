@@ -100,15 +100,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     console.debug('[Online] Game started:', {
                         players: Array.isArray(msg.players) ? msg.players : [],
-                        gridSize: Math.max(3, (Array.isArray(msg.players) ? msg.players.length : 2) + 3)
+                        gridSize: Math.max(3, (Array.isArray(msg.players) ? msg.players.length : 2) + 3),
+                        colors: Array.isArray(msg.colors) ? msg.colors : undefined
                     });
                     onlineGameActive = true;
                     onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
                     myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
                     const p = Math.max(2, Math.min(playerColors.length, onlinePlayers.length || 2));
                     const s = Math.max(3, p + 3);
-                    // Colors: host green, others follow playerColors order
-                    gameColors = playerColors.slice(0, p);
+                    // Use server-assigned colors if provided; fallback to default slice
+                    if (msg.colors && Array.isArray(msg.colors) && msg.colors.length >= p) {
+                        gameColors = msg.colors.slice(0, p);
+                    } else {
+                        gameColors = playerColors.slice(0, p);
+                    }
                     playerCount = p;
                     gridSize = s;
                     document.documentElement.style.setProperty('--grid-size', gridSize);
@@ -128,6 +133,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     updateGrid();
                 } catch (err) {
                     console.error('[Online] Failed to start online game', err);
+                }
+            } else if (msg.type === 'request_preferred_colors') {
+                // Server requests our current preferred color (from the cycler)
+                try {
+                    const color = playerColors[startingColorIndex] || 'green';
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'preferred_color', color }));
+                    }
+                } catch (e) {
+                    console.warn('[Online] Failed to send preferred color', e);
                 }
             } else if (msg.type === 'joined') {
                 // If joined includes player names, log them

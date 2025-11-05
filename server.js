@@ -18,6 +18,8 @@ const wss = new WebSocketServer({ port: PORT });
 //   }
 // }
 const rooms = {};
+// Keep server-authoritative list of available player colors (must match client order)
+const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'orange', 'purple'];
 // Track which room a connection belongs to and the player's name (per tab)
 const connectionMeta = new Map(); // ws -> { roomName: string, name: string }
 
@@ -147,24 +149,66 @@ wss.on('connection', (ws) => {
                 ws.send(JSON.stringify({ type: 'error', error: 'Room is not full yet' }));
                 return;
             }
+            // Initiate preferred color collection before starting
+            if (room._colorCollect && room._colorCollect.inProgress) {
+                // Already collecting (debounce multiple start clicks)
+                return;
+            }
             const players = room.participants.map(p => p.name);
-            const gridSize = Math.max(3, playerCount + 3);
-            // Initialize per-room game state for turn enforcement
-            room.game = {
-                started: true,
-                players: players.slice(),
-                turnIndex: 0
+            const collect = {
+                inProgress: true,
+                expected: playerCount,
+                responses: new Map(), // name -> preferred color
+                timeout: null
             };
-            // Broadcast start to all participants
+            room._colorCollect = collect;
+            // Ask every participant for their current preferred color (client color cycler)
+            const requestPayload = JSON.stringify({ type: 'request_preferred_colors', room: meta.roomName, players });
             room.participants.forEach(p => {
                 if (p.ws.readyState === 1) {
-                    try {
-                        p.ws.send(JSON.stringify({ type: 'started', room: meta.roomName, players, gridSize }));
-                    } catch {
-                        // ignore
-                    }
+                    try { p.ws.send(requestPayload); } catch { /* ignore */ }
                 }
             });
+            // Helper to finalize assignment (on all responses or timeout)
+            const finalizeAssignment = () => {
+                if (!rooms[meta.roomName]) return; // room gone
+                const r = rooms[meta.roomName];
+                // Idempotency: ensure we only finalize once
+                if (!r._colorCollect || !r._colorCollect.inProgress) return;
+                r._colorCollect.inProgress = false;
+                if (r._colorCollect.timeout) {
+                    clearTimeout(r._colorCollect.timeout);
+                    r._colorCollect.timeout = null;
+                }
+                // Build preferred list in participant order (default to 'green' if missing)
+                const prefs = players.map(name => {
+                    const raw = r._colorCollect.responses.get(name);
+                    const c = typeof raw === 'string' ? String(raw) : 'green';
+                    // sanitize to known palette
+                    return playerColors.includes(c) ? c : 'green';
+                });
+                const assigned = assignColorsDeterministic(players, prefs, playerColors);
+                const gridSize = Math.max(3, playerCount + 3);
+                // Initialize per-room game state for turn enforcement and color validation
+                r.game = {
+                    started: true,
+                    players: players.slice(),
+                    turnIndex: 0,
+                    colors: assigned.slice()
+                };
+                // Broadcast start to all participants with authoritative colors
+                const startPayload = JSON.stringify({ type: 'started', room: meta.roomName, players, gridSize, colors: assigned });
+                r.participants.forEach(p => {
+                    if (p.ws.readyState === 1) {
+                        try { p.ws.send(startPayload); } catch { /* ignore */ }
+                    }
+                });
+                // Cleanup
+                delete r._colorCollect;
+            };
+            // Timeout to avoid hanging if a client doesn't respond
+            collect.timeout = setTimeout(finalizeAssignment, 2500);
+            // If everyone responds earlier, we'll finalize immediately in the handler below
         } else if (msg.type === 'move') {
             const meta = connectionMeta.get(ws);
             if (!meta || !meta.roomName) return;
@@ -201,6 +245,10 @@ wss.on('connection', (ws) => {
 
             // Accept move: compute next turn and broadcast
             const nextIndex = (fromIndex + 1) % Math.max(1, players.length);
+            // Derive the authoritative color for this player, if available
+            const assignedColor = (room.game && Array.isArray(room.game.colors))
+                ? room.game.colors[fromIndex]
+                : (typeof msg.color === 'string' ? msg.color : undefined);
             const payload = {
                 type: 'move',
                 room: meta.roomName,
@@ -208,7 +256,7 @@ wss.on('connection', (ws) => {
                 col: c,
                 fromIndex,
                 nextIndex,
-                color: typeof msg.color === 'string' ? msg.color : undefined,
+                color: assignedColor,
             };
 
             console.debug(`[Turn] Accepted move from ${senderName} (idx ${fromIndex}) -> (${r},${c}). Next: ${players[nextIndex]} (idx ${nextIndex})`);
@@ -218,6 +266,46 @@ wss.on('connection', (ws) => {
                 }
             });
             room.game.turnIndex = nextIndex;
+        } else if (msg.type === 'preferred_color') {
+            // A client responded with their current preferred color (from cycler)
+            const meta = connectionMeta.get(ws);
+            if (!meta || !meta.roomName) return;
+            const room = rooms[meta.roomName];
+            if (!room || !room._colorCollect || !room._colorCollect.inProgress) return;
+            const name = meta.name;
+            const color = typeof msg.color === 'string' ? String(msg.color) : '';
+            // Sanitize color to known palette, else ignore
+            if (!playerColors.includes(color)) {
+                // ignore invalid colors
+                return;
+            }
+            room._colorCollect.responses.set(name, color);
+            // If we have all responses, finalize immediately
+            if (room._colorCollect.responses.size >= room._colorCollect.expected) {
+                // finalize (simulate start branch behavior)
+                if (room._colorCollect.timeout) {
+                    clearTimeout(room._colorCollect.timeout);
+                    room._colorCollect.timeout = null;
+                }
+                // Reuse the same logic as in start finalization
+                const players = room.participants.map(p => p.name);
+                const prefs = players.map(nm => room._colorCollect.responses.get(nm) || 'green');
+                const assigned = assignColorsDeterministic(players, prefs, playerColors);
+                const gridSize = Math.max(3, players.length + 3);
+                room.game = {
+                    started: true,
+                    players: players.slice(),
+                    turnIndex: 0,
+                    colors: assigned.slice()
+                };
+                const startPayload = JSON.stringify({ type: 'started', room: meta.roomName, players, gridSize, colors: assigned });
+                room.participants.forEach(p => {
+                    if (p.ws.readyState === 1) {
+                        try { p.ws.send(startPayload); } catch { /* ignore */ }
+                    }
+                });
+                delete room._colorCollect;
+            }
         } else if (msg.type === 'leave') {
             const meta = connectionMeta.get(ws);
             if (!meta) {
@@ -335,6 +423,50 @@ function broadcastRoomList() {
     wss.clients.forEach(client => {
         if (client.readyState === 1) client.send(list);
     });
+}
+
+/**
+ * Assign unique colors to players deterministically using their preferred colors.
+ * Order: host first (current room.participants order).
+ * Rule: if a preferred color was already taken, assign the next color in playerColors
+ * that is NOT inside the preferred colors list. If none remain, pick the next
+ * available color not yet assigned.
+ * @param {string[]} players - ordered player names
+ * @param {string[]} prefs - preferred colors in same order as players
+ * @param {string[]} palette - available colors (server-authoritative)
+ * @returns {string[]} assignedColors - same length as players
+ */
+function assignColorsDeterministic(players, prefs, palette) {
+    const n = Array.isArray(players) ? players.length : 0;
+    if (n <= 0) return [];
+    const available = Array.isArray(palette) && palette.length ? palette.slice() : playerColors.slice();
+    const preferredSet = new Set(prefs.filter(c => available.includes(c)));
+    const assigned = [];
+    const used = new Set();
+
+    for (let i = 0; i < n; i++) {
+        const pref = prefs[i];
+        if (available.includes(pref) && !used.has(pref)) {
+            // Take preferred color if not yet taken
+            assigned.push(pref); used.add(pref); continue;
+        }
+        // Find next color after preferred that is not in preferredSet and not used
+        let pick = null;
+        if (available.includes(pref)) {
+            let idx = available.indexOf(pref);
+            for (let step = 1; step <= available.length; step++) {
+                const cand = available[(idx + step) % available.length];
+                if (!preferredSet.has(cand) && !used.has(cand)) { pick = cand; break; }
+            }
+        }
+        // Fallback: any remaining color not used
+        if (!pick) {
+            for (const c of available) { if (!used.has(c)) { pick = c; break; } }
+        }
+        if (!pick) pick = available[0]; // last resort (shouldn't happen)
+        assigned.push(pick); used.add(pick);
+    }
+    return assigned;
 }
 
 console.log(`WebSocket server running on ws://localhost:${PORT}`);

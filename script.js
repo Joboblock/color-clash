@@ -1,4 +1,25 @@
+// Player name length limit (base, not including suffix)
+const PLAYER_NAME_LENGTH = 12;
 document.addEventListener('DOMContentLoaded', () => {
+// Shared name sanitization and validity functions (top-level)
+function sanitizeName(raw) {
+    if (typeof raw !== 'string') return '';
+    let s = raw.replace(/\s+/g, '_');
+    s = s.replace(/[^A-Za-z0-9_]/g, '');
+    if (s.length > PLAYER_NAME_LENGTH) s = s.slice(0, PLAYER_NAME_LENGTH);
+    return s;
+}
+
+function reflectValidity(inputEl, val) {
+    const tooShort = val.length > 0 && val.length < 3;
+    if (tooShort) {
+        inputEl.classList.add('invalid');
+        inputEl.setAttribute('aria-invalid', 'true');
+    } else {
+        inputEl.classList.remove('invalid');
+        inputEl.removeAttribute('aria-invalid');
+    }
+}
     function showModalError(html) {
         let modal = document.getElementById('modalError');
         if (!modal) {
@@ -324,20 +345,18 @@ document.addEventListener('DOMContentLoaded', () => {
         function sendHost() {
             try {
                 // For debug: send player name, but do not use for logic
-                let debugPlayerName = (localStorage.getItem('playerName') || onlinePlayerNameInput.value || 'Player').trim();
+                let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput.value || 'Player'));
                 // Check for duplicate names in the room list
                 let rooms = window.lastRoomList || {};
                 let takenNames = [];
                 if (rooms[name] && Array.isArray(rooms[name].players)) {
                     takenNames = rooms[name].players.map(p => p.name);
                 }
-                let baseName = debugPlayerName;
-                let suffix = 1;
+                let baseName = debugPlayerName.slice(0, PLAYER_NAME_LENGTH);
+                let suffix = 2; // reserve 13th char for a single-digit suffix starting at 2
                 let candidate = baseName;
-                while (takenNames.includes(candidate) && suffix <= 11) {
-                    // Ensure max 16 chars
-                    let maxLen = 16 - String(suffix).length;
-                    candidate = baseName.slice(0, maxLen) + String(suffix);
+                while (takenNames.includes(candidate) && suffix <= 9) {
+                    candidate = baseName.slice(0, PLAYER_NAME_LENGTH) + String(suffix);
                     suffix++;
                 }
                 if (takenNames.includes(candidate)) {
@@ -366,20 +385,18 @@ document.addEventListener('DOMContentLoaded', () => {
         connectWebSocket();
         console.debug('[Join] Joining room:', roomName);
         // For debug: send player name, but do not use for logic
-        let debugPlayerName = (localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player').trim();
+    let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player'));
         // Check for duplicate names in the room list
         let rooms = window.lastRoomList || {};
         let takenNames = [];
         if (rooms[roomName] && Array.isArray(rooms[roomName].players)) {
             takenNames = rooms[roomName].players.map(p => p.name);
         }
-        let baseName = debugPlayerName;
-        let suffix = 1;
+        let baseName = debugPlayerName.slice(0, PLAYER_NAME_LENGTH);
+        let suffix = 2; // reserve 13th char for a single-digit suffix starting at 2
         let candidate = baseName;
-        while (takenNames.includes(candidate) && suffix <= 11) {
-            // Ensure max 16 chars
-            let maxLen = 16 - String(suffix).length;
-            candidate = baseName.slice(0, maxLen) + String(suffix);
+        while (takenNames.includes(candidate) && suffix <= 9) {
+            candidate = baseName.slice(0, PLAYER_NAME_LENGTH) + String(suffix);
             suffix++;
         }
         if (takenNames.includes(candidate)) {
@@ -428,14 +445,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const onlinePlayerNameInput = document.getElementById('onlinePlayerName');
     // Utility: synchronize all player name fields
     function syncPlayerNameFields(newName) {
-        const name = window.sanitizeName(newName || '');
+        const name = sanitizeName(newName || '');
         if (playerNameInput) {
             playerNameInput.value = name;
-            window.reflectValidity(playerNameInput, name);
+            reflectValidity(playerNameInput, name);
         }
         if (onlinePlayerNameInput) {
             onlinePlayerNameInput.value = name;
-            window.reflectValidity(onlinePlayerNameInput, name);
+            reflectValidity(onlinePlayerNameInput, name);
         }
         // Add more fields here if needed
     }
@@ -827,29 +844,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Helper to toggle Train Mode UI state in mainMenu
 
-    // Sanitize player name: replace spaces with underscores, remove non-alphanumerics, limit to 16
+    // Sanitize player name: replace spaces with underscores, remove non-alphanumerics, limit to PLAYER_NAME_LENGTH (13th reserved for suffix if needed)
     if (playerNameInput) {
-        try { playerNameInput.maxLength = 16; } catch { /* ignore */ }
+        try { playerNameInput.maxLength = PLAYER_NAME_LENGTH; } catch { /* ignore */ }
         // Shared name sanitization and validity functions
-        window.sanitizeName = (raw) => {
+        function sanitizeName(raw) {
             if (typeof raw !== 'string') return '';
             let s = raw.replace(/\s+/g, '_');
             s = s.replace(/[^A-Za-z0-9_]/g, '');
-            if (s.length > 16) s = s.slice(0, 16);
+            if (s.length > PLAYER_NAME_LENGTH) s = s.slice(0, PLAYER_NAME_LENGTH);
             return s;
-        };
-        window.reflectValidity = (inputEl, val) => {
+        }
+
+        function reflectValidity(inputEl, val) {
             const tooShort = val.length > 0 && val.length < 3;
             if (tooShort) {
                 inputEl.classList.add('invalid');
                 inputEl.setAttribute('aria-invalid', 'true');
-                inputEl.title = 'Enter 3–16 letters or numbers (spaces become _)';
             } else {
                 inputEl.classList.remove('invalid');
                 inputEl.removeAttribute('aria-invalid');
-                inputEl.removeAttribute('title');
             }
-        };
+        }
         // Load player name from localStorage if available
         const savedName = localStorage.getItem('playerName');
         if (savedName) {
@@ -859,13 +875,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const handleSanitize = (e) => {
             const v = e.target.value;
-            const cleaned = window.sanitizeName(v);
+            const cleaned = sanitizeName(v);
             if (v !== cleaned) {
-                const pos = Math.min(cleaned.length, 16);
+                const pos = Math.min(cleaned.length, PLAYER_NAME_LENGTH);
                 e.target.value = cleaned;
                 try { e.target.setSelectionRange(pos, pos); } catch { /* ignore */ }
             }
-            window.reflectValidity(e.target, e.target.value);
+            reflectValidity(e.target, e.target.value);
             // Save player name to localStorage and sync all fields
             localStorage.setItem('playerName', e.target.value);
             syncPlayerNameFields(e.target.value);
@@ -890,7 +906,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Online menu name input restrictions (reuse shared logic)
 if (onlinePlayerNameInput) {
-    try { onlinePlayerNameInput.maxLength = 16; } catch { /* ignore */ }
+    try { onlinePlayerNameInput.maxLength = PLAYER_NAME_LENGTH; } catch { /* ignore */ }
     // Load player name from localStorage if available
     const savedName = localStorage.getItem('playerName');
     if (savedName) {
@@ -900,13 +916,13 @@ if (onlinePlayerNameInput) {
     }
     const handleSanitize = (e) => {
         const v = e.target.value;
-        const cleaned = window.sanitizeName(v);
+        const cleaned = sanitizeName(v);
         if (v !== cleaned) {
-            const pos = Math.min(cleaned.length, 16);
+            const pos = Math.min(cleaned.length, PLAYER_NAME_LENGTH);
             e.target.value = cleaned;
             try { e.target.setSelectionRange(pos, pos); } catch { /* ignore */ }
         }
-        window.reflectValidity(e.target, e.target.value);
+        reflectValidity(e.target, e.target.value);
         // Save player name to localStorage and sync all fields
         localStorage.setItem('playerName', e.target.value);
         syncPlayerNameFields(e.target.value);

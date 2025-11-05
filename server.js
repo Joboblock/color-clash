@@ -1,3 +1,5 @@
+// Player name length limit (base, not including suffix)
+const PLAYER_NAME_LENGTH = 12;
 import { WebSocketServer } from 'ws';
 const PORT = 3000;
 
@@ -58,8 +60,9 @@ wss.on('connection', (ws) => {
       // Default to 2 unless provided by host (optional)
       const provided = Number.isFinite(msg.maxPlayers) ? Math.floor(Number(msg.maxPlayers)) : 2;
       const clamped = clampPlayers(provided);
-      // Use debugName if present, otherwise default to 'Player'
-      const playerName = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
+      // Use debugName if present, otherwise default to 'Player'. Enforce 12-char base; reserve 13th for numeric suffix.
+      const baseRaw = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
+      const playerName = pickUniqueName(null, baseRaw);
       rooms[msg.roomName] = {
         maxPlayers: clamped,
         participants: [ { ws, name: playerName, isHost: true } ]
@@ -99,8 +102,9 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ type: 'error', error: 'Room is full' }));
         return;
       }
-  // Use debugName if present, otherwise default to 'Player'
-  const playerName = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
+  // Use debugName if present, otherwise default to 'Player'. Enforce 12-char base; reserve 13th for numeric suffix and ensure uniqueness in room.
+  const baseRaw = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
+  const playerName = pickUniqueName(room, baseRaw);
   room.participants.push({ ws, name: playerName, isHost: false });
     connectionMeta.set(ws, { roomName: msg.roomName, name: playerName });
 
@@ -295,6 +299,35 @@ function clampPlayers(n) {
   const v = Math.floor(Number(n));
   if (!Number.isFinite(v)) return 2;
   return Math.max(2, Math.min(8, v));
+}
+
+// Sanitize an incoming name and enforce base length 12.
+function sanitizeBaseName(raw) {
+  try {
+    let s = String(raw || '').trim();
+    if (!s) s = 'Player';
+    // Align with client: replace spaces with underscores and drop non-alphanumerics/underscore
+    s = s.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '');
+    if (s.length > PLAYER_NAME_LENGTH) s = s.slice(0, PLAYER_NAME_LENGTH);
+    return s;
+  } catch {
+    return 'Player';
+  }
+}
+
+// Pick a unique name within a room by appending a single-digit suffix 2..9 in the 13th position if needed.
+function pickUniqueName(room, raw) {
+  const base = sanitizeBaseName(raw);
+  const taken = room && Array.isArray(room.participants)
+    ? room.participants.map(p => p.name)
+    : [];
+  if (!taken.includes(base)) return base;
+  for (let i = 2; i <= 9; i++) {
+    const candidate = base.slice(0, PLAYER_NAME_LENGTH) + String(i);
+    if (!taken.includes(candidate)) return candidate;
+  }
+  // Fallback (should not happen with max 8 players): keep base
+  return base;
 }
 
 function broadcastRoomList() {

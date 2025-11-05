@@ -53,6 +53,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const roomListElement = document.getElementById('roomList');
     // Online bottom action button in online menu
     const hostCustomGameBtnRef = document.getElementById('hostCustomGameBtn');
+    // Track last applied server move sequence to avoid duplicates
+    let lastAppliedSeq = 0;
 
     function getConfiguredWebSocketUrl() {
         try {
@@ -176,6 +178,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (msg.type === 'started') {
                 // Online game start: close menus and start a game with N players and grid size = N + 3
                 try {
+                    // Reset dedup sequence on new game
+                    lastAppliedSeq = 0;
                     console.debug('[Online] Game started:', {
                         players: Array.isArray(msg.players) ? msg.players : [],
                         gridSize: Math.max(3, (Array.isArray(msg.players) ? msg.players.length : 2) + 3),
@@ -263,13 +267,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     if (!onlineGameActive) return;
                     if (msg.room && msg.room !== myJoinedRoom) return;
+                    const seq = Number(msg.seq);
+                    if (Number.isInteger(seq)) {
+                        if (seq <= lastAppliedSeq) {
+                            return; // duplicate or old move; ignore
+                        }
+                    }
                     const r = Number(msg.row), c = Number(msg.col);
                     const fromIdx = Number(msg.fromIndex);
                     if (!Number.isInteger(r) || !Number.isInteger(c)) return;
-                    // Don't re-apply our own move
+                    // If it's our own echoed move, just advance seq and ignore
                     if (fromIdx === myOnlineIndex) {
+                        if (Number.isInteger(seq)) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
                         return;
                     }
+                    if (Number.isInteger(seq)) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
                     console.debug('[Online] Move received:', {
                         fromPlayer: fromIdx,
                         color: activeColors()[fromIdx],
@@ -318,6 +330,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (idx >= missed.length) { updateStartButtonState(); return; }
                             const m = missed[idx];
                             const r = Number(m.row), c = Number(m.col), fromIdx = Number(m.fromIndex);
+                            const seq = Number(m.seq);
+                            if (Number.isInteger(seq) && seq <= lastAppliedSeq) { idx++; applyNext(); return; }
                             if (!Number.isInteger(r) || !Number.isInteger(c) || !Number.isInteger(fromIdx)) { idx++; applyNext(); return; }
                             const doApply = () => {
                                 if (!onlineGameActive) { // if somehow not active, skip safe
@@ -325,6 +339,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
                                 currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
                                 handleClick(r, c);
+                                if (Number.isInteger(seq)) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
                                 idx++;
                                 // allow UI/explosions to process next tick
                                 setTimeout(applyNext, 0);

@@ -45,6 +45,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Multiplayer room logic
     let ws;
+    let wsConnected = false; // reflects stable connection state
+    let wsBackoffMs = 500;   // exponential backoff starting delay
+    let wsReconnectTimer = null;
+    let wsEverOpened = false; // used to know if we should try to rejoin
     let hostedRoom = null;
     const roomListElement = document.getElementById('roomList');
     // Online bottom action button in online menu
@@ -74,13 +78,62 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function showConnBanner(message, kind = 'info') {
+        let bar = document.getElementById('connStatus');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'connStatus';
+            bar.style.position = 'fixed';
+            bar.style.left = '0';
+            bar.style.top = '0';
+            bar.style.width = '100%';
+            bar.style.zIndex = '10000';
+            bar.style.padding = '8px 12px';
+            bar.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial';
+            bar.style.fontSize = '14px';
+            bar.style.textAlign = 'center';
+            bar.style.boxShadow = '0 2px 10px rgba(0,0,0,0.15)';
+            document.body.appendChild(bar);
+        }
+        bar.textContent = message || '';
+        bar.style.background = (kind === 'error') ? '#b00020' : (kind === 'ok' ? '#146c43' : '#8a8d91');
+        bar.style.color = '#fff';
+        bar.style.display = message ? 'block' : 'none';
+    }
+
+    function hideConnBanner() { showConnBanner('', 'ok'); }
+
+    function scheduleReconnect() {
+        if (wsReconnectTimer) return;
+        const delay = Math.min(wsBackoffMs, 5000);
+        console.debug(`[WebSocket] Scheduling reconnect in ${delay}ms`);
+        showConnBanner('Reconnecting…', 'info');
+        wsReconnectTimer = setTimeout(() => {
+            wsReconnectTimer = null;
+            try { connectWebSocket(); } catch { /* ignore */ }
+            // increase backoff for next attempt
+            wsBackoffMs = Math.min(wsBackoffMs * 2, 5000);
+        }, delay);
+    }
+
     function connectWebSocket() {
-        if (ws && ws.readyState === WebSocket.OPEN) return;
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
         const wsUrl = getConfiguredWebSocketUrl();
         ws = new WebSocket(wsUrl);
         ws.onopen = () => {
             console.debug('[WebSocket] Connected, requesting room list');
+            wsConnected = true;
+            wsEverOpened = true;
+            wsBackoffMs = 500;
+            hideConnBanner();
+            if (wsReconnectTimer) { try { clearTimeout(wsReconnectTimer); } catch { /* noop */ } wsReconnectTimer = null; }
             ws.send(JSON.stringify({ type: 'list' }));
+            // Attempt a seamless rejoin if we were in a room before
+            try {
+                if (myJoinedRoom && myPlayerName) {
+                    ws.send(JSON.stringify({ type: 'reconnect', roomName: myJoinedRoom, debugName: myPlayerName }));
+                }
+            } catch { /* ignore */ }
         };
         ws.onmessage = (event) => {
             let msg;
@@ -243,10 +296,29 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.error('[Online] Error applying remote move', err);
                     // ...existing code...
                 }
+            } else if (msg.type === 'rejoined') {
+                console.debug('[Online] Rejoined room:', msg.room);
+                myJoinedRoom = msg.room || myJoinedRoom;
+                if (Array.isArray(msg.players)) {
+                    myRoomPlayers = msg.players;
+                    myRoomCurrentPlayers = msg.players.length;
+                }
+                myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
+                updateStartButtonState();
             } else if (msg.type === 'error') {
                 console.debug('[Error]', msg.error);
                 alert(msg.error);
             }
+        };
+        ws.onerror = () => {
+            console.warn('[WebSocket] Error');
+        };
+        ws.onclose = () => {
+            console.debug('[WebSocket] Closed');
+            wsConnected = false;
+            // Show banner if we had connected before (avoid showing at initial load offline)
+            if (wsEverOpened) showConnBanner('Connection lost. Reconnecting…', 'error');
+            scheduleReconnect();
         };
     }
 
@@ -522,18 +594,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isProcessing) return; // Prevent sending moves while processing
                 if (currentPlayer !== myOnlineIndex) return;
                 if (!isValidLocalMove(row, col, myOnlineIndex)) return;
-                // Send move instantly to server
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({
-                        type: 'move',
-                        row,
-                        col,
-                        fromIndex: myOnlineIndex,
-                        nextIndex: (myOnlineIndex + 1) % playerCount,
-                        color: activeColors()[myOnlineIndex]
-                    }));
+                // Only act when connected; avoid local desync while offline
+                if (!ws || ws.readyState !== WebSocket.OPEN || !wsConnected) {
+                    showConnBanner('You are offline. Reconnecting…', 'error');
+                    return;
                 }
-                // ...existing code...
+                // Send move to server and rely on echo for other clients; apply locally for responsiveness
+                ws.send(JSON.stringify({
+                    type: 'move',
+                    row,
+                    col,
+                    fromIndex: myOnlineIndex,
+                    nextIndex: (myOnlineIndex + 1) % playerCount,
+                    color: activeColors()[myOnlineIndex]
+                }));
                 handleClick(row, col);
                 return;
             }
@@ -2233,19 +2307,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (onlineGameActive) {
             if (currentPlayer !== myOnlineIndex) return;
             if (!isValidLocalMove(row, col, myOnlineIndex)) return;
-            e.preventDefault();
-            // Send move instantly to server
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    type: 'move',
-                    row,
-                    col,
-                    fromIndex: myOnlineIndex,
-                    nextIndex: (myOnlineIndex + 1) % playerCount,
-                    color: activeColors()[myOnlineIndex]
-                }));
+            // Only act when connected; avoid local desync while offline
+            if (!ws || ws.readyState !== WebSocket.OPEN || !wsConnected) {
+                showConnBanner('You are offline. Reconnecting…', 'error');
+                return;
             }
-            // ...existing code...
+            e.preventDefault();
+            ws.send(JSON.stringify({
+                type: 'move',
+                row,
+                col,
+                fromIndex: myOnlineIndex,
+                nextIndex: (myOnlineIndex + 1) % playerCount,
+                color: activeColors()[myOnlineIndex]
+            }));
             handleClick(row, col);
             return;
         }

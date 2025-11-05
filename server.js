@@ -94,11 +94,13 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 // rooms = {
 //   [roomName]: {
 //     maxPlayers: number,
-//     participants: Array<{ ws: WebSocket, name: string, isHost: boolean }>,
+//     participants: Array<{ ws: WebSocket, name: string, isHost: boolean, connected: boolean }>,
+//     _disconnectTimers?: Map<string, NodeJS.Timeout>,
 //     game?: {
 //       started: boolean,
 //       players: string[], // fixed order of names at start
-//       turnIndex: number   // whose turn it is (index in players)
+//       turnIndex: number, // whose turn it is (index in players)
+//       colors?: string[]
 //     }
 //   }
 // }
@@ -107,6 +109,8 @@ const rooms = {};
 const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'orange', 'purple'];
 // Track which room a connection belongs to and the player's name (per tab)
 const connectionMeta = new Map(); // ws -> { roomName: string, name: string }
+// Allow brief disconnects to reattach by name before freeing the seat
+const GRACE_MS = 8000; // 8s grace window
 
 wss.on('connection', (ws) => {
     ws.on('message', (raw) => {
@@ -114,7 +118,7 @@ wss.on('connection', (ws) => {
         try {
             msg = JSON.parse(raw);
         } catch {
-            ws.send(JSON.stringify({ type: 'error', error: 'Invalid message format' }));
+            try { ws.send(JSON.stringify({ type: 'error', error: 'Invalid message format' })); } catch { /* ignore */ }
             return;
         }
 
@@ -131,10 +135,8 @@ wss.on('connection', (ws) => {
                     prevRoom.participants.forEach(p => {
                         if (p.ws.readyState === 1) {
                             try {
-                                p.ws.send(JSON.stringify({ type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.map(pp => ({ name: pp.name })) }));
-                            } catch {
-                                // ignore
-                            }
+                                p.ws.send(JSON.stringify({ type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }));
+                            } catch { /* ignore */ }
                         }
                     });
                 }
@@ -152,7 +154,8 @@ wss.on('connection', (ws) => {
             const playerName = pickUniqueName(null, baseRaw);
             rooms[msg.roomName] = {
                 maxPlayers: clamped,
-                participants: [{ ws, name: playerName, isHost: true }]
+                participants: [{ ws, name: playerName, isHost: true, connected: true }],
+                _disconnectTimers: new Map()
             };
             connectionMeta.set(ws, { roomName: msg.roomName, name: playerName });
             ws.send(JSON.stringify({ type: 'hosted', room: msg.roomName, maxPlayers: clamped, player: playerName }));
@@ -175,10 +178,8 @@ wss.on('connection', (ws) => {
                     prevRoom.participants.forEach(p => {
                         if (p.ws.readyState === 1) {
                             try {
-                                p.ws.send(JSON.stringify({ type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.map(pp => ({ name: pp.name })) }));
-                            } catch {
-                                // ignore
-                            }
+                                p.ws.send(JSON.stringify({ type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }));
+                            } catch { /* ignore */ }
                         }
                     });
                 }
@@ -192,18 +193,48 @@ wss.on('connection', (ws) => {
             // Use debugName if present, otherwise default to 'Player'. Enforce 12-char base; reserve 13th for numeric suffix and ensure uniqueness in room.
             const baseRaw = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
             const playerName = pickUniqueName(room, baseRaw);
-            room.participants.push({ ws, name: playerName, isHost: false });
+            room.participants.push({ ws, name: playerName, isHost: false, connected: true });
             connectionMeta.set(ws, { roomName: msg.roomName, name: playerName });
 
-            ws.send(JSON.stringify({ type: 'joined', room: msg.roomName, maxPlayers: room.maxPlayers, players: room.participants.map(p => ({ name: p.name })) }));
+            ws.send(JSON.stringify({ type: 'joined', room: msg.roomName, maxPlayers: room.maxPlayers, players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })) }));
             // Notify existing participants about the new joiner (optional)
             room.participants.forEach(p => {
                 if (p.ws !== ws && p.ws.readyState === 1) {
                     try {
-                        p.ws.send(JSON.stringify({ type: 'roomupdate', room: msg.roomName, players: room.participants.map(pp => ({ name: pp.name })) }));
-                    } catch {
-                        // ignore send errors on best-effort notifications
-                    }
+                        p.ws.send(JSON.stringify({ type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }));
+                    } catch { /* ignore */ }
+                }
+            });
+            broadcastRoomList();
+        } else if (msg.type === 'reconnect' && msg.roomName && typeof msg.debugName === 'string') {
+            const room = rooms[msg.roomName];
+            if (!room) {
+                ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
+                return;
+            }
+            const name = sanitizeBaseName(msg.debugName);
+            const participant = room.participants.find(p => p.name === name && p.connected === false);
+            if (!participant) {
+                ws.send(JSON.stringify({ type: 'error', error: 'No disconnected session to reattach' }));
+                return;
+            }
+            // Clear any pending purge timer for this name
+            if (room._disconnectTimers && room._disconnectTimers.has(name)) {
+                try { clearTimeout(room._disconnectTimers.get(name)); } catch { /* ignore */ }
+                room._disconnectTimers.delete(name);
+            }
+            // Attach this socket and mark connected
+            participant.ws = ws;
+            participant.connected = true;
+            connectionMeta.set(ws, { roomName: msg.roomName, name });
+            // Acknowledge
+            try {
+                ws.send(JSON.stringify({ type: 'rejoined', room: msg.roomName, maxPlayers: room.maxPlayers, players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })) }));
+            } catch { /* ignore */ }
+            // Notify others of updated connected roster
+            room.participants.forEach(p => {
+                if (p.ws !== ws && p.ws.readyState === 1) {
+                    try { p.ws.send(JSON.stringify({ type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) })); } catch { /* ignore */ }
                 }
             });
             broadcastRoomList();
@@ -302,7 +333,7 @@ wss.on('connection', (ws) => {
 
             // Enforce that a game has started and track turn order
             if (!room.game || !room.game.started) {
-                try { ws.send(JSON.stringify({ type: 'error', error: 'Game not started' })); } catch (e) { /* ignore */ void e; }
+                try { ws.send(JSON.stringify({ type: 'error', error: 'Game not started' })); } catch { /* ignore */ }
                 return;
             }
 
@@ -314,17 +345,17 @@ wss.on('connection', (ws) => {
             const fromIndex = players.indexOf(senderName);
 
             if (!Number.isInteger(r) || !Number.isInteger(c)) {
-                try { ws.send(JSON.stringify({ type: 'error', error: 'Invalid move coordinates' })); } catch (e) { /* ignore */ void e; }
+                try { ws.send(JSON.stringify({ type: 'error', error: 'Invalid move coordinates' })); } catch { /* ignore */ }
                 return;
             }
             if (fromIndex < 0) {
-                try { ws.send(JSON.stringify({ type: 'error', error: 'Unknown player' })); } catch (e) { /* ignore */ void e; }
+                try { ws.send(JSON.stringify({ type: 'error', error: 'Unknown player' })); } catch { /* ignore */ }
                 return;
             }
             if (fromIndex !== currentTurn) {
                 const expectedPlayer = players[currentTurn];
                 console.debug(`[Turn] Rejected move from ${senderName} (idx ${fromIndex}) - expected ${expectedPlayer} (idx ${currentTurn})`);
-                try { ws.send(JSON.stringify({ type: 'error', error: 'Not your turn', expectedIndex: currentTurn, expectedPlayer })); } catch (e) { /* ignore */ void e; }
+                try { ws.send(JSON.stringify({ type: 'error', error: 'Not your turn', expectedIndex: currentTurn, expectedPlayer })); } catch { /* ignore */ }
                 return;
             }
 
@@ -413,11 +444,7 @@ wss.on('connection', (ws) => {
             } else {
                 room.participants.forEach(p => {
                     if (p.ws.readyState === 1) {
-                        try {
-                            p.ws.send(JSON.stringify({ type: 'roomupdate', room: roomName, players: room.participants.map(pp => ({ name: pp.name })) }));
-                        } catch {
-                            // ignore
-                        }
+                        try { p.ws.send(JSON.stringify({ type: 'roomupdate', room: roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) })); } catch { /* ignore */ }
                     }
                 });
             }
@@ -425,27 +452,52 @@ wss.on('connection', (ws) => {
         }
     });
 
-    ws.send(JSON.stringify({ type: 'info', message: 'Connected to server!' }));
+    // Greet new connections
+    try { ws.send(JSON.stringify({ type: 'info', message: 'Connected to server!' })); } catch { /* ignore */ }
 
     ws.on('close', () => {
         const meta = connectionMeta.get(ws);
         if (!meta) return;
-        const { roomName } = meta;
+        const { roomName, name } = meta;
         const room = rooms[roomName];
-        if (!room) return;
-        room.participants = room.participants.filter(p => p.ws !== ws);
-        connectionMeta.delete(ws);
-        if (room.participants.length === 0) {
-            delete rooms[roomName];
-        } else {
-            // Broadcast room participant update
-            room.participants.forEach(p => {
-                if (p.ws.readyState === 1) {
-                    try {
-                        p.ws.send(JSON.stringify({ type: 'roomupdate', room: roomName, players: room.participants.map(pp => ({ name: pp.name })) }));
-                    } catch {
-                        // ignore send errors on best-effort notifications
+        if (!room) { connectionMeta.delete(ws); return; }
+
+        // Mark participant disconnected (reserve seat) and schedule purge
+        const participant = room.participants.find(p => p.name === name);
+        if (participant) {
+            participant.connected = false;
+            if (!room._disconnectTimers) room._disconnectTimers = new Map();
+            // Clear any existing timer for this name
+            if (room._disconnectTimers.has(name)) {
+                try { clearTimeout(room._disconnectTimers.get(name)); } catch { /* ignore */ }
+            }
+            const timer = setTimeout(() => {
+                const rr = rooms[roomName];
+                if (!rr) return;
+                const idx = rr.participants.findIndex(pp => pp.name === name && !pp.connected);
+                if (idx >= 0) {
+                    rr.participants.splice(idx, 1);
+                    if (rr.participants.length === 0) {
+                        delete rooms[roomName];
+                    } else {
+                        rr.participants.forEach(p => {
+                            if (p.ws.readyState === 1) {
+                                try { p.ws.send(JSON.stringify({ type: 'roomupdate', room: roomName, players: rr.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) })); } catch { /* ignore */ }
+                            }
+                        });
                     }
+                    broadcastRoomList();
+                }
+                if (rr && rr._disconnectTimers) rr._disconnectTimers.delete(name);
+            }, GRACE_MS);
+            room._disconnectTimers.set(name, timer);
+        }
+        connectionMeta.delete(ws);
+        // Notify connected clients about updated roster immediately
+        if (rooms[roomName]) {
+            rooms[roomName].participants.forEach(p => {
+                if (p.ws.readyState === 1) {
+                    try { p.ws.send(JSON.stringify({ type: 'roomupdate', room: roomName, players: rooms[roomName].participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) })); } catch { /* ignore */ }
                 }
             });
         }

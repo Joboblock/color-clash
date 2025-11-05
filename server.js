@@ -1,9 +1,94 @@
 // Player name length limit (base, not including suffix)
 const PLAYER_NAME_LENGTH = 12;
+import http from 'http';
+import process from 'node:process';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
 import { WebSocketServer } from 'ws';
-const PORT = 3000;
 
-const wss = new WebSocketServer({ port: PORT });
+// Cloud Run provides PORT; default to 8080 locally
+const PORT = Number.parseInt(process.env.PORT || '', 10) || 8080;
+
+// Resolve current directory (ESM)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Simple static file server for index.html, script.js, styles.css
+const contentTypes = new Map([
+    ['.html', 'text/html; charset=utf-8'],
+    ['.js', 'application/javascript; charset=utf-8'],
+    ['.css', 'text/css; charset=utf-8'],
+    ['.json', 'application/json; charset=utf-8'],
+    ['.svg', 'image/svg+xml'],
+    ['.png', 'image/png'],
+    ['.jpg', 'image/jpeg'],
+    ['.jpeg', 'image/jpeg'],
+    ['.ico', 'image/x-icon'],
+]);
+
+function sendError(res, code = 404, message = 'Not found') {
+    res.statusCode = code;
+    res.setHeader('content-type', 'text/plain; charset=utf-8');
+    res.end(message);
+}
+
+const server = http.createServer(async (req, res) => {
+    try {
+        // Health checks
+        if (req.url === '/healthz' || req.url === '/_ah/health') {
+            res.statusCode = 200;
+            res.setHeader('content-type', 'text/plain; charset=utf-8');
+            res.end('ok');
+            return;
+        }
+
+            // Default to index.html for root
+            let reqPath = (req.url || '/').split('?')[0];
+        if (reqPath === '/' || reqPath === '') {
+            reqPath = '/index.html';
+        }
+
+        // Prevent path traversal
+            const safePath = path
+                .normalize(reqPath)
+                .replace(/^\.\.(?:\/|\\|$)/, '')
+                .replace(/^\/+/, ''); // strip any leading slashes so join is relative
+            const absPath = path.join(__dirname, safePath);
+        const st = await stat(absPath);
+        if (!st.isFile()) {
+            sendError(res, 404);
+            return;
+        }
+        const ext = path.extname(absPath).toLowerCase();
+        const ct = contentTypes.get(ext) || 'application/octet-stream';
+        res.statusCode = 200;
+        res.setHeader('content-type', ct);
+        createReadStream(absPath).pipe(res);
+        } catch {
+        // Fallback to index.html for SPA routes
+        try {
+            const absIndex = path.join(__dirname, 'index.html');
+            const ext = '.html';
+            const ct = contentTypes.get(ext) || 'text/html; charset=utf-8';
+            res.statusCode = 200;
+            res.setHeader('content-type', ct);
+            createReadStream(absIndex).pipe(res);
+        } catch {
+            sendError(res, 404);
+        }
+    }
+});
+
+// Attach WebSocket server on path /ws
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+    // Start HTTP server
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log(`HTTP server listening on http://0.0.0.0:${PORT}`);
+        console.log(`WebSocket endpoint available at ws://<host>:${PORT}/ws`);
+    });
 
 // Room management structure:
 // rooms = {

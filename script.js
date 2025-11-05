@@ -52,7 +52,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function connectWebSocket() {
         if (ws && ws.readyState === WebSocket.OPEN) return;
-        ws = new WebSocket('ws://localhost:3000');
+        // Build WS URL based on current origin; fallback to localhost in file://
+        const isSecure = window.location.protocol === 'https:';
+        const proto = isSecure ? 'wss' : 'ws';
+        const host = window.location.host || 'localhost:8080';
+        const wsUrl = `${proto}://${host}/ws`;
+        ws = new WebSocket(wsUrl);
         ws.onopen = () => {
             console.debug('[WebSocket] Connected, requesting room list');
             ws.send(JSON.stringify({ type: 'list' }));

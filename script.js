@@ -2778,6 +2778,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const existingCount = existingCircles.length;
 
+        // Special case: AI strength preview should always "spawn" from center
+        // so reuse of existing circles shouldn't animate from their previous positions.
+        // Reset existing circles to centered, invisible state as starting point.
+        const isAIPreview = !!innerCircle.closest('#aiStrengthTile');
+        if (isAIPreview) {
+            for (const c of existingCircles) {
+                c.style.setProperty('--tx', 0);
+                c.style.setProperty('--ty', 0);
+                c.style.opacity = '0';
+            }
+        }
+
         if (causedByExplosion) {
             innerCircle.style.transform = 'scale(1.05)';
             setTimeout(() => innerCircle.style.transform = '', delayAnimation); //DELAY schmol innerCircle

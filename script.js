@@ -282,6 +282,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     myRoomCurrentPlayers = msg.players.length;
                     myRoomPlayers = msg.players;
                 }
+                // If server provided the planned grid size for this room, immediately reflect it in the background grid.
+                try {
+                    if (Number.isInteger(msg.gridSize)) {
+                        const s = Math.max(3, Math.min(16, parseInt(msg.gridSize, 10)));
+                        // Sync display value but don't alter selected player count here
+                        menuGridSizeVal = s;
+                        if (typeof reflectGridSizeDisplay === 'function') reflectGridSizeDisplay();
+                        if (s !== gridSize) {
+                            // Keep current playerCount for background; size is what matters here
+                            recreateGrid(s, playerCount);
+                        }
+                    }
+                } catch { /* ignore */ }
                 updateStartButtonState();
             } else if (msg.type === 'left') {
                 console.debug('[Leave] Left room:', msg.room);

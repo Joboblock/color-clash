@@ -223,7 +223,28 @@ wss.on('connection', (ws) => {
             room.participants.push({ ws, name: playerName, isHost: false, connected: true });
             connectionMeta.set(ws, { roomName: msg.roomName, name: playerName });
 
-            ws.send(JSON.stringify({ type: 'joined', room: msg.roomName, maxPlayers: room.maxPlayers, player: playerName, players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })) }));
+            // Provide the client with the room's planned grid size so the background grid can match immediately on join.
+            // Planned grid size is based on host's desiredGridSize (if any), but not below the schedule minimum for maxPlayers.
+            function recommendedGridSize(p) {
+                if (p <= 2) return 3;
+                if (p <= 4) return 4; // 3-4 players
+                if (p === 5) return 5;
+                return 6; // 6-8 players
+            }
+            const scheduleMin = recommendedGridSize(room.maxPlayers || 2);
+            const desired = Number.isFinite(room.desiredGridSize) ? Math.floor(room.desiredGridSize) : null;
+            const plannedGridSize = desired !== null
+                ? Math.max(scheduleMin, Math.min(16, Math.max(3, desired)))
+                : scheduleMin;
+
+            ws.send(JSON.stringify({
+                type: 'joined',
+                room: msg.roomName,
+                maxPlayers: room.maxPlayers,
+                player: playerName,
+                players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
+                gridSize: plannedGridSize
+            }));
             // Notify existing participants about the new joiner (optional)
             room.participants.forEach(p => {
                 if (p.ws !== ws && p.ws.readyState === 1) {

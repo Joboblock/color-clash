@@ -603,16 +603,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return;
             }
-            // Otherwise behave as Host Custom -> open mainMenu in host mode
-            const onlineMenu = document.getElementById('onlineMenu');
-            const mainMenu = document.getElementById('mainMenu');
-            if (onlineMenu && mainMenu) {
-                setHidden(onlineMenu, true);
-                setHidden(mainMenu, false);
-                setMainMenuMode('host');
-                // Mark mainMenu as opened by host for close logic
-                mainMenu.dataset.openedBy = 'host';
-            }
+            // Otherwise behave as Host Custom -> navigate to host menu
+            navigateToMenu('host');
         });
     }
 
@@ -853,10 +845,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!Number.isNaN(ad) && ad >= 1) aiPreviewValue = Math.max(1, Math.min(5, ad));
     }
 
-    // Decide initial menu visibility: only open menu if no players/size params OR menu param is present
+    // Decide initial menu visibility using typed menu values
     const initialParams = new URLSearchParams(window.location.search);
     const hasPlayersOrSize = initialParams.has('players') || initialParams.has('size');
-    const isMenu = initialParams.has('menu');
 
     const firstMenu = document.getElementById('firstMenu');
     const mainMenu = document.getElementById('mainMenu');
@@ -878,21 +869,80 @@ document.addEventListener('DOMContentLoaded', () => {
             }
     };
 
-    const replaceUrlWithParams = (params) => {
-        const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-        window.history.replaceState(null, '', newUrl);
-    };
+    // (replaced by setMenuParam)
 
-    const ensureMenuParamIfNeeded = (force = false) => {
+    // New: typed menu param helpers (first|local|online|host|train)
+    function getMenuParam() {
+        try {
+            const val = (new URLSearchParams(window.location.search)).get('menu');
+            if (!val) return null;
+            if (val === 'true') return 'first'; // backward compat
+            const allowed = ['first', 'local', 'online', 'host', 'train'];
+            return allowed.includes(val) ? val : null;
+        } catch { return null; }
+    }
+
+    function setMenuParam(menuKey, push = true) {
         const params = new URLSearchParams(window.location.search);
-        const hasParams = params.has('players') || params.has('size');
-        if (force || (!params.has('menu') && !hasParams)) {
-            params.set('menu', 'true');
-            replaceUrlWithParams(params);
-            return true;
+        params.set('menu', menuKey);
+        // While in explicit menu, drop transient game-only params so refresh is clean
+        // Keep ai_depth if returning to train menu so the UI can reflect it
+        if (menuKey !== null) {
+            params.delete('players');
+            params.delete('size');
         }
-        return false;
-    };
+        const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+        if (push) window.history.pushState({ menu: menuKey }, '', url); else window.history.replaceState({ menu: menuKey }, '', url);
+    }
+
+    function showMenuFor(menuKey) {
+        const onlineMenu = document.getElementById('onlineMenu');
+        // Default hide all
+        setHidden(firstMenu, true);
+        setHidden(mainMenu, true);
+        if (onlineMenu) setHidden(onlineMenu, true);
+        // Clear host marker unless entering host
+    if (mainMenu) { try { delete mainMenu.dataset.openedBy; } catch { /* ignore */ }
+        }
+        switch (menuKey) {
+            case 'first':
+                setHidden(firstMenu, false);
+                break;
+            case 'local':
+                setHidden(mainMenu, false);
+                setMainMenuMode('local');
+                break;
+            case 'online':
+                if (onlineMenu) setHidden(onlineMenu, false);
+                // reflect any online state on button
+                updateStartButtonState();
+                break;
+            case 'host':
+                setHidden(mainMenu, false);
+                setMainMenuMode('host');
+                if (mainMenu) mainMenu.dataset.openedBy = 'host';
+                break;
+            case 'train':
+                setHidden(mainMenu, false);
+                setMainMenuMode('train');
+                break;
+            default:
+                // Fallback to first
+                setHidden(firstMenu, false);
+        }
+        // When showing any menu overlay, ensure background color mirrors cycler
+        setMenuBodyColor();
+        // Update AI preview if train menu is shown
+    if (menuKey === 'train') { try { updateAIPreview(); } catch { /* ignore */ }
+        }
+    }
+
+    function navigateToMenu(menuKey) {
+        // If navigating to online, ensure WS is (re)connecting
+        if (menuKey === 'online') connectWebSocket();
+        setMenuParam(menuKey, true);
+        showMenuFor(menuKey);
+    }
 
     // --- Main behaviour preserved, but simplified ---
     /**
@@ -923,110 +973,58 @@ document.addEventListener('DOMContentLoaded', () => {
         const aiStrengthTile = document.getElementById('aiStrengthTile');
         if (aiStrengthTile) aiStrengthTile.style.display = (mode === 'train') ? '' : 'none';
     }
-    if (hasPlayersOrSize && !isMenu) {
-        // hide menu when explicit game params provided (and not in menu mode)
+    // Initial routing based on typed menu param
+    const typedMenu = getMenuParam();
+    if (!typedMenu && hasPlayersOrSize) {
+        // Explicit game state: ensure all menus hidden
         setHidden(firstMenu, true);
         setHidden(mainMenu, true);
+        const onlineMenu = document.getElementById('onlineMenu');
+        if (onlineMenu) setHidden(onlineMenu, true);
     } else {
-        // Open / make menu available
-        if (mainMenu) setHidden(mainMenu, false);
+        // If no menu param, default to first and replace URL so refresh/back is stable
+        const menuToShow = typedMenu || 'first';
+        if (!typedMenu) setMenuParam(menuToShow, false);
+        showMenuFor(menuToShow);
 
-        // Non-fatal: call these if available (preserves original side-effects)
-        if (typeof updateRandomTip === 'function') try { updateRandomTip(); } catch { /* empty */ }
-        if (typeof updateAIPreview === 'function') try { updateAIPreview(); } catch { /* empty */ }
+        // Non-fatal: preserve previous side-effects
+        try { updateRandomTip(); } catch { /* ignore */ }
+        try { updateAIPreview(); } catch { /* ignore */ }
+    }
 
-        // Ensure ?menu=true is present when the script decides to open menu
-        if (!isMenu) ensureMenuParamIfNeeded(true);
-
-        // --- Main Menu Logic (firstMenu exists => two-step menu flow) ---
-        if (firstMenu && localGameBtn && mainMenu) {
-            // Hide mainMenu initially (firstMenu is the starting UI)
-            setHidden(mainMenu, true);
-
-            // Ensure ?menu=true is present if no parameters (match previous behaviour)
-            const urlParams = new URLSearchParams(window.location.search);
-            const hasParams = urlParams.has('players') || urlParams.has('size');
-            let showMenu = urlParams.get('menu') === 'true';
-            if (!hasParams && !showMenu) {
-                urlParams.set('menu', 'true');
-                replaceUrlWithParams(urlParams);
-                showMenu = true;
-            }
-
-            setHidden(firstMenu, !showMenu);
-
-            // Attach event listeners once (idempotent guard)
-            if (!document.body.dataset.menuInited) {
-                document.body.dataset.menuInited = '1';
-
-                // Show mainMenu for Local Game (hide name input)
-                localGameBtn.addEventListener('click', () => {
-                    setHidden(firstMenu, true);
-                    setHidden(mainMenu, false);
-                    setMainMenuMode('local');
-                });
-
-                // Show onlineMenu for Online Game
-                const onlineMenu = document.getElementById('onlineMenu');
-                if (onlineGameBtn && onlineMenu && mainMenu) {
-                    onlineGameBtn.addEventListener('click', (e) => {
-                        if (!ws || ws.readyState !== WebSocket.OPEN) {
-                            e.preventDefault();
-                            showModalError('Unable to connect to the multiplayer server.<br>Please check your internet connection or try again in a moment.');
-                            return;
-                        }
-                        setHidden(firstMenu, true);
-                        setHidden(mainMenu, true);
-                        setHidden(onlineMenu, false);
-                        // Reflect current room status on the action button
-                        updateStartButtonState();
-                    });
+    // Attach menu button listeners once (even if we started in-game)
+    if (!document.body.dataset.menuInited) {
+        document.body.dataset.menuInited = '1';
+        // Local
+        localGameBtn?.addEventListener('click', () => navigateToMenu('local'));
+        // Online (guard connection)
+        const onlineMenuEl = document.getElementById('onlineMenu');
+        if (onlineGameBtn && onlineMenuEl) {
+            onlineGameBtn.addEventListener('click', (e) => {
+                if (!ws || ws.readyState !== WebSocket.OPEN) {
+                    e.preventDefault();
+                    showModalError('Unable to connect to the multiplayer server.<br>Please check your internet connection or try again in a moment.');
+                    return;
                 }
-
-                // Host Custom/Start Game button is handled globally; no per-init binding here
-                // Train Mode button logic
-                trainMainBtn.addEventListener('click', () => {
-                    setHidden(firstMenu, true);
-                    setHidden(mainMenu, false);
-                    setMainMenuMode('train');
-                });
-            }
-        } else {
-            // If firstMenu is absent, ensure mainMenu visibility (fall back)
-            setHidden(mainMenu, false);
+                navigateToMenu('online');
+            });
         }
+        // Train
+        trainMainBtn?.addEventListener('click', () => navigateToMenu('train'));
     }
 
     // Combined top-right close button logic for local and online menus
-    function handleMenuClose(menuId) {
-        const menu = document.getElementById(menuId);
-        const firstMenu = document.getElementById('firstMenu');
-        const onlineMenu = document.getElementById('onlineMenu');
-        setMainMenuMode('local'); // Always restore default UI when closing mainMenu
-        // Exception: if mainMenu was opened by hostGameBtn, redirect to onlineMenu
-        if (menuId === 'mainMenu' && menu && onlineMenu && menu.dataset.openedBy === 'host') {
-            menu.classList.add('hidden');
-            menu.setAttribute('aria-hidden', 'true');
-            onlineMenu.classList.remove('hidden');
-            onlineMenu.setAttribute('aria-hidden', 'false');
-            menu.dataset.openedBy = '';
-            return;
-        }
-        // Default: always redirect to firstMenu
-        if (menu && firstMenu) {
-            menu.classList.add('hidden');
-            menu.setAttribute('aria-hidden', 'true');
-            firstMenu.classList.remove('hidden');
-            firstMenu.setAttribute('aria-hidden', 'false');
-        }
+    function handleMenuClose() {
+        // Trigger browser back navigation, to fix actual back button moving user a menu "Forwards"
+        window.history.back();
     }
     const menuTopRightBtn = document.getElementById('menuTopRightBtn');
     if (menuTopRightBtn) {
-        menuTopRightBtn.addEventListener('click', () => handleMenuClose('mainMenu'));
+        menuTopRightBtn.addEventListener('click', handleMenuClose);
     }
     const onlineTopRightBtn = document.getElementById('onlineTopRightBtn');
     if (onlineTopRightBtn) {
-        onlineTopRightBtn.addEventListener('click', () => handleMenuClose('onlineMenu'));
+        onlineTopRightBtn.addEventListener('click', handleMenuClose);
     }
     // --- Main Menu Logic ---
 
@@ -1577,7 +1575,12 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (mode === 'host') {
             // Host the room when clicking the start button in host mode
             hostRoom();
-        } else if (mode === 'train') {
+        }
+        // Host menu: if in host mode, clicking the Host button should also allow back navigation to online menu
+        if (mode === 'host' && mainMenu && mainMenu.dataset.mode === 'host') {
+            window.history.back();
+        }
+        else if (mode === 'train') {
             await requestFullscreenIfMobile();
             const params = new URLSearchParams(window.location.search);
             params.delete('menu');
@@ -1639,20 +1642,18 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function applyStateFromUrl() {
         const params = new URLSearchParams(window.location.search);
+        const typed = getMenuParam();
         const hasPS = params.has('players') || params.has('size');
-        const showMenu = params.has('menu') || !hasPS;
-        if (showMenu) {
-            if (mainMenu) mainMenu.classList.remove('hidden');
-            updateRandomTip();
-            // When returning to the menu, reflect current chosen color on the background
-            setMenuBodyColor();
-            // Sync AI preview to URL parameter when showing menu
+        if (typed || !hasPS) {
+            // Show the requested or default menu
+            showMenuFor(typed || 'first');
+            try { updateRandomTip(); } catch { /* ignore */ }
+            // Reflect AI strength to UI if present
             const ad = parseInt(params.get('ai_depth') || '', 10);
             if (!Number.isNaN(ad) && ad >= 1) {
                 aiPreviewValue = Math.max(1, Math.min(5, ad));
-                updateAIPreview();
+                try { updateAIPreview(); } catch { /* ignore */ }
             }
-            // Move keyboard focus to the slider for easy keyboard navigation
             try { (playerBoxSlider || menuColorCycle || startBtn)?.focus(); } catch { /* ignore */ }
             exitFullscreenIfPossible();
             return;
@@ -1661,15 +1662,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const p = clampPlayers(parseInt(params.get('players') || '', 10) || 2);
         let s = parseInt(params.get('size') || '', 10);
         if (!Number.isInteger(s)) s = Math.max(3, 3 + p);
-        if (mainMenu) mainMenu.classList.add('hidden');
+        setHidden(firstMenu, true);
+        setHidden(mainMenu, true);
+        const onlineMenu = document.getElementById('onlineMenu');
+        if (onlineMenu) setHidden(onlineMenu, true);
         // Enable train mode if any AI-related parameter exists in the URL
         trainMode = params.has('ai_depth') || params.has('ai_k');
-        // Update AI depth from URL if provided
         const ad = parseInt(params.get('ai_depth') || '', 10);
         if (!Number.isNaN(ad) && ad >= 1) {
             try { aiDepth = Math.max(1, ad); } catch { /* ignore */ }
         }
-        // Derive the active game palette from current cycler selection and requested player count
         gameColors = computeSelectedColors(p);
         recreateGrid(Math.max(3, s), p);
     }
@@ -3035,21 +3037,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 stopExplosionLoop();
                 // Clear focus from any grid cell before showing the menu
                 clearCellFocus();
-                // Open the menu by adding menu=true to the URL
-                const urlParams = new URLSearchParams(window.location.search);
-                urlParams.set('menu', 'true');
-                const newUrl = `${window.location.pathname}?${urlParams.toString()}${window.location.hash || ''}`;
-                // Update the URL without reloading the page
-                window.history.replaceState(null, '', newUrl);
-                // Show the appropriate menu overlay
-                if (onlineGameActive) {
-                    console.debug('[Online] Game ended: winner =', activeColors().find((color, idx) => playerCells[idx] > 0));
-                    const onlineMenu = document.getElementById('onlineMenu');
-                    if (onlineMenu) onlineMenu.classList.remove('hidden');
-                } else {
-                    if (mainMenu) mainMenu.classList.remove('hidden');
-                    updateRandomTip();
-                }
+                // Open the appropriate menu and reflect it in the URL
+                const targetMenu = onlineGameActive ? 'online' : (trainMode ? 'train' : 'local');
+                setMenuParam(targetMenu, false);
+                showMenuFor(targetMenu);
                 // When showing the menu, exit fullscreen to restore browser UI if needed
                 exitFullscreenIfPossible();
             }, delayGameEnd); //DELAY Game End

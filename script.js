@@ -828,7 +828,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Get grid size from URL or recommended schedule
     let gridSize = parseInt(getQueryParam('size'));
-    if (!Number.isInteger(gridSize)) gridSize = recommendedGridSize(playerCount);
+    if (!Number.isInteger(gridSize)) gridSize = defaultGridSizeForPlayers(playerCount);
 
     // Game Parameters
     const maxCellValue = 5;
@@ -2263,23 +2263,20 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} may recreate the grid to reflect new settings.
      */
     function onMenuPlayerCountChanged(newCount) {
-        // Only update if the value actually changes
-        if (newCount !== menuPlayerCount) {
+        // Only update if the resulting grid size would change
+        const minForPlayers = recommendedGridSize(newCount);
+        const desired = defaultGridSizeForPlayers(newCount);
+        const newGridSize = Math.max(minForPlayers, desired);
+        if (newGridSize !== menuGridSizeVal) {
             menuPlayerCount = newCount;
-            const minForPlayers = recommendedGridSize(newCount);
-            // Auto-select default grid size based on legacy rule: p + 3 (min 3)
-            const desired = defaultGridSizeForPlayers(newCount);
-            // Never allow below schedule minimum in UI state
-            menuGridSizeVal = Math.max(minForPlayers, desired);
+            menuGridSizeVal = newGridSize;
             reflectGridSizeDisplay();
             bumpValueAnimation();
 
             // Recreate grid immediately to the auto-selected default for this player count
-            if (newCount !== playerCount || gridSize !== menuGridSizeVal) {
-                recreateGrid(menuGridSizeVal, newCount);
-            }
+            recreateGrid(menuGridSizeVal, newCount);
 
-            // Update UI highlights afterward (this won't trigger another recreate since playerCount is now updated)
+            // Update UI highlights afterward
             highlightPlayerBoxes(newCount);
         }
     }

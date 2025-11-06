@@ -2250,23 +2250,25 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} may recreate the grid to reflect new settings.
      */
     function onMenuPlayerCountChanged(newCount) {
-        // Update selection first so bound calculations reflect the new count
-        menuPlayerCount = newCount;
-        const minForPlayers = recommendedGridSize(newCount);
-        // Auto-select default grid size based on legacy rule: p + 3 (min 3)
-        const desired = defaultGridSizeForPlayers(newCount);
-        // Never allow below schedule minimum in UI state
-        menuGridSizeVal = Math.max(minForPlayers, desired);
-        reflectGridSizeDisplay();
-        bumpValueAnimation();
+        // Only update if the value actually changes
+        if (newCount !== menuPlayerCount) {
+            menuPlayerCount = newCount;
+            const minForPlayers = recommendedGridSize(newCount);
+            // Auto-select default grid size based on legacy rule: p + 3 (min 3)
+            const desired = defaultGridSizeForPlayers(newCount);
+            // Never allow below schedule minimum in UI state
+            menuGridSizeVal = Math.max(minForPlayers, desired);
+            reflectGridSizeDisplay();
+            bumpValueAnimation();
 
-        // Recreate grid immediately to the auto-selected default for this player count
-        if (newCount !== playerCount || gridSize !== menuGridSizeVal) {
-            recreateGrid(menuGridSizeVal, newCount);
+            // Recreate grid immediately to the auto-selected default for this player count
+            if (newCount !== playerCount || gridSize !== menuGridSizeVal) {
+                recreateGrid(menuGridSizeVal, newCount);
+            }
+
+            // Update UI highlights afterward (this won't trigger another recreate since playerCount is now updated)
+            highlightPlayerBoxes(newCount);
         }
-
-        // Update UI highlights afterward (this won't trigger another recreate since playerCount is now updated)
-        highlightPlayerBoxes(newCount);
     }
     //#endregion
 
@@ -2295,6 +2297,41 @@ document.addEventListener('DOMContentLoaded', () => {
             explosionTimerId = null;
         }
         isProcessing = false;
+    }
+
+    /**
+     * Centralized game-end scheduling used by win condition and invalid-initial cases.
+     * @returns {void}
+     */
+    function scheduleGameEnd() {
+        if (gameWon) return;
+        gameWon = true;
+        if (menuShownAfterWin) return; // schedule only once
+        menuShownAfterWin = true;
+        setTimeout(() => {
+            if (!gameWon) return;
+            stopExplosionLoop();
+            clearCellFocus();
+            const targetMenu = onlineGameActive ? 'online' : (trainMode ? 'train' : 'local');
+            setMenuParam(targetMenu, false);
+            showMenuFor(targetMenu);
+            exitFullscreenIfPossible();
+        }, delayGameEnd);
+    }
+
+    /**
+     * Quick scan to determine if the given player has any valid initial placement.
+     * @param {number} playerIndex
+     * @returns {boolean}
+     */
+    function playerHasValidInitialPlacement(playerIndex) {
+        if (initialPlacements[playerIndex]) return true; // already placed
+        for (let r = 0; r < gridSize; r++) {
+            for (let c = 0; c < gridSize; c++) {
+                if (grid[r][c].value === 0 && !isInitialPlacementInvalid(r, c)) return true;
+            }
+        }
+        return false;
     }
 
     // Train mode globals
@@ -2891,9 +2928,20 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function switchPlayer() {
         // const prevIndex = currentPlayer; // unused after instant send
-        do {
+
+
+        let tried = 0;
+        while (tried < playerCount) {
             currentPlayer = (currentPlayer + 1) % playerCount;
-        } while (!hasCells(currentPlayer) && initialPlacements.every(placement => placement));
+            // During initial-placement phase: if this player cannot place at all, end game
+            if (!initialPlacements[currentPlayer] && !playerHasValidInitialPlacement(currentPlayer)) {
+                scheduleGameEnd();
+                return;
+            }
+            // Accept this player if they either have cells (normal phase) or are still placing
+            if (!initialPlacements[currentPlayer] || hasCells(currentPlayer) || !initialPlacements.every(p => p)) break;
+            tried++;
+        }
 
         document.body.className = activeColors()[currentPlayer];
         clearCellFocus();
@@ -3067,24 +3115,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const activePlayers = playerCells.filter(count => count > 0).length;
-        if (activePlayers === 1) {
-            gameWon = true;
-            if (menuShownAfterWin) return; // schedule only once
-            menuShownAfterWin = true;
-            setTimeout(() => {
-                if (!gameWon) return;
-                // First, stop the chain; then immediately open the menu (no extra delay)
-                stopExplosionLoop();
-                // Clear focus from any grid cell before showing the menu
-                clearCellFocus();
-                // Open the appropriate menu and reflect it in the URL
-                const targetMenu = onlineGameActive ? 'online' : (trainMode ? 'train' : 'local');
-                setMenuParam(targetMenu, false);
-                showMenuFor(targetMenu);
-                // When showing the menu, exit fullscreen to restore browser UI if needed
-                exitFullscreenIfPossible();
-            }, delayGameEnd); //DELAY Game End
-        }
+        if (activePlayers === 1) scheduleGameEnd();
     }
     //#endregion
 
@@ -3571,9 +3602,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const candidates = generateCandidatesOnSim(grid, initialPlacements, playerIndex);
         if (candidates.length === 0) {
-            if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
-            switchPlayer();
-            return;
+            if (!initialPlacements[playerIndex]) { scheduleGameEnd(); return; }
+            initialPlacements[playerIndex] = true; switchPlayer(); return;
         }
 
         // Evaluate immediate result grids first (as before) to get candidate.resultGrid

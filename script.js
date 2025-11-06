@@ -35,11 +35,27 @@ document.addEventListener('DOMContentLoaded', () => {
             modal.style.alignItems = 'center';
             modal.style.justifyContent = 'center';
             modal.style.zIndex = '9999';
-            modal.innerHTML = '<div style="background:#fff;padding:24px 32px;border-radius:10px;max-width:90vw;box-shadow:0 4px 24px rgba(0,0,0,0.18);font-size:1.1em;text-align:center;">' + html + '<br><br><button id="modalErrorClose" style="margin-top:12px;padding:8px 18px;font-size:1em;">Close</button></div>';
+            modal.innerHTML = '<div style="background:#fff;padding:24px 32px;border-radius:10px;max-width:90vw;box-shadow:0 4px 24px rgba(0,0,0,0.18);font-size:1.1em;text-align:center;">' + html + '</div>';
             document.body.appendChild(modal);
-            modal.querySelector('#modalErrorClose').onclick = () => {
-                modal.remove();
+
+            // Close modal on any pointerdown or Space/Enter keydown
+            const closeModal = () => {
+                if (modal) modal.remove();
+                window.removeEventListener('pointerdown', closeModal, true);
+                window.removeEventListener('keydown', keyHandler, true);
             };
+            const keyHandler = (ev) => {
+                // Always close on Space, Enter, or Escape, regardless of focus
+                if (ev.key === ' ' || ev.key === 'Enter' || ev.key === 'Escape' || ev.key === 'Esc') {
+                    ev.preventDefault();
+                    ev.stopImmediatePropagation();
+                    closeModal();
+                }
+            };
+            setTimeout(() => {
+                window.addEventListener('pointerdown', closeModal, true);
+                window.addEventListener('keydown', keyHandler, true);
+            }, 0);
         }
     }
 
@@ -80,7 +96,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Only show the connection banner while user is in Online/Host menus
+    function isOnlineMenusOpen() {
+        try {
+            const onlineMenu = document.getElementById('onlineMenu');
+            const mainMenu = document.getElementById('mainMenu');
+            const onlineMenuOpen = onlineMenu && !onlineMenu.classList.contains('hidden');
+            const hostMenuOpen = mainMenu && !mainMenu.classList.contains('hidden') && (
+                mainMenu.dataset.mode === 'host' ||
+                mainMenu.dataset.openedBy === 'host' ||
+                ((mainMenu.querySelector('.game-header-panel')?.textContent || '').toLowerCase().includes('online'))
+            );
+            return !!(onlineMenuOpen || hostMenuOpen);
+        } catch { return false; }
+    }
+
     function showConnBanner(message, kind = 'info') {
+        // Respect UI context: suppress banner unless Online/Host menus are visible
+        if (!isOnlineMenusOpen()) return;
         let bar = document.getElementById('connStatus');
         if (!bar) {
             bar = document.createElement('div');
@@ -103,7 +136,10 @@ document.addEventListener('DOMContentLoaded', () => {
         bar.style.display = message ? 'block' : 'none';
     }
 
-    function hideConnBanner() { showConnBanner('', 'ok'); }
+    function hideConnBanner() {
+        const bar = document.getElementById('connStatus');
+        if (bar) bar.style.display = 'none';
+    }
 
     function scheduleReconnect() {
         if (wsReconnectTimer) return;
@@ -829,10 +865,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const trainMainBtn = document.getElementById('trainMainBtn');
 
     // --- Helpers ---
-    const setHidden = (el, hidden) => {
+        const setHidden = (el, hidden) => {
         if (!el) return;
         el.classList.toggle('hidden', !!hidden);
         el.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+            // If we're hiding Online/Host menus, make sure to hide any connection banner
+            if (hidden) {
+                const id = el.id || '';
+                const isOnline = id === 'onlineMenu';
+                const isHostMenu = id === 'mainMenu' && (el.dataset.mode === 'host' || el.dataset.openedBy === 'host');
+                if (isOnline || isHostMenu) hideConnBanner();
+            }
     };
 
     const replaceUrlWithParams = (params) => {
@@ -863,6 +906,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const startBtn = document.getElementById('startBtn');
         const playerNameInput = document.getElementById('playerName');
         if (!mainMenu) return;
+        // Persist mode for later checks (e.g., connection banner gating)
+        try { mainMenu.dataset.mode = String(mode); } catch { /* ignore */ }
         if (header) {
             if (mode === 'train') header.textContent = 'Train Mode';
             else if (mode === 'host') header.textContent = 'Online Game';
@@ -927,7 +972,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     onlineGameBtn.addEventListener('click', (e) => {
                         if (!ws || ws.readyState !== WebSocket.OPEN) {
                             e.preventDefault();
-                            showModalError('Cannot connect to server. There is currently no multiplayer server.<br>If you want one, support the project by <a href="https://github.com/Joboblock/color-clash" target="_blank" rel="noopener">giving it a star on GitHub</a>.');
+                            showModalError('Unable to connect to the multiplayer server.<br>Please check your internet connection or try again in a moment.');
                             return;
                         }
                         setHidden(firstMenu, true);

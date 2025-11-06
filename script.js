@@ -66,6 +66,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let wsReconnectTimer = null;
     let wsEverOpened = false; // used to know if we should try to rejoin
     let hostedRoom = null;
+    // Desired grid size chosen in Host menu; null means use server default (playerCount+3)
+    let hostedDesiredGridSize = null;
     const roomListElement = document.getElementById('roomList');
     // Online bottom action button in online menu
     const hostCustomGameBtnRef = document.getElementById('hostCustomGameBtn');
@@ -212,20 +214,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateRoomList(msg.rooms);
                 updateStartButtonState(msg.rooms);
             } else if (msg.type === 'started') {
-                // Online game start: close menus and start a game with N players and grid size = N + 3
+                // Online game start: use provided gridSize if available, else fallback to schedule min by player count
                 try {
                     // Reset dedup sequence on new game
                     lastAppliedSeq = 0;
                     console.debug('[Online] Game started:', {
                         players: Array.isArray(msg.players) ? msg.players : [],
-                        gridSize: Math.max(3, (Array.isArray(msg.players) ? msg.players.length : 2) + 3),
+                        gridSize: Number.isInteger(msg.gridSize) ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10))) : recommendedGridSize((Array.isArray(msg.players) ? msg.players.length : 2)),
                         colors: Array.isArray(msg.colors) ? msg.colors : undefined
                     });
                     onlineGameActive = true;
                     onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
                     myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
                     const p = Math.max(2, Math.min(playerColors.length, onlinePlayers.length || 2));
-                    const s = Math.max(3, p + 3);
+                    const s = Number.isInteger(msg.gridSize) ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10))) : recommendedGridSize(p);
                     // Use server-assigned colors if provided; fallback to default slice
                     if (msg.colors && Array.isArray(msg.colors) && msg.colors.length >= p) {
                         gameColors = msg.colors.slice(0, p);
@@ -544,7 +546,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput.value || 'Player'));
                 myPlayerName = debugPlayerName;
                 const selectedPlayers = Math.max(2, Math.min(playerColors.length, Math.floor(menuPlayerCount || 2)));
-                ws.send(JSON.stringify({ type: 'host', roomName: name, maxPlayers: selectedPlayers, debugName: debugPlayerName }));
+                const desiredGrid = Number.isInteger(menuGridSizeVal) ? Math.max(3, Math.min(16, menuGridSizeVal)) : Math.max(3, selectedPlayers + 3);
+                hostedDesiredGridSize = desiredGrid;
+                ws.send(JSON.stringify({ type: 'host', roomName: name, maxPlayers: selectedPlayers, gridSize: desiredGrid, debugName: debugPlayerName }));
             } catch (err) {
                 console.error('[Host] Error hosting room:', err);
                 if (err && err.stack) console.error(err.stack);
@@ -599,7 +603,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (btn.classList && btn.classList.contains('start-mode') && !btn.disabled) {
                 // Host starts the online game
                 if (ws && ws.readyState === WebSocket.OPEN) {
-                    try { ws.send(JSON.stringify({ type: 'start' })); } catch { /* ignore */ }
+                    const startPayload = { type: 'start' };
+                    if (Number.isInteger(hostedDesiredGridSize)) startPayload.gridSize = hostedDesiredGridSize;
+                    try { ws.send(JSON.stringify(startPayload)); } catch { /* ignore */ }
                 }
                 return;
             }
@@ -792,8 +798,24 @@ document.addEventListener('DOMContentLoaded', () => {
     let playerCount = parseInt(getQueryParam('players')) || 2;
     playerCount = Math.min(playerCount, playerColors.length);  // Cap at available colors
 
-    // Get grid size from URL
-    let gridSize = parseInt(getQueryParam('size')) || (3 + playerCount);
+    // New recommended grid size schedule (custom minimal bounds)
+    // Assumption for unspecified counts (6,7): use 6 (same as 8).
+    function recommendedGridSize(p) {
+        if (p <= 2) return 3;
+        if (p <= 4) return 4; // covers 3-4
+        if (p === 5) return 5;
+        return 6; // 6-8 players
+    }
+
+    // Default grid size when auto-selecting via player slider changes
+    // Keep legacy behavior: desired = Math.max(3, p + 3)
+    function defaultGridSizeForPlayers(p) {
+        return Math.max(3, (parseInt(p, 10) || 0) + 3);
+    }
+
+    // Get grid size from URL or recommended schedule
+    let gridSize = parseInt(getQueryParam('size'));
+    if (!Number.isInteger(gridSize)) gridSize = recommendedGridSize(playerCount);
 
     // Game Parameters
     const maxCellValue = 5;
@@ -1359,8 +1381,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (gridValueEl) {
             gridValueEl.textContent = String(menuGridSizeVal);
         }
+        // Dynamic lower bound depends on player count
+        const minForPlayers = recommendedGridSize(menuPlayerCount);
         // Keep buttons focusable but mark non-interactive via aria-disabled
-        setAriaDisabledButton(gridDecBtn, menuGridSizeVal <= 3);
+        setAriaDisabledButton(gridDecBtn, menuGridSizeVal <= minForPlayers);
         setAriaDisabledButton(gridIncBtn, menuGridSizeVal >= 16);
     }
 
@@ -1373,8 +1397,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function adjustGridSize(delta) {
-        let v = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : (3 + menuPlayerCount);
-        v = Math.max(3, Math.min(16, v + delta));
+        const minForPlayers = recommendedGridSize(menuPlayerCount);
+        let v = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : recommendedGridSize(menuPlayerCount);
+        v = Math.max(minForPlayers, Math.min(16, v + delta));
         menuGridSizeVal = v;
         reflectGridSizeDisplay();
         bumpValueAnimation();
@@ -2155,8 +2180,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Sizing/alignment handled purely via CSS
 
         if (count !== playerCount) {
-            const desiredSize = Math.max(3, count + 3);
-            recreateGrid(desiredSize, count);
+            // Only auto-grow up to recommended minimum, don't shrink below if user chose larger
+            const minForPlayers = recommendedGridSize(count);
+            const targetSize = Math.max(minForPlayers, gridSize);
+            recreateGrid(targetSize, count);
         }
     }
 
@@ -2166,8 +2193,11 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} sets menuGridSize.value.
      */
     function updateSizeBoundsForPlayers(pCount) {
-        const desired = Math.max(3, pCount + 3);
-        menuGridSizeVal = desired;
+        const minForPlayers = recommendedGridSize(pCount);
+        // If current selection below new minimum, bump it; otherwise keep user custom size
+        if (!Number.isInteger(menuGridSizeVal) || menuGridSizeVal < minForPlayers) {
+            menuGridSizeVal = minForPlayers;
+        }
         reflectGridSizeDisplay();
     }
 
@@ -2220,25 +2250,23 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} may recreate the grid to reflect new settings.
      */
     function onMenuPlayerCountChanged(newCount) {
+        // Update selection first so bound calculations reflect the new count
         menuPlayerCount = newCount;
-        const desiredSize = Math.max(3, newCount + 3);
-        // reflect desired size in display state and animate bump when it changes via player slider
-        const prevSize = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : null;
-        menuGridSizeVal = desiredSize;
-        if (gridValueEl) gridValueEl.textContent = String(desiredSize);
-        if (prevSize === null || desiredSize !== prevSize) {
-            bumpValueAnimation();
+        const minForPlayers = recommendedGridSize(newCount);
+        // Auto-select default grid size based on legacy rule: p + 3 (min 3)
+        const desired = defaultGridSizeForPlayers(newCount);
+        // Never allow below schedule minimum in UI state
+        menuGridSizeVal = Math.max(minForPlayers, desired);
+        reflectGridSizeDisplay();
+        bumpValueAnimation();
+
+        // Recreate grid immediately to the auto-selected default for this player count
+        if (newCount !== playerCount || gridSize !== menuGridSizeVal) {
+            recreateGrid(menuGridSizeVal, newCount);
         }
-        updateSizeBoundsForPlayers(newCount);
-        // Direct slider interaction: immediately reflect active boxes without FLIP animation
-        // (keeps original behavior of activating the nearest box and all to its left)
+
+        // Update UI highlights afterward (this won't trigger another recreate since playerCount is now updated)
         highlightPlayerBoxes(newCount);
-
-        // Sizing/alignment handled purely via CSS
-
-        if (newCount !== playerCount || desiredSize !== gridSize) {
-            recreateGrid(desiredSize, newCount);
-        }
     }
     //#endregion
 

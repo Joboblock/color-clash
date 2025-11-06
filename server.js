@@ -155,16 +155,33 @@ wss.on('connection', (ws) => {
             // Default to 2 unless provided by host (optional)
             const provided = Number.isFinite(msg.maxPlayers) ? Math.floor(Number(msg.maxPlayers)) : 2;
             const clamped = clampPlayers(provided);
+            // Recommended grid size schedule for server authoritative fallback
+            function recommendedGridSize(p) {
+                if (p <= 2) return 3;
+                if (p <= 4) return 4; // 3-4 players
+                if (p === 5) return 5;
+                return 6; // 6-8 players
+            }
             // Use debugName if present, otherwise default to 'Player'. Enforce 12-char base; reserve 13th for numeric suffix.
             const baseRaw = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
             const playerName = pickUniqueName(null, baseRaw);
+            // Capture host requested grid size if provided (clamp 3..16); store for later start
+            const requestedGridRaw = Number.isFinite(msg.gridSize) ? Math.floor(msg.gridSize) : NaN;
+            let requestedGrid = Number.isFinite(requestedGridRaw) ? requestedGridRaw : null;
+            if (requestedGrid !== null) {
+                // Enforce schedule minimum
+                const minForPlayers = recommendedGridSize(clamped);
+                if (requestedGrid < minForPlayers) requestedGrid = minForPlayers;
+                if (requestedGrid > 16) requestedGrid = 16;
+            }
             rooms[uniqueRoomName] = {
                 maxPlayers: clamped,
                 participants: [{ ws, name: playerName, isHost: true, connected: true }],
-                _disconnectTimers: new Map()
+                _disconnectTimers: new Map(),
+                desiredGridSize: requestedGrid // null means use dynamic playerCount+3
             };
             connectionMeta.set(ws, { roomName: uniqueRoomName, name: playerName });
-            ws.send(JSON.stringify({ type: 'hosted', room: uniqueRoomName, maxPlayers: clamped, player: playerName }));
+            ws.send(JSON.stringify({ type: 'hosted', room: uniqueRoomName, maxPlayers: clamped, player: playerName, gridSize: requestedGrid }));
             broadcastRoomList();
     } else if (msg.type === 'join' && msg.roomName) {
             const room = rooms[msg.roomName];
@@ -329,7 +346,15 @@ wss.on('connection', (ws) => {
                     return playerColors.includes(c) ? c : 'green';
                 });
                 const assigned = assignColorsDeterministic(players, prefs, playerColors);
-                const gridSize = Math.max(3, playerCount + 3);
+                function recommendedGridSize(p) {
+                    if (p <= 2) return 3;
+                    if (p <= 4) return 4;
+                    if (p === 5) return 5;
+                    return 6;
+                }
+                const gridSize = Number.isFinite(r.desiredGridSize)
+                    ? Math.max(recommendedGridSize(playerCount), Math.min(16, r.desiredGridSize))
+                    : recommendedGridSize(playerCount);
                 // Initialize per-room game state for turn enforcement and color validation
                 r.game = {
                     started: true,
@@ -447,7 +472,15 @@ wss.on('connection', (ws) => {
                 const players = room.participants.map(p => p.name);
                 const prefs = players.map(nm => room._colorCollect.responses.get(nm) || 'green');
                 const assigned = assignColorsDeterministic(players, prefs, playerColors);
-                const gridSize = Math.max(3, players.length + 3);
+                function recommendedGridSize(p) {
+                    if (p <= 2) return 3;
+                    if (p <= 4) return 4;
+                    if (p === 5) return 5;
+                    return 6;
+                }
+                const gridSize = Number.isFinite(room.desiredGridSize)
+                    ? Math.max(recommendedGridSize(players.length), Math.min(16, room.desiredGridSize))
+                    : recommendedGridSize(players.length);
                 room.game = {
                     started: true,
                     players: players.slice(),

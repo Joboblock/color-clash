@@ -502,31 +502,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function hostRoom() {
-        const name = onlinePlayerNameInput.value.trim() || 'Room_' + Math.floor(Math.random() * 1000);
+        const name = onlinePlayerNameInput.value.trim() || 'Player';
         function sendHost() {
             try {
-                // For debug: send player name, but do not use for logic
                 let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput.value || 'Player'));
-                // Check for duplicate names in the room list
-                let rooms = window.lastRoomList || {};
-                let takenNames = [];
-                if (rooms[name] && Array.isArray(rooms[name].players)) {
-                    takenNames = rooms[name].players.map(p => p.name);
-                }
-                let baseName = debugPlayerName.slice(0, PLAYER_NAME_LENGTH);
-                let suffix = 2; // reserve 13th char for a single-digit suffix starting at 2
-                let candidate = baseName;
-                while (takenNames.includes(candidate) && suffix <= 9) {
-                    candidate = baseName.slice(0, PLAYER_NAME_LENGTH) + String(suffix);
-                    suffix++;
-                }
-                if (takenNames.includes(candidate)) {
-                    showModalError('All name variants are taken in this room. Please choose a different name.');
-                    return;
-                }
-                debugPlayerName = candidate;
                 myPlayerName = debugPlayerName;
-                // Send selected player count for maxPlayers
                 const selectedPlayers = Math.max(2, Math.min(playerColors.length, Math.floor(menuPlayerCount || 2)));
                 ws.send(JSON.stringify({ type: 'host', roomName: name, maxPlayers: selectedPlayers, debugName: debugPlayerName }));
             } catch (err) {

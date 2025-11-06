@@ -123,7 +123,7 @@ wss.on('connection', (ws) => {
             return;
         }
 
-        if (msg.type === 'host' && msg.roomName) {
+        if (msg.type === 'host') {
             // If this connection is already in a room, remove it from that room first
             const metaExisting = connectionMeta.get(ws);
             if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
@@ -143,8 +143,13 @@ wss.on('connection', (ws) => {
                 }
                 connectionMeta.delete(ws);
             }
-            if (rooms[msg.roomName]) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Room already exists' }));
+            // Compute a unique room name using the same pattern as player names
+            const roomBaseRaw = (typeof msg.roomName === 'string' && msg.roomName)
+                ? String(msg.roomName)
+                : 'Player';
+            const uniqueRoomName = pickUniqueRoomName(roomBaseRaw);
+            if (!uniqueRoomName) {
+                try { ws.send(JSON.stringify({ type: 'error', error: 'Room name already taken (all variants 2–9 used). Please choose a different name.' })); } catch { /* ignore */ }
                 return;
             }
             // Default to 2 unless provided by host (optional)
@@ -153,13 +158,13 @@ wss.on('connection', (ws) => {
             // Use debugName if present, otherwise default to 'Player'. Enforce 12-char base; reserve 13th for numeric suffix.
             const baseRaw = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
             const playerName = pickUniqueName(null, baseRaw);
-            rooms[msg.roomName] = {
+            rooms[uniqueRoomName] = {
                 maxPlayers: clamped,
                 participants: [{ ws, name: playerName, isHost: true, connected: true }],
                 _disconnectTimers: new Map()
             };
-            connectionMeta.set(ws, { roomName: msg.roomName, name: playerName });
-            ws.send(JSON.stringify({ type: 'hosted', room: msg.roomName, maxPlayers: clamped, player: playerName }));
+            connectionMeta.set(ws, { roomName: uniqueRoomName, name: playerName });
+            ws.send(JSON.stringify({ type: 'hosted', room: uniqueRoomName, maxPlayers: clamped, player: playerName }));
             broadcastRoomList();
     } else if (msg.type === 'join' && msg.roomName) {
             const room = rooms[msg.roomName];
@@ -194,6 +199,10 @@ wss.on('connection', (ws) => {
             // Use debugName if present, otherwise default to 'Player'. Enforce 12-char base; reserve 13th for numeric suffix and ensure uniqueness in room.
             const baseRaw = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
             const playerName = pickUniqueName(room, baseRaw);
+            if (!playerName) {
+                try { ws.send(JSON.stringify({ type: 'error', error: 'All name variants are taken in this room. Please choose a different name.' })); } catch { /* ignore */ }
+                return;
+            }
             room.participants.push({ ws, name: playerName, isHost: false, connected: true });
             connectionMeta.set(ws, { roomName: msg.roomName, name: playerName });
 
@@ -584,18 +593,30 @@ function sanitizeBaseName(raw) {
 }
 
 // Pick a unique name within a room by appending a single-digit suffix 2..9 in the 13th position if needed.
-function pickUniqueName(room, raw) {
+// Generic unique name picker with suffixing 2..9 in 13th position; returns null if exhausted
+function pickUniqueFromTaken(raw, takenArray) {
     const base = sanitizeBaseName(raw);
-    const taken = room && Array.isArray(room.participants)
-        ? room.participants.map(p => p.name)
-        : [];
+    const taken = Array.isArray(takenArray) ? takenArray : [];
     if (!taken.includes(base)) return base;
     for (let i = 2; i <= 9; i++) {
         const candidate = base.slice(0, PLAYER_NAME_LENGTH) + String(i);
         if (!taken.includes(candidate)) return candidate;
     }
-    // Fallback (should not happen with max 8 players): keep base
-    return base;
+    return null; // signal exhaustion instead of falling back to base
+}
+
+// Pick a unique player name within a room, or null if variants exhausted
+function pickUniqueName(room, raw) {
+    const taken = room && Array.isArray(room.participants)
+        ? room.participants.map(p => p.name)
+        : [];
+    return pickUniqueFromTaken(raw, taken);
+}
+
+// Pick a unique room name across all rooms using the same pattern; or null if exhausted
+function pickUniqueRoomName(raw) {
+    const taken = Object.keys(rooms);
+    return pickUniqueFromTaken(raw, taken);
 }
 
 function broadcastRoomList() {

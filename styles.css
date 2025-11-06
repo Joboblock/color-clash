@@ -267,7 +267,9 @@ body {
     cursor: pointer;
     position: relative;
     box-sizing: border-box;
-    /* Prevent mobile tap highlight and unintended text selection */
+}
+/* Prevent mobile tap highlight and text selection for all non-text interactive elements */
+button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlineMenuColorCycle, #aiPreviewCell, .inner-circle {
     -webkit-tap-highlight-color: transparent;
     -webkit-touch-callout: none;
     user-select: none;

@@ -910,8 +910,8 @@ document.addEventListener('DOMContentLoaded', () => {
         try { mainMenu.dataset.mode = String(mode); } catch { /* ignore */ }
         if (header) {
             if (mode === 'train') header.textContent = 'Train Mode';
-            else if (mode === 'host') header.textContent = 'Online Game';
-            else header.textContent = 'Color Clash';
+            else if (mode === 'host') header.textContent = 'Host Game';
+            else header.textContent = 'Local Game';
         }
         if (startBtn) {
             startBtn.style.display = '';

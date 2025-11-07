@@ -932,6 +932,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // (replaced by setMenuParam)
 
     // New: typed menu param helpers (first|local|online|host|train)
+    // Lightweight in-app stack of menu states to avoid timeout fallbacks
+    let menuHistoryStack = [];
     function getMenuParam() {
         try {
             const val = (new URLSearchParams(window.location.search)).get('menu');
@@ -952,7 +954,25 @@ document.addEventListener('DOMContentLoaded', () => {
             params.delete('size');
         }
         const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-        if (push) window.history.pushState({ menu: menuKey }, '', url); else window.history.replaceState({ menu: menuKey }, '', url);
+        if (push) {
+            window.history.pushState({ menu: menuKey }, '', url);
+            // keep our in-memory stack in sync
+            menuHistoryStack.push(menuKey);
+        } else {
+            window.history.replaceState({ menu: menuKey }, '', url);
+            if (menuHistoryStack.length) menuHistoryStack[menuHistoryStack.length - 1] = menuKey; else menuHistoryStack.push(menuKey);
+        }
+    }
+
+    // Ensure the current entry has a state and initialize our in-memory stack
+    function ensureHistoryStateInitialized() {
+        try {
+            const current = getMenuParam() || 'first';
+            if (!window.history.state || typeof window.history.state.menu === 'undefined') {
+                window.history.replaceState({ menu: current }, '', window.location.href);
+            }
+            if (!menuHistoryStack.length) menuHistoryStack.push(current);
+        } catch { /* ignore */ }
     }
 
     function showMenuFor(menuKey) {
@@ -1059,6 +1079,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try { updateAIPreview(); } catch { /* ignore */ }
     }
 
+    // Initialize history.state and our stack to the current menu once
+    ensureHistoryStateInitialized();
+
     // Attach menu button listeners once (even if we started in-game)
     if (!document.body.dataset.menuInited) {
         document.body.dataset.menuInited = '1';
@@ -1085,32 +1108,20 @@ document.addEventListener('DOMContentLoaded', () => {
         // Determine current menu context
         const params = new URLSearchParams(window.location.search);
         const currentMenu = params.get('menu');
-        let handled = false;
         const expectedMenu = (
             currentMenu === 'host' ? 'online' :
             (currentMenu === 'local' || currentMenu === 'train' || currentMenu === 'online') ? 'first' :
             null
         );
-        function onPopState() {
-            window.removeEventListener('popstate', onPopState);
-            const prevParams = new URLSearchParams(window.location.search);
-            const prevMenu = prevParams.get('menu');
-            if (expectedMenu && prevMenu !== expectedMenu) {
-                // Not the expected menu, manually correct with replaceState
-                setMenuParam(expectedMenu, false); // false = replaceState
-                showMenuFor(expectedMenu);
-                handled = true;
-            }
+        if (!expectedMenu) return;
+        // If our previous stack entry matches, use real back(); else do a replace
+        const prev = menuHistoryStack.length >= 2 ? menuHistoryStack[menuHistoryStack.length - 2] : null;
+        if (prev === expectedMenu) {
+            window.history.back();
+            return;
         }
-        window.addEventListener('popstate', onPopState);
-        window.history.back();
-        // Fallback: if not handled after short delay, manually correct
-        setTimeout(() => {
-            if (!handled && expectedMenu) {
-                setMenuParam(expectedMenu, false); // false = replaceState
-                showMenuFor(expectedMenu);
-            }
-        }, 100);
+        setMenuParam(expectedMenu, false); // replaceState (no popstate)
+        showMenuFor(expectedMenu);
     }
     const menuTopRightBtn = document.getElementById('menuTopRightBtn');
     if (menuTopRightBtn) {
@@ -1409,6 +1420,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Handle browser navigation to toggle between menu and game instead of leaving the app
     window.addEventListener('popstate', applyStateFromUrl);
+    // Keep our in-memory stack aligned with the browser history on back/forward
+    window.addEventListener('popstate', (ev) => {
+        try {
+            const stateMenu = (ev && ev.state && ev.state.menu) ? ev.state.menu : getMenuParam() || 'first';
+            if (menuHistoryStack.length) menuHistoryStack.pop();
+            menuHistoryStack.push(stateMenu);
+        } catch { /* ignore */ }
+    });
 
     // Make the visual box slider draggable like a real slider
     let isDragging = false;

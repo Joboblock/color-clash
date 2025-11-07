@@ -1050,8 +1050,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Combined top-right close button logic for local and online menus
     function handleMenuClose() {
-        // Trigger browser back navigation, to fix actual back button moving user a menu "Forwards"
+        // Determine current menu context
+        const params = new URLSearchParams(window.location.search);
+        const currentMenu = params.get('menu');
+        let handled = false;
+        const expectedMenu = (
+            currentMenu === 'host' ? 'online' :
+            (currentMenu === 'local' || currentMenu === 'train' || currentMenu === 'online') ? 'first' :
+            null
+        );
+        function onPopState() {
+            window.removeEventListener('popstate', onPopState);
+            const prevParams = new URLSearchParams(window.location.search);
+            const prevMenu = prevParams.get('menu');
+            if (expectedMenu && prevMenu !== expectedMenu) {
+                // Not the expected menu, manually correct with replaceState
+                setMenuParam(expectedMenu, false); // false = replaceState
+                showMenuFor(expectedMenu);
+                handled = true;
+            }
+        }
+        window.addEventListener('popstate', onPopState);
         window.history.back();
+        // Fallback: if not handled after short delay, manually correct
+        setTimeout(() => {
+            if (!handled && expectedMenu) {
+                setMenuParam(expectedMenu, false); // false = replaceState
+                showMenuFor(expectedMenu);
+            }
+        }, 100);
     }
     const menuTopRightBtn = document.getElementById('menuTopRightBtn');
     if (menuTopRightBtn) {

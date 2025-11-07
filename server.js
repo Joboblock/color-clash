@@ -181,7 +181,24 @@ wss.on('connection', (ws) => {
                 desiredGridSize: requestedGrid // null means use dynamic playerCount+3
             };
             connectionMeta.set(ws, { roomName: uniqueRoomName, name: playerName });
-            ws.send(JSON.stringify({ type: 'hosted', room: uniqueRoomName, maxPlayers: clamped, player: playerName, gridSize: requestedGrid }));
+            // Compute a planned grid size for the lobby background for the host as well.
+            // Use host's desiredGridSize if provided; otherwise default to (playerTarget + 3)
+            // while respecting the per-player minimum schedule and the max cap of 16.
+            {
+                function recommendedGridSize(p) {
+                    if (p <= 2) return 3;
+                    if (p <= 4) return 4; // 3-4 players
+                    if (p === 5) return 5;
+                    return 6; // 6-8 players
+                }
+                const scheduleMin = recommendedGridSize(clamped);
+                const playerTarget = clamped; // room will enforce full before start
+                const defaultGrid = Math.max(scheduleMin, Math.min(16, Math.max(3, playerTarget + 3)));
+                const plannedGridSize = requestedGrid !== null
+                    ? Math.max(scheduleMin, Math.min(16, Math.max(3, requestedGrid)))
+                    : defaultGrid;
+                ws.send(JSON.stringify({ type: 'hosted', room: uniqueRoomName, maxPlayers: clamped, player: playerName, gridSize: plannedGridSize }));
+            }
             broadcastRoomList();
     } else if (msg.type === 'join' && msg.roomName) {
             const room = rooms[msg.roomName];
@@ -225,17 +242,19 @@ wss.on('connection', (ws) => {
 
             // Provide the client with the room's planned grid size so the background grid can match immediately on join.
             // Planned grid size is based on host's desiredGridSize (if any), but not below the schedule minimum for maxPlayers.
-            function recommendedGridSize(p) {
+            function minGridSize(p) {
                 if (p <= 2) return 3;
                 if (p <= 4) return 4; // 3-4 players
                 if (p === 5) return 5;
                 return 6; // 6-8 players
             }
-            const scheduleMin = recommendedGridSize(room.maxPlayers || 2);
+            const scheduleMin = minGridSize(room.maxPlayers || 2);
             const desired = Number.isFinite(room.desiredGridSize) ? Math.floor(room.desiredGridSize) : null;
+            const playerTarget = Number.isFinite(room.maxPlayers) ? room.maxPlayers : (room.participants?.length || 2);
+            const defaultGrid = Math.max(scheduleMin, Math.min(16, Math.max(3, playerTarget + 3)));
             const plannedGridSize = desired !== null
                 ? Math.max(scheduleMin, Math.min(16, Math.max(3, desired)))
-                : scheduleMin;
+                : defaultGrid;
 
             ws.send(JSON.stringify({
                 type: 'joined',
@@ -373,9 +392,11 @@ wss.on('connection', (ws) => {
                     if (p === 5) return 5;
                     return 6;
                 }
+                // Determine grid size: if host specified, clamp it; otherwise default to (playerCount + 3)
+                // while never going below the per-player schedule minimum and never above 16.
                 const gridSize = Number.isFinite(r.desiredGridSize)
-                    ? Math.max(recommendedGridSize(playerCount), Math.min(16, r.desiredGridSize))
-                    : recommendedGridSize(playerCount);
+                    ? Math.max(recommendedGridSize(playerCount), Math.min(16, Math.max(3, r.desiredGridSize)))
+                    : Math.max(recommendedGridSize(playerCount), Math.min(16, Math.max(3, playerCount + 3)));
                 // Initialize per-room game state for turn enforcement and color validation
                 r.game = {
                     started: true,
@@ -500,8 +521,8 @@ wss.on('connection', (ws) => {
                     return 6;
                 }
                 const gridSize = Number.isFinite(room.desiredGridSize)
-                    ? Math.max(recommendedGridSize(players.length), Math.min(16, room.desiredGridSize))
-                    : recommendedGridSize(players.length);
+                    ? Math.max(recommendedGridSize(players.length), Math.min(16, Math.max(3, room.desiredGridSize)))
+                    : Math.max(recommendedGridSize(players.length), Math.min(16, Math.max(3, players.length + 3)));
                 room.game = {
                     started: true,
                     players: players.slice(),

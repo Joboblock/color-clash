@@ -576,7 +576,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function joinRoom(roomName) {
-        connectWebSocket();
         console.debug('[Join] Joining room:', roomName);
         // For debug: send player name, but do not use for logic
         let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player'));
@@ -599,13 +598,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         debugPlayerName = candidate;
         myPlayerName = debugPlayerName;
-        ws.send(JSON.stringify({ type: 'join', roomName: roomName, debugName: debugPlayerName }));
+
+        // Ensure connection and send once open
+        const doJoin = () => {
+            try { ws.send(JSON.stringify({ type: 'join', roomName: roomName, debugName: debugPlayerName })); } catch { /* ignore */ }
+        };
+        connectWebSocket();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            doJoin();
+        } else {
+            showConnBanner('Connecting to server…', 'info');
+            ws?.addEventListener('open', doJoin, { once: true });
+        }
     }
 
     function leaveRoom(roomName) {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
         console.debug('[Leave] Leaving room:', roomName);
-        ws.send(JSON.stringify({ type: 'leave', roomName: roomName }));
+        const doLeave = () => {
+            try { ws.send(JSON.stringify({ type: 'leave', roomName: roomName })); } catch { /* ignore */ }
+        };
+        connectWebSocket();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            doLeave();
+        } else {
+            showConnBanner('Connecting to server…', 'info');
+            ws?.addEventListener('open', doLeave, { once: true });
+        }
     }
 
     // Wire Host Custom / Start Game button behavior in the online menu
@@ -615,10 +633,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // If we're in Start Game mode and enabled, trigger online start (stub)
             if (btn.classList && btn.classList.contains('start-mode') && !btn.disabled) {
                 // Host starts the online game
+                const startPayload = { type: 'start' };
+                if (Number.isInteger(hostedDesiredGridSize)) startPayload.gridSize = hostedDesiredGridSize;
+                connectWebSocket();
                 if (ws && ws.readyState === WebSocket.OPEN) {
-                    const startPayload = { type: 'start' };
-                    if (Number.isInteger(hostedDesiredGridSize)) startPayload.gridSize = hostedDesiredGridSize;
                     try { ws.send(JSON.stringify(startPayload)); } catch { /* ignore */ }
+                } else {
+                    showConnBanner('Connecting to server…', 'info');
+                    ws?.addEventListener('open', () => {
+                        try { ws.send(JSON.stringify(startPayload)); } catch { /* ignore */ }
+                    }, { once: true });
                 }
                 return;
             }
@@ -673,6 +697,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Only act when connected; avoid local desync while offline
                 if (!ws || ws.readyState !== WebSocket.OPEN || !wsConnected) {
                     showConnBanner('You are offline. Reconnecting…', 'error');
+                    connectWebSocket();
                     return;
                 }
                 // Send move to server and rely on echo for other clients; apply locally for responsiveness
@@ -951,6 +976,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (onlineMenu) setHidden(onlineMenu, false);
                 // reflect any online state on button
                 updateStartButtonState();
+                // Always show a reconnecting banner by default when opening the Online menu;
+                // it will be hidden automatically once a connection is established (on ws.onopen)
+                if (!ws || ws.readyState !== WebSocket.OPEN || !wsConnected) {
+                    showConnBanner('Reconnecting…', 'info');
+                } else {
+                    hideConnBanner();
+                }
                 break;
             case 'host':
                 setHidden(mainMenu, false);
@@ -973,8 +1005,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function navigateToMenu(menuKey) {
-        // If navigating to online, ensure WS is (re)connecting
-        if (menuKey === 'online') connectWebSocket();
+        // If navigating to online or host, ensure WS is (re)connecting
+        if (menuKey === 'online' || menuKey === 'host') connectWebSocket();
         setMenuParam(menuKey, true);
         showMenuFor(menuKey);
     }
@@ -1035,11 +1067,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Online (guard connection)
         const onlineMenuEl = document.getElementById('onlineMenu');
         if (onlineGameBtn && onlineMenuEl) {
-            onlineGameBtn.addEventListener('click', (e) => {
+            onlineGameBtn.addEventListener('click', () => {
+                // Always try to (re)connect when opening the online menu
+                connectWebSocket();
                 if (!ws || ws.readyState !== WebSocket.OPEN) {
-                    e.preventDefault();
-                    showModalError('Unable to connect to the multiplayer server.<br>Please check your internet connection or try again in a moment.');
-                    return;
+                    showConnBanner('Reconnecting…', 'info');
                 }
                 navigateToMenu('online');
             });
@@ -2488,6 +2520,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Only act when connected; avoid local desync while offline
             if (!ws || ws.readyState !== WebSocket.OPEN || !wsConnected) {
                 showConnBanner('You are offline. Reconnecting…', 'error');
+                connectWebSocket();
                 return;
             }
             e.preventDefault();

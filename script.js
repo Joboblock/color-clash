@@ -3689,17 +3689,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (chosenFast) {
                     const onUserConfirm = (ev) => {
-                        // Accept pointerdown or Enter/Space keydown
-                        if (ev.type === 'pointerdown' || (ev.type === 'keydown' && (ev.key === 'Enter' || ev.key === ' '))) {
+                        // Accept click (tap release) or Enter/Space keydown
+                        if (ev.type === 'click' || (ev.type === 'keydown' && (ev.key === 'Enter' || ev.key === ' '))) {
                             ev.stopPropagation();
                             ev.preventDefault();
-                            document.removeEventListener('pointerdown', onUserConfirm, true);
+                            document.removeEventListener('click', onUserConfirm, true);
                             document.removeEventListener('keydown', onUserConfirm, true);
                             clearAIDebugUI();
                             handleClick(chosenFast.r, chosenFast.c);
                         }
                     };
-                    document.addEventListener('pointerdown', onUserConfirm, true);
+                    document.addEventListener('click', onUserConfirm, true);
                     document.addEventListener('keydown', onUserConfirm, true);
                 } else {
                     if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
@@ -3799,17 +3799,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (chosen) {
                 const onUserConfirm = (ev) => {
-                    // Accept pointerdown or Enter/Space keydown
-                    if (ev.type === 'pointerdown' || (ev.type === 'keydown' && (ev.key === 'Enter' || ev.key === ' '))) {
+                    // Accept click (tap release) or Enter/Space keydown
+                    if (ev.type === 'click' || (ev.type === 'keydown' && (ev.key === 'Enter' || ev.key === ' '))) {
                         ev.stopPropagation();
                         ev.preventDefault();
-                        document.removeEventListener('pointerdown', onUserConfirm, true);
+                        document.removeEventListener('click', onUserConfirm, true);
                         document.removeEventListener('keydown', onUserConfirm, true);
                         clearAIDebugUI();
                         handleClick(chosen.r, chosen.c);
                     }
                 };
-                document.addEventListener('pointerdown', onUserConfirm, true);
+                document.addEventListener('click', onUserConfirm, true);
                 document.addEventListener('keydown', onUserConfirm, true);
             } else {
                 if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;

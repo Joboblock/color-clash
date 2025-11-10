@@ -190,6 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // On successful hosting, return to Online game menu
                 const onlineMenu = document.getElementById('onlineMenu');
                 const mainMenu = document.getElementById('mainMenu');
+                let deferredRoomKey = null;
                 if (onlineMenu && mainMenu) {
                     // hide mainMenu (Host Game menu)
                     mainMenu.classList.add('hidden');
@@ -199,6 +200,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     onlineMenu.setAttribute('aria-hidden', 'false');
                     // clear marker
                     try { mainMenu.dataset.openedBy = ''; } catch { /* ignore */ }
+                }
+                // If the host menu was open, and the menu stack indicates a back navigation will occur, defer updating the key until after popstate
+                if (msg.roomKey) {
+                    // If the previous menu was 'host', and we are now in 'online', defer updateUrlRoomKey
+                    const params = new URLSearchParams(window.location.search);
+                    const currentMenu = params.get('menu');
+                    if (currentMenu === 'host') {
+                        // Defer until next popstate
+                        deferredRoomKey = msg.roomKey;
+                        const popHandler = () => {
+                            updateUrlRoomKey(deferredRoomKey);
+                            window.removeEventListener('popstate', popHandler, true);
+                        };
+                        window.addEventListener('popstate', popHandler, true);
+                    } else {
+                        updateUrlRoomKey(msg.roomKey);
+                    }
                 }
                 updateStartButtonState();
             } else if (msg.type === 'roomlist') {
@@ -273,6 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.debug(`[Join] Joined room: ${msg.room}`);
                 }
                 myJoinedRoom = msg.room;
+                if (msg.roomKey) updateUrlRoomKey(msg.roomKey);
                 if (typeof msg.player === 'string' && msg.player) {
                     myPlayerName = msg.player;
                 }
@@ -300,6 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.debug('[Leave] Left room:', msg.room);
                 if (!msg.room || msg.room === myJoinedRoom) myJoinedRoom = null;
                 myRoomMaxPlayers = null; myRoomCurrentPlayers = 0; myRoomPlayers = [];
+                removeUrlRoomKey();
                 updateStartButtonState();
             } else if (msg.type === 'roomupdate') {
                 if (msg.players && Array.isArray(msg.players)) {
@@ -365,6 +385,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (msg.type === 'rejoined') {
                 console.debug('[Online] Rejoined room:', msg.room);
                 myJoinedRoom = msg.room || myJoinedRoom;
+                if (msg.roomKey) updateUrlRoomKey(msg.roomKey);
                 if (Array.isArray(msg.players)) {
                     myRoomPlayers = msg.players;
                     myRoomCurrentPlayers = msg.players.length;
@@ -408,6 +429,13 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (msg.type === 'error') {
                 console.debug('[Error]', msg.error);
                 alert(msg.error);
+                // If we failed to join by key, remove stale key from URL
+                try {
+                    const err = String(msg.error || '');
+                    if (err.includes('Room not found') || err.includes('already started') || err.includes('full')) {
+                        removeUrlRoomKey();
+                    }
+                } catch { /* ignore */ }
             }
         };
         ws.onerror = () => {
@@ -624,6 +652,8 @@ document.addEventListener('DOMContentLoaded', () => {
             showConnBanner('Connecting to server…', 'info');
             ws?.addEventListener('open', doLeave, { once: true });
         }
+        // Remove key from URL when leaving
+        removeUrlRoomKey();
     }
 
     // Wire Host Custom / Start Game button behavior in the online menu
@@ -652,6 +682,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     connectWebSocket();
+    // Auto-join flow: if ?key= present and not already in a room, attempt join_by_key
+    (function attemptAutoJoinByKey() {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const key = params.get('key');
+            if (key && !myJoinedRoom) {
+                // Ensure WS is open then send
+                const sendJoinKey = () => {
+                    try { ws.send(JSON.stringify({ type: 'join_by_key', roomKey: key, debugName: (localStorage.getItem('playerName') || 'Player') })); } catch { /* ignore */ }
+                };
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    sendJoinKey();
+                } else {
+                    ws.addEventListener('open', sendJoinKey, { once: true });
+                }
+                // Navigate to online menu for visibility
+                navigateToMenu('online');
+            }
+        } catch { /* ignore */ }
+    })();
     // ...existing code...
     // Declare name input fields before sync function
     const onlinePlayerNameInput = document.getElementById('onlinePlayerName');
@@ -953,6 +1003,9 @@ document.addEventListener('DOMContentLoaded', () => {
             params.delete('players');
             params.delete('size');
         }
+        // Preserve room key param if present while navigating menus
+        const existingKey = (new URLSearchParams(window.location.search)).get('key');
+        if (existingKey) params.set('key', existingKey);
         const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
         if (push) {
             window.history.pushState({ menu: menuKey }, '', url);
@@ -962,6 +1015,24 @@ document.addEventListener('DOMContentLoaded', () => {
             window.history.replaceState({ menu: menuKey }, '', url);
             if (menuHistoryStack.length) menuHistoryStack[menuHistoryStack.length - 1] = menuKey; else menuHistoryStack.push(menuKey);
         }
+    }
+
+    // Helpers to manage ?key param
+    function updateUrlRoomKey(key) {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            params.set('key', key);
+            const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+            window.history.replaceState({ ...(window.history.state||{}), menu: getMenuParam() || 'first' }, '', url);
+        } catch { /* ignore */ }
+    }
+    function removeUrlRoomKey() {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            params.delete('key');
+            const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+            window.history.replaceState({ ...(window.history.state||{}), menu: getMenuParam() || 'first' }, '', url);
+        } catch { /* ignore */ }
     }
 
     // Ensure the current entry has a state and initialize our in-memory stack

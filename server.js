@@ -105,6 +105,8 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 //   }
 // }
 const rooms = {};
+// Map of room join keys -> room names for deep-link joining
+const roomKeys = new Map();
 // Keep server-authoritative list of available player colors (must match client order)
 const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'orange', 'purple'];
 // Track which room a connection belongs to and the player's name (per tab)
@@ -130,7 +132,9 @@ wss.on('connection', (ws) => {
                 const prevRoom = rooms[metaExisting.roomName];
                 prevRoom.participants = prevRoom.participants.filter(p => p.ws !== ws);
                 if (prevRoom.participants.length === 0) {
+                    const oldKey = prevRoom.roomKey;
                     delete rooms[metaExisting.roomName];
+                    if (oldKey) roomKeys.delete(oldKey);
                 } else {
                     // notify previous room
                     prevRoom.participants.forEach(p => {
@@ -174,12 +178,16 @@ wss.on('connection', (ws) => {
                 if (requestedGrid < minForPlayers) requestedGrid = minForPlayers;
                 if (requestedGrid > 16) requestedGrid = 16;
             }
+            // Generate unique join key for this room
+            const roomKey = generateRoomKey();
             rooms[uniqueRoomName] = {
                 maxPlayers: clamped,
                 participants: [{ ws, name: playerName, isHost: true, connected: true }],
                 _disconnectTimers: new Map(),
-                desiredGridSize: requestedGrid // null means use dynamic playerCount+3
+                desiredGridSize: requestedGrid, // null means use dynamic playerCount+3
+                roomKey
             };
+            roomKeys.set(roomKey, uniqueRoomName);
             connectionMeta.set(ws, { roomName: uniqueRoomName, name: playerName });
             // Compute a planned grid size for the lobby background for the host as well.
             // Use host's desiredGridSize if provided; otherwise default to (playerTarget + 3)
@@ -197,7 +205,7 @@ wss.on('connection', (ws) => {
                 const plannedGridSize = requestedGrid !== null
                     ? Math.max(scheduleMin, Math.min(16, Math.max(3, requestedGrid)))
                     : defaultGrid;
-                ws.send(JSON.stringify({ type: 'hosted', room: uniqueRoomName, maxPlayers: clamped, player: playerName, gridSize: plannedGridSize }));
+                ws.send(JSON.stringify({ type: 'hosted', room: uniqueRoomName, roomKey, maxPlayers: clamped, player: playerName, gridSize: plannedGridSize }));
             }
             broadcastRoomList();
     } else if (msg.type === 'join' && msg.roomName) {
@@ -206,13 +214,19 @@ wss.on('connection', (ws) => {
                 ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
                 return;
             }
+            if (room.game && room.game.started) {
+                ws.send(JSON.stringify({ type: 'error', error: 'Room already started' }));
+                return;
+            }
             // If this connection is already in a room, remove it from that room first
             const metaExisting = connectionMeta.get(ws);
             if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
                 const prevRoom = rooms[metaExisting.roomName];
                 prevRoom.participants = prevRoom.participants.filter(p => p.ws !== ws);
                 if (prevRoom.participants.length === 0) {
+                    const oldKey = prevRoom.roomKey;
                     delete rooms[metaExisting.roomName];
+                    if (oldKey) roomKeys.delete(oldKey);
                 } else {
                     // notify previous room
                     prevRoom.participants.forEach(p => {
@@ -259,6 +273,7 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({
                 type: 'joined',
                 room: msg.roomName,
+                roomKey: room.roomKey,
                 maxPlayers: room.maxPlayers,
                 player: playerName,
                 players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
@@ -270,6 +285,73 @@ wss.on('connection', (ws) => {
                     try {
                         p.ws.send(JSON.stringify({ type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }));
                     } catch { /* ignore */ }
+                }
+            });
+            broadcastRoomList();
+    } else if (msg.type === 'join_by_key' && typeof msg.roomKey === 'string') {
+            const key = String(msg.roomKey);
+            const roomName = roomKeys.get(key);
+            if (!roomName) {
+                ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
+                return;
+            }
+            const room = rooms[roomName];
+            if (!room) {
+                ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
+                return;
+            }
+            if (room.game && room.game.started) {
+                ws.send(JSON.stringify({ type: 'error', error: 'Room already started' }));
+                return;
+            }
+            // Remove from existing room if any
+            const metaExisting = connectionMeta.get(ws);
+            if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
+                const prevRoom = rooms[metaExisting.roomName];
+                prevRoom.participants = prevRoom.participants.filter(p => p.ws !== ws);
+                if (prevRoom.participants.length === 0) {
+                    const oldKey = prevRoom.roomKey;
+                    delete rooms[metaExisting.roomName];
+                    if (oldKey) roomKeys.delete(oldKey);
+                } else {
+                    prevRoom.participants.forEach(p => {
+                        if (p.ws.readyState === 1) {
+                            try { p.ws.send(JSON.stringify({ type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) })); } catch { /* ignore */ }
+                        }
+                    });
+                }
+                connectionMeta.delete(ws);
+            }
+            const count = room.participants?.length || 0;
+            if (count >= room.maxPlayers) {
+                ws.send(JSON.stringify({ type: 'error', error: 'Room is full' }));
+                return;
+            }
+            const baseRaw = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
+            const playerName = pickUniqueName(room, baseRaw);
+            if (!playerName) {
+                try { ws.send(JSON.stringify({ type: 'error', error: 'All name variants are taken in this room. Please choose a different name.' })); } catch { /* ignore */ }
+                return;
+            }
+            room.participants.push({ ws, name: playerName, isHost: false, connected: true });
+            connectionMeta.set(ws, { roomName, name: playerName });
+            function minGridSize(p) {
+                if (p <= 2) return 3;
+                if (p <= 4) return 4; // 3-4 players
+                if (p === 5) return 5;
+                return 6; // 6-8 players
+            }
+            const scheduleMin = minGridSize(room.maxPlayers || 2);
+            const desired = Number.isFinite(room.desiredGridSize) ? Math.floor(room.desiredGridSize) : null;
+            const playerTarget = Number.isFinite(room.maxPlayers) ? room.maxPlayers : (room.participants?.length || 2);
+            const defaultGrid = Math.max(scheduleMin, Math.min(16, Math.max(3, playerTarget + 3)));
+            const plannedGridSize = desired !== null
+                ? Math.max(scheduleMin, Math.min(16, Math.max(3, desired)))
+                : defaultGrid;
+            ws.send(JSON.stringify({ type: 'joined', room: roomName, roomKey: room.roomKey, maxPlayers: room.maxPlayers, player: playerName, players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })), gridSize: plannedGridSize }));
+            room.participants.forEach(p => {
+                if (p.ws !== ws && p.ws.readyState === 1) {
+                    try { p.ws.send(JSON.stringify({ type: 'roomupdate', room: roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) })); } catch { /* ignore */ }
                 }
             });
             broadcastRoomList();
@@ -305,6 +387,7 @@ wss.on('connection', (ws) => {
             const rejoinPayload = {
                 type: 'rejoined',
                 room: msg.roomName,
+                roomKey: room.roomKey,
                 maxPlayers: room.maxPlayers,
                 players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
                 started: !!(room.game && room.game.started),
@@ -558,7 +641,9 @@ wss.on('connection', (ws) => {
             connectionMeta.delete(ws);
             ws.send(JSON.stringify({ type: 'left', room: roomName }));
             if (room.participants.length === 0) {
+                const oldKey = room.roomKey;
                 delete rooms[roomName];
+                if (oldKey) roomKeys.delete(oldKey);
             } else {
                 room.participants.forEach(p => {
                     if (p.ws.readyState === 1) {
@@ -605,7 +690,9 @@ wss.on('connection', (ws) => {
                 if (idx >= 0) {
                     rr.participants.splice(idx, 1);
                     if (rr.participants.length === 0) {
+                        const oldKey = rr.roomKey;
                         delete rooms[roomName];
+                        if (oldKey) roomKeys.delete(oldKey);
                     } else {
                         rr.participants.forEach(p => {
                             if (p.ws.readyState === 1) {
@@ -743,6 +830,26 @@ function assignColorsDeterministic(players, prefs, palette) {
         assigned.push(pick); used.add(pick);
     }
     return assigned;
+}
+
+// Generate a random room key (9 chars alphanumeric) ensuring uniqueness
+function generateRoomKey() {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const randLength = 6;
+    let key = '';
+    let attempts = 0;
+    do {
+        // Timestamp part: last 4 base36 chars of current ms timestamp
+        const ts = Date.now().toString(36).slice(-4);
+        let rand = '';
+        for (let i = 0; i < randLength; i++) {
+            rand += alphabet[Math.floor(Math.random() * alphabet.length)];
+        }
+        key = rand + ts;
+        attempts++;
+        if (attempts > 500) break;
+    } while (roomKeys.has(key));
+    return key;
 }
 
 console.log(`WebSocket server running on ws://localhost:${PORT}`);

@@ -101,16 +101,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Only show the connection banner while user is in Online/Host menus
     function isOnlineMenusOpen() {
         try {
-            const onlineMenu = document.getElementById('onlineMenu');
-            const mainMenu = document.getElementById('mainMenu');
-            const onlineMenuOpen = onlineMenu && !onlineMenu.classList.contains('hidden');
-            const hostMenuOpen = mainMenu && !mainMenu.classList.contains('hidden') && (
-                mainMenu.dataset.mode === 'host' ||
-                mainMenu.dataset.openedBy === 'host' ||
-                ((mainMenu.querySelector('.game-header-panel')?.textContent || '').toLowerCase().includes('online'))
-            );
-            return !!(onlineMenuOpen || hostMenuOpen);
-        } catch { return false; }
+            // Show connection banner in both online and host menus
+            const params = new URLSearchParams(window.location.search);
+            const menu = params.get('menu');
+            return menu === 'online' || menu === 'host';
+        } catch {
+            return false;
+        }
     }
 
     function showConnBanner(message, kind = 'info') {

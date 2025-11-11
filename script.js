@@ -393,7 +393,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const missed = Array.isArray(msg.recentMoves) ? msg.recentMoves.slice() : [];
                     if (missed.length) {
                         // Ensure chronological order by sequence if present
-                        missed.sort((a,b) => (Number(a.seq)||0) - (Number(b.seq)||0));
+                        missed.sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
                         let idx = 0;
                         const applyNext = () => {
                             if (idx >= missed.length) { updateStartButtonState(); return; }
@@ -963,20 +963,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const trainMainBtn = document.getElementById('trainMainBtn');
 
     // --- Helpers ---
-        const setHidden = (el, hidden) => {
+    const setHidden = (el, hidden) => {
         if (!el) return;
         el.classList.toggle('hidden', !!hidden);
         el.setAttribute('aria-hidden', hidden ? 'true' : 'false');
-            // If we're hiding Online/Host menus, make sure to hide any connection banner
-            if (hidden) {
-                const id = el.id || '';
-                const isOnline = id === 'onlineMenu';
-                const isHostMenu = id === 'mainMenu' && (el.dataset.mode === 'host' || el.dataset.openedBy === 'host');
-                if (isOnline || isHostMenu) hideConnBanner();
-            }
+        // If we're hiding Online/Host menus, make sure to hide any connection banner
+        if (hidden) {
+            const id = el.id || '';
+            const isOnline = id === 'onlineMenu';
+            const isHostMenu = id === 'mainMenu' && (el.dataset.mode === 'host' || el.dataset.openedBy === 'host');
+            if (isOnline || isHostMenu) hideConnBanner();
+        }
     };
-
-    // (replaced by setMenuParam)
 
     // New: typed menu param helpers (first|local|online|host|train)
     // Lightweight in-app stack of menu states to avoid timeout fallbacks
@@ -1020,7 +1018,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const params = new URLSearchParams(window.location.search);
             params.set('key', key);
             const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-            window.history.replaceState({ ...(window.history.state||{}), menu: getMenuParam() || 'first' }, '', url);
+            window.history.replaceState({ ...(window.history.state || {}), menu: getMenuParam() || 'first' }, '', url);
         } catch { /* ignore */ }
     }
     function removeUrlRoomKey() {
@@ -1028,7 +1026,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const params = new URLSearchParams(window.location.search);
             params.delete('key');
             const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-            window.history.replaceState({ ...(window.history.state||{}), menu: getMenuParam() || 'first' }, '', url);
+            window.history.replaceState({ ...(window.history.state || {}), menu: getMenuParam() || 'first' }, '', url);
         } catch { /* ignore */ }
     }
 
@@ -1050,7 +1048,8 @@ document.addEventListener('DOMContentLoaded', () => {
         setHidden(mainMenu, true);
         if (onlineMenu) setHidden(onlineMenu, true);
         // Clear host marker unless entering host
-    if (mainMenu) { try { delete mainMenu.dataset.openedBy; } catch { /* ignore */ }
+        if (mainMenu) {
+            try { delete mainMenu.dataset.openedBy; } catch { /* ignore */ }
         }
         switch (menuKey) {
             case 'first':
@@ -1088,7 +1087,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // When showing any menu overlay, ensure background color mirrors cycler
         setMenuBodyColor();
         // Update AI preview if train menu is shown
-    if (menuKey === 'train') { try { updateAIPreview(); } catch { /* ignore */ }
+        if (menuKey === 'train') {
+            try { updateAIPreview(); } catch { /* ignore */ }
         }
     }
 
@@ -1178,8 +1178,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const currentMenu = params.get('menu');
         const expectedMenu = (
             currentMenu === 'host' ? 'online' :
-            (currentMenu === 'local' || currentMenu === 'train' || currentMenu === 'online') ? 'first' :
-            null
+                (currentMenu === 'local' || currentMenu === 'train' || currentMenu === 'online') ? 'first' :
+                    null
         );
         if (!expectedMenu) return;
         // If our previous stack entry matches, use real back(); else do a replace
@@ -1303,31 +1303,31 @@ document.addEventListener('DOMContentLoaded', () => {
         onlinePlayerNameInput.addEventListener('blur', handleSanitize);
         onlinePlayerNameInput.addEventListener('change', handleSanitize);
         onlinePlayerNameInput.addEventListener('keydown', nameInputKeydownHandler);
-    // Shared keydown handler for name inputs
-    function nameInputKeydownHandler(e) {
-        const el = e.target;
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            el.blur();
-        } else if (e.key === ' ') {
-            e.preventDefault();
-            const start = el.selectionStart;
-            const end = el.selectionEnd;
-            const value = el.value;
-            if (value.length < PLAYER_NAME_LENGTH) {
-                el.value = value.slice(0, start) + '_' + value.slice(end);
-                el.setSelectionRange(start + 1, start + 1);
-                el.dispatchEvent(new Event('input', { bubbles: true }));
+        // Shared keydown handler for name inputs
+        function nameInputKeydownHandler(e) {
+            const el = e.target;
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                el.blur();
+            } else if (e.key === ' ') {
+                e.preventDefault();
+                const start = el.selectionStart;
+                const end = el.selectionEnd;
+                const value = el.value;
+                if (value.length < PLAYER_NAME_LENGTH) {
+                    el.value = value.slice(0, start) + '_' + value.slice(end);
+                    el.setSelectionRange(start + 1, start + 1);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            }
+            // Only allow arrow navigation out if input is empty
+            if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && el.value === '') {
+                // Allow default behavior (navigation)
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                // Prevent navigation if not empty
+                e.stopPropagation();
             }
         }
-        // Only allow arrow navigation out if input is empty
-        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && el.value === '') {
-            // Allow default behavior (navigation)
-        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-            // Prevent navigation if not empty
-            e.stopPropagation();
-        }
-    }
     }
 
     // set dynamic bounds

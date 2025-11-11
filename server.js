@@ -44,18 +44,18 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-            // Default to index.html for root
-            let reqPath = (req.url || '/').split('?')[0];
+        // Default to index.html for root
+        let reqPath = (req.url || '/').split('?')[0];
         if (reqPath === '/' || reqPath === '') {
             reqPath = '/index.html';
         }
 
         // Prevent path traversal
-            const safePath = path
-                .normalize(reqPath)
-                .replace(/^\.\.(?:\/|\\|$)/, '')
-                .replace(/^\/+/, ''); // strip any leading slashes so join is relative
-            const absPath = path.join(__dirname, safePath);
+        const safePath = path
+            .normalize(reqPath)
+            .replace(/^\.\.(?:\/|\\|$)/, '')
+            .replace(/^\/+/, ''); // strip any leading slashes so join is relative
+        const absPath = path.join(__dirname, safePath);
         const st = await stat(absPath);
         if (!st.isFile()) {
             sendError(res, 404);
@@ -66,7 +66,7 @@ const server = http.createServer(async (req, res) => {
         res.statusCode = 200;
         res.setHeader('content-type', ct);
         createReadStream(absPath).pipe(res);
-        } catch {
+    } catch {
         // Fallback to index.html for SPA routes
         try {
             const absIndex = path.join(__dirname, 'index.html');
@@ -84,11 +84,11 @@ const server = http.createServer(async (req, res) => {
 // Attach WebSocket server on path /ws
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-    // Start HTTP server
-    server.listen(PORT, '0.0.0.0', () => {
-        console.log(`HTTP server listening on http://0.0.0.0:${PORT}`);
-        console.log(`WebSocket endpoint available at ws://<host>:${PORT}/ws`);
-    });
+// Start HTTP server
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`HTTP server listening on http://0.0.0.0:${PORT}`);
+    console.log(`WebSocket endpoint available at ws://<host>:${PORT}/ws`);
+});
 
 // Room management structure:
 // rooms = {
@@ -112,8 +112,7 @@ const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'oran
 // Track which room a connection belongs to and the player's name (per tab)
 const connectionMeta = new Map(); // ws -> { roomName: string, name: string }
 // Allow brief disconnects to reattach by name before freeing the seat
-const LOBBY_GRACE_MS = 8000; // 8s grace window for lobby
-const GAME_GRACE_MS = 300000; // 5 min grace window for in-game
+const GRACE_MS = 300000; // 5 min grace window
 
 wss.on('connection', (ws) => {
     ws.on('message', (raw) => {
@@ -208,7 +207,7 @@ wss.on('connection', (ws) => {
                 ws.send(JSON.stringify({ type: 'hosted', room: uniqueRoomName, roomKey, maxPlayers: clamped, player: playerName, gridSize: plannedGridSize }));
             }
             broadcastRoomList();
-    } else if (msg.type === 'join' && msg.roomName) {
+        } else if (msg.type === 'join' && msg.roomName) {
             const room = rooms[msg.roomName];
             if (!room) {
                 ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
@@ -288,7 +287,7 @@ wss.on('connection', (ws) => {
                 }
             });
             broadcastRoomList();
-    } else if (msg.type === 'join_by_key' && typeof msg.roomKey === 'string') {
+        } else if (msg.type === 'join_by_key' && typeof msg.roomKey === 'string') {
             const key = String(msg.roomKey);
             const roomName = roomKeys.get(key);
             if (!roomName) {
@@ -355,7 +354,7 @@ wss.on('connection', (ws) => {
                 }
             });
             broadcastRoomList();
-    } else if (msg.type === 'reconnect' && msg.roomName && typeof msg.debugName === 'string') {
+        } else if (msg.type === 'reconnect' && msg.roomName && typeof msg.debugName === 'string') {
             const room = rooms[msg.roomName];
             if (!room) {
                 ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
@@ -681,8 +680,6 @@ wss.on('connection', (ws) => {
             if (room._disconnectTimers.has(name)) {
                 try { clearTimeout(room._disconnectTimers.get(name)); } catch { /* ignore */ }
             }
-            // Use longer grace if game started, else short lobby grace
-            const graceMs = (room.game && room.game.started) ? GAME_GRACE_MS : LOBBY_GRACE_MS;
             const timer = setTimeout(() => {
                 const rr = rooms[roomName];
                 if (!rr) return;
@@ -703,7 +700,7 @@ wss.on('connection', (ws) => {
                     broadcastRoomList();
                 }
                 if (rr && rr._disconnectTimers) rr._disconnectTimers.delete(name);
-            }, graceMs);
+            }, GRACE_MS);
             room._disconnectTimers.set(name, timer);
         }
         connectionMeta.delete(ws);

@@ -1866,13 +1866,18 @@ document.addEventListener('DOMContentLoaded', () => {
         positions.forEach((posClass, idx) => {
             const d = document.createElement('div');
             d.className = 'edge-circle ' + posClass;
+            d.dataset.playerIndex = String(idx);
             const key = ac[idx % ac.length];
-            d.style.setProperty('--circle-color', colorHex(key));
+            const base = colorHex(key);
+            d.style.setProperty('--circle-color', base);
+            d.style.setProperty('--circle-color-dim', mixWithBlack(base, 0.25));
             container.appendChild(d);
         });
     document.body.appendChild(container);
     // Set circle size variable using viewport and grid dimensions
     document.documentElement.style.setProperty('--edge-circle-size', computeEdgeCircleSize() + 'px');
+    // Initialize active/inactive states on the next frame so CSS transitions run from opacity:0
+    requestAnimationFrame(() => { try { updateEdgeCirclesActive(); } catch { /* ignore */ } });
     }
 
     // Only need to update the restriction type on resize
@@ -1933,56 +1938,86 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Compute positional classes for player edge circles based on count and restriction
     function computeEdgePositions(count, restrict) {
-        // Corner order: bottom-left, bottom-right, top-right, top-left
-        const corners = ['pos-corner-bl', 'pos-corner-br', 'pos-corner-tr', 'pos-corner-tl'];
-        const positions = [];
-        if (count <= 0) return positions;
+        if (count <= 0) return [];
+        // Clockwise orders starting from bottom-left corner
+        const orderSide = [
+            'pos-corner-bl',
+            'pos-bottom-mid1', 'pos-bottom-center', 'pos-bottom-mid2',
+            'pos-corner-br',
+            'pos-corner-tr',
+            'pos-top-mid2', 'pos-top-center', 'pos-top-mid1',
+            'pos-corner-tl'
+        ];
+        const orderTop = [
+            'pos-corner-bl',
+            'pos-left-mid2', 'pos-left-center', 'pos-left-mid1',
+            'pos-corner-tl',
+            'pos-corner-tr',
+            'pos-right-mid1', 'pos-right-center', 'pos-right-mid2',
+            'pos-corner-br'
+        ];
+        const corners = ['pos-corner-bl', 'pos-corner-br', 'pos-corner-tr', 'pos-corner-tl']; // clockwise BL→BR→TR→TL
 
+        // Build the set of allowed positions for this player count and restriction
+        let allowed = new Set();
         if (count === 2) {
-            if (restrict === 'side') {
-                return ['pos-top-center', 'pos-bottom-center'];
-            } else {
-                return ['pos-left-center', 'pos-right-center'];
-            }
-        }
-
-        if (count === 3) {
-            return corners.slice(0, 3);
-        }
-
-        if (count === 4) {
-            return corners.slice(0, 4);
-        }
-
-        if (count === 5) {
-            const base = corners.slice(0, 4);
-            const extra = (restrict === 'side') ? ['pos-top-center'] : ['pos-left-center'];
-            return base.concat(extra);
-        }
-
-        if (count === 6) {
-            const base = corners.slice(0, 4);
-            const extras = (restrict === 'side') ? ['pos-top-center', 'pos-bottom-center'] : ['pos-left-center', 'pos-right-center'];
-            return base.concat(extras);
-        }
-
-        if (count === 7) {
-            const base = corners.slice(0, 4);
-            if (restrict === 'side') {
-                // two on top (1/3, 2/3) + one on bottom center
-                return base.concat(['pos-top-mid1', 'pos-top-mid2', 'pos-bottom-center']);
-            } else {
-                // two on left (1/3, 2/3) + one on right center
-                return base.concat(['pos-left-mid1', 'pos-left-mid2', 'pos-right-center']);
-            }
-        }
-
-        // 8 or more: use the full pattern (4 corners + 2 + 2 on free sides)
-        if (restrict === 'side') {
-            return corners.concat(['pos-top-mid1', 'pos-top-mid2', 'pos-bottom-mid1', 'pos-bottom-mid2']).slice(0, count);
+            allowed = new Set(restrict === 'side'
+                ? ['pos-bottom-center', 'pos-top-center']
+                : ['pos-left-center', 'pos-right-center']
+            );
+        } else if (count === 3) {
+            allowed = new Set(corners.slice(0, 3));
+        } else if (count === 4) {
+            allowed = new Set(corners);
+        } else if (count === 5) {
+            allowed = new Set([
+                ...corners,
+                ...(restrict === 'side' ? ['pos-bottom-center'] : ['pos-left-center'])
+            ]);
+        } else if (count === 6) {
+            allowed = new Set([
+                ...corners,
+                ...(restrict === 'side' ? ['pos-bottom-center', 'pos-top-center'] : ['pos-left-center', 'pos-right-center'])
+            ]);
+        } else if (count === 7) {
+            allowed = new Set([
+                ...corners,
+                ...(restrict === 'side'
+                    ? ['pos-bottom-center', 'pos-top-mid1', 'pos-top-mid2']
+                    : ['pos-right-center', 'pos-left-mid1', 'pos-left-mid2']
+                )
+            ]);
         } else {
-            return corners.concat(['pos-left-mid1', 'pos-left-mid2', 'pos-right-mid1', 'pos-right-mid2']).slice(0, count);
+            // 8 or more
+            allowed = new Set([
+                ...corners,
+                ...(restrict === 'side'
+                    ? ['pos-bottom-mid1', 'pos-bottom-mid2', 'pos-top-mid1', 'pos-top-mid2']
+                    : ['pos-left-mid1', 'pos-left-mid2', 'pos-right-mid1', 'pos-right-mid2']
+                )
+            ]);
         }
+
+        const order = (restrict === 'side') ? orderSide : orderTop;
+        const out = [];
+        for (const pos of order) {
+            if (allowed.has(pos)) out.push(pos);
+            if (out.length >= count) break;
+        }
+        return out;
+    }
+
+    // Reflect active player on edge circles (full size/opacity for active; smaller/faded for others)
+    function updateEdgeCirclesActive() {
+        const container = document.getElementById('edgeCirclesContainer');
+        if (!container) return;
+        const circles = Array.from(container.querySelectorAll('.edge-circle'));
+        if (!circles.length) return;
+        const activeIdx = Math.max(0, Math.min(circles.length - 1, currentPlayer || 0));
+        circles.forEach((el, idx) => {
+            el.classList.toggle('is-active', idx === activeIdx);
+            el.classList.toggle('is-inactive', idx !== activeIdx);
+        });
     }
 
 
@@ -2449,6 +2484,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
+     * Mix a hex color with black to dim it toward black.
+     * @param {string} hex - base hex color.
+     * @param {number} [factor=0.45] - portion of black (0..1).
+     * @returns {string} css rgb(r,g,b) color string.
+     */
+    function mixWithBlack(hex, factor = 0.45) {
+        const { r, g, b } = hexToRgb(hex);
+        const mix = (c) => Math.round((1 - factor) * c + factor * 0);
+        return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+    }
+
+    /**
      * Build the visual player "box slider" (1..maxPlayers) and attach handlers.
      * @returns {void} updates DOM under #playerBoxSlider.
      */
@@ -2849,6 +2896,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // highlight invalid positions with new layout
         highlightInvalidInitialPositions();
         document.body.className = activeColors()[currentPlayer];
+    // Sync active circle emphasis after grid rebuild
+    try { updateEdgeCirclesActive(); } catch { /* ignore */ }
 
         // Reflect actual grid size in display value while menu is present
         menuGridSizeVal = Math.max(3, newSize);
@@ -3268,7 +3317,9 @@ document.addEventListener('DOMContentLoaded', () => {
             tried++;
         }
 
-        document.body.className = activeColors()[currentPlayer];
+    document.body.className = activeColors()[currentPlayer];
+    // Update edge circle emphasis for new active player
+    try { updateEdgeCirclesActive(); } catch { /* ignore */ }
         clearCellFocus();
         updateGrid();
         // Restore focus to last focused cell for this player, if any

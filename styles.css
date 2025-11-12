@@ -13,16 +13,18 @@
     border-radius: 50%;
     box-shadow: 0 0 0 3px rgba(255,255,255,0.65), 0 4px 12px rgba(0,0,0,0.35);
     background: var(--circle-color, #fff);
-    opacity: 0;
-    animation: edgeCircleFade 420ms ease forwards;
+    opacity: 1; /* keep 100% opacity; fade using color */
     width: var(--edge-circle-size, 44px);
     --circle-color: #fff;
-    transform: translate(-50%, -50%);
+    --circle-color-dim: #333; /* fallback dim */
+    transform: translate(-50%, -50%) scale(0.5);
+    transition: transform 220ms ease, background-color 180ms ease;
 }
-@keyframes edgeCircleFade {
-    from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
-    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-}
+/* remove keyframes: use transitions instead */
+
+/* Active/inactive sizing states */
+.edge-circle.is-inactive { background-color: var(--circle-color-dim, #333); transform: translate(-50%, -50%) scale(0.5); }
+.edge-circle.is-active { background-color: var(--circle-color, #fff); transform: translate(-50%, -50%) scale(1); }
 
 /* Positioning for 8 circles: 0-3 corners, 4-7 edge-mids. Use restriction class for layout. */
 /* Corner positions (independent of restriction) */
@@ -872,17 +874,19 @@ body.magenta { background-color: var(--body-magenta); }
     width: var(--edge-circle-size, 44px);
     height: var(--edge-circle-size, 44px);
     border-radius: 50%;
-    transform: translate(-50%, -50%);
+    transform: translate(-50%, -50%) scale(0.5);
     box-shadow: 0 0 0 3px rgba(255,255,255,0.65), 0 4px 12px rgba(0,0,0,0.35);
-    background: #fff;
-    opacity: 0;
-    animation: edgeCircleFade 420ms ease forwards;
+    background: var(--circle-color, #fff);
+    opacity: 1; /* keep 100% opacity; fade using color */
+    /* no animation; rely on transitions */
+    transition: transform 220ms ease, background-color 180ms ease;
 }
 
-@keyframes edgeCircleFade {
-    from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
-    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-}
+/* remove keyframes: use transitions instead */
+
+/* Active/inactive states (duplicate to ensure cascade at this location) */
+.edge-circle.is-inactive { background-color: var(--circle-color-dim, #333); transform: translate(-50%, -50%) scale(0.5); }
+.edge-circle.is-active { background-color: var(--circle-color, #fff); transform: translate(-50%, -50%) scale(1); }
 
 /* Top-right menu close button style */
 .menu-color-box.menu-close-btn {

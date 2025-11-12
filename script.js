@@ -1854,23 +1854,22 @@ document.addEventListener('DOMContentLoaded', () => {
         container.setAttribute('data-restrict', getRestrictionType());
 
         // Use color palette for 8 circles
-        const colors = (() => {
-            try {
-                const n = playerColors.length;
-                const seq = [];
-                for (let i = 0; i < 8; i++) seq.push(playerColors[(startingColorIndex + i) % n]);
-                return seq;
-            } catch { return ['green','red','blue','yellow','magenta','cyan','orange','purple']; }
-        })();
         const colorHex = (key) => {
             try { return innerCircleColors[key] || '#fff'; } catch { return '#fff'; }
         };
-        for (let i = 0; i < 8; i++) {
+        // Determine number of players (use activeColors when available)
+        const ac = (typeof activeColors === 'function') ? activeColors() : playerColors;
+        const count = Math.min(ac.length || 0, Math.max(2, (typeof playerCount === 'number' ? playerCount : ac.length || 2)));
+        const restrict = getRestrictionType();
+
+        const positions = computeEdgePositions(count, restrict);
+        positions.forEach((posClass, idx) => {
             const d = document.createElement('div');
-            d.className = 'edge-circle c' + i;
-            d.style.setProperty('--circle-color', colorHex(colors[i % colors.length]));
+            d.className = 'edge-circle ' + posClass;
+            const key = ac[idx % ac.length];
+            d.style.setProperty('--circle-color', colorHex(key));
             container.appendChild(d);
-        }
+        });
     document.body.appendChild(container);
     // Set circle size variable using viewport and grid dimensions
     document.documentElement.style.setProperty('--edge-circle-size', computeEdgeCircleSize() + 'px');
@@ -1879,7 +1878,27 @@ document.addEventListener('DOMContentLoaded', () => {
     // Only need to update the restriction type on resize
     window.addEventListener('resize', () => {
         const container = document.getElementById('edgeCirclesContainer');
-        if (container) container.setAttribute('data-restrict', getRestrictionType());
+        const newRestrict = getRestrictionType();
+        if (container) {
+            const oldRestrict = container.getAttribute('data-restrict');
+            if (oldRestrict !== newRestrict) {
+                // Rebuild layout when switching between side/top to update positional classes
+                try { container.remove(); } catch { /* ignore */ }
+                createEdgeCircles();
+                return; // createEdgeCircles sets size var as well
+            } else {
+                container.setAttribute('data-restrict', newRestrict);
+            }
+        } else {
+            // If no container exists but grid is visible and no menus, create it
+            const anyMenuVisible = [document.getElementById('firstMenu'), document.getElementById('mainMenu'), document.getElementById('onlineMenu')]
+                .some(m => m && !m.classList.contains('hidden'));
+            const gridEl = document.querySelector('.grid');
+            if (gridEl && gridEl.offsetParent !== null && !anyMenuVisible) {
+                createEdgeCircles();
+                return;
+            }
+        }
         // Also update circle size variable
         document.documentElement.style.setProperty('--edge-circle-size', computeEdgeCircleSize() + 'px');
     }, { passive: true });
@@ -1910,6 +1929,60 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch { /* ignore measure issues */ }
 
         return size;
+    }
+
+    // Compute positional classes for player edge circles based on count and restriction
+    function computeEdgePositions(count, restrict) {
+        // Corner order: bottom-left, bottom-right, top-right, top-left
+        const corners = ['pos-corner-bl', 'pos-corner-br', 'pos-corner-tr', 'pos-corner-tl'];
+        const positions = [];
+        if (count <= 0) return positions;
+
+        if (count === 2) {
+            if (restrict === 'side') {
+                return ['pos-top-center', 'pos-bottom-center'];
+            } else {
+                return ['pos-left-center', 'pos-right-center'];
+            }
+        }
+
+        if (count === 3) {
+            return corners.slice(0, 3);
+        }
+
+        if (count === 4) {
+            return corners.slice(0, 4);
+        }
+
+        if (count === 5) {
+            const base = corners.slice(0, 4);
+            const extra = (restrict === 'side') ? ['pos-top-center'] : ['pos-left-center'];
+            return base.concat(extra);
+        }
+
+        if (count === 6) {
+            const base = corners.slice(0, 4);
+            const extras = (restrict === 'side') ? ['pos-top-center', 'pos-bottom-center'] : ['pos-left-center', 'pos-right-center'];
+            return base.concat(extras);
+        }
+
+        if (count === 7) {
+            const base = corners.slice(0, 4);
+            if (restrict === 'side') {
+                // two on top (1/3, 2/3) + one on bottom center
+                return base.concat(['pos-top-mid1', 'pos-top-mid2', 'pos-bottom-center']);
+            } else {
+                // two on left (1/3, 2/3) + one on right center
+                return base.concat(['pos-left-mid1', 'pos-left-mid2', 'pos-right-center']);
+            }
+        }
+
+        // 8 or more: use the full pattern (4 corners + 2 + 2 on free sides)
+        if (restrict === 'side') {
+            return corners.concat(['pos-top-mid1', 'pos-top-mid2', 'pos-bottom-mid1', 'pos-bottom-mid2']).slice(0, count);
+        } else {
+            return corners.concat(['pos-left-mid1', 'pos-left-mid2', 'pos-right-mid1', 'pos-right-mid2']).slice(0, count);
+        }
     }
 
 

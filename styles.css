@@ -25,23 +25,27 @@
 }
 
 /* Positioning for 8 circles: 0-3 corners, 4-7 edge-mids. Use restriction class for layout. */
-.edge-circles-container[data-restrict="side"] .edge-circle.c0 { left: 0; top: 0; }
-.edge-circles-container[data-restrict="side"] .edge-circle.c1 { left: 100vw; top: 0; }
-.edge-circles-container[data-restrict="side"] .edge-circle.c2 { left: 0; top: 100vh; }
-.edge-circles-container[data-restrict="side"] .edge-circle.c3 { left: 100vw; top: 100vh; }
-.edge-circles-container[data-restrict="side"] .edge-circle.c4 { left: 33.33vw; top: 0; }
-.edge-circles-container[data-restrict="side"] .edge-circle.c5 { left: 66.66vw; top: 0; }
-.edge-circles-container[data-restrict="side"] .edge-circle.c6 { left: 33.33vw; top: 100vh; }
-.edge-circles-container[data-restrict="side"] .edge-circle.c7 { left: 66.66vw; top: 100vh; }
+/* Corner positions (independent of restriction) */
+.edge-circle.pos-corner-tl { left: 0%; top: 0%; }
+.edge-circle.pos-corner-tr { left: 100%; top: 0%; }
+.edge-circle.pos-corner-bl { left: 0%; top: 100%; }
+.edge-circle.pos-corner-br { left: 100%; top: 100%; }
 
-.edge-circles-container[data-restrict="top"] .edge-circle.c0 { left: 0; top: 0; }
-.edge-circles-container[data-restrict="top"] .edge-circle.c1 { left: 100vw; top: 0; }
-.edge-circles-container[data-restrict="top"] .edge-circle.c2 { left: 0; top: 100vh; }
-.edge-circles-container[data-restrict="top"] .edge-circle.c3 { left: 100vw; top: 100vh; }
-.edge-circles-container[data-restrict="top"] .edge-circle.c4 { left: 0; top: 33.33vh; }
-.edge-circles-container[data-restrict="top"] .edge-circle.c5 { left: 0; top: 66.66vh; }
-.edge-circles-container[data-restrict="top"] .edge-circle.c6 { left: 100vw; top: 33.33vh; }
-.edge-circles-container[data-restrict="top"] .edge-circle.c7 { left: 100vw; top: 66.66vh; }
+/* When sides restrict (width < height), top/bottom are the free edges */
+.edge-circles-container[data-restrict="side"] .edge-circle.pos-top-center { left: 50%; top: 0%; }
+.edge-circles-container[data-restrict="side"] .edge-circle.pos-bottom-center { left: 50%; top: 100%; }
+.edge-circles-container[data-restrict="side"] .edge-circle.pos-top-mid1 { left: 33.33%; top: 0%; }
+.edge-circles-container[data-restrict="side"] .edge-circle.pos-top-mid2 { left: 66.66%; top: 0%; }
+.edge-circles-container[data-restrict="side"] .edge-circle.pos-bottom-mid1 { left: 33.33%; top: 100%; }
+.edge-circles-container[data-restrict="side"] .edge-circle.pos-bottom-mid2 { left: 66.66%; top: 100%; }
+
+/* When top/bottom restrict, left/right are the free edges */
+.edge-circles-container[data-restrict="top"] .edge-circle.pos-left-center { left: 0%; top: 50%; }
+.edge-circles-container[data-restrict="top"] .edge-circle.pos-right-center { left: 100%; top: 50%; }
+.edge-circles-container[data-restrict="top"] .edge-circle.pos-left-mid1 { left: 0%; top: 33.33%; }
+.edge-circles-container[data-restrict="top"] .edge-circle.pos-left-mid2 { left: 0%; top: 66.66%; }
+.edge-circles-container[data-restrict="top"] .edge-circle.pos-right-mid1 { left: 100%; top: 33.33%; }
+.edge-circles-container[data-restrict="top"] .edge-circle.pos-right-mid2 { left: 100%; top: 66.66%; }
 /* Center Host Custom button vertically in online menu */
 .host-custom-btn-wrapper {
     display: flex;

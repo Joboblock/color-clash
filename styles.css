@@ -1,3 +1,46 @@
+.edge-circles-container {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: 1;
+}
+/* Circle diameter: just under 1/3 of the shorter viewport side, minus margin */
+.edge-circle {
+    position: absolute;
+    aspect-ratio: 1/1;
+    border-radius: 50%;
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.65), 0 4px 12px rgba(0,0,0,0.35);
+    background: var(--circle-color, #fff);
+    opacity: 0;
+    animation: edgeCircleFade 420ms ease forwards;
+    width: var(--edge-circle-size, 44px);
+    --circle-color: #fff;
+}
+@keyframes edgeCircleFade {
+    from { opacity: 0; transform: scale(0.6); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+/* Positioning for 8 circles: 0-3 corners, 4-7 edge-mids. Use restriction class for layout. */
+.edge-circles-container[data-restrict="side"] .edge-circle.c0 { left: 0; top: 0; }
+.edge-circles-container[data-restrict="side"] .edge-circle.c1 { left: 100vw; top: 0; }
+.edge-circles-container[data-restrict="side"] .edge-circle.c2 { left: 0; top: 100vh; }
+.edge-circles-container[data-restrict="side"] .edge-circle.c3 { left: 100vw; top: 100vh; }
+.edge-circles-container[data-restrict="side"] .edge-circle.c4 { left: 33.33vw; top: 0; }
+.edge-circles-container[data-restrict="side"] .edge-circle.c5 { left: 66.66vw; top: 0; }
+.edge-circles-container[data-restrict="side"] .edge-circle.c6 { left: 33.33vw; top: 100vh; }
+.edge-circles-container[data-restrict="side"] .edge-circle.c7 { left: 66.66vw; top: 100vh; }
+
+.edge-circles-container[data-restrict="top"] .edge-circle.c0 { left: 0; top: 0; }
+.edge-circles-container[data-restrict="top"] .edge-circle.c1 { left: 100vw; top: 0; }
+.edge-circles-container[data-restrict="top"] .edge-circle.c2 { left: 0; top: 100vh; }
+.edge-circles-container[data-restrict="top"] .edge-circle.c3 { left: 100vw; top: 100vh; }
+.edge-circles-container[data-restrict="top"] .edge-circle.c4 { left: 0; top: 33.33vh; }
+.edge-circles-container[data-restrict="top"] .edge-circle.c5 { left: 0; top: 66.66vh; }
+.edge-circles-container[data-restrict="top"] .edge-circle.c6 { left: 100vw; top: 33.33vh; }
+.edge-circles-container[data-restrict="top"] .edge-circle.c7 { left: 100vw; top: 66.66vh; }
 /* Center Host Custom button vertically in online menu */
 .host-custom-btn-wrapper {
     display: flex;
@@ -809,6 +852,32 @@ body.blue { background-color: var(--body-blue); }
 body.purple { background-color: var(--body-purple); }
 body.magenta { background-color: var(--body-magenta); }
 /* #endregion */
+
+/* Edge circles overlay (corner + side indicator dots) */
+.edge-circles-container {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: 1; /* Below menus (z=100) but above page background */
+}
+.edge-circle {
+    position: absolute;
+    width: var(--edge-circle-size, 44px);
+    height: var(--edge-circle-size, 44px);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.65), 0 4px 12px rgba(0,0,0,0.35);
+    background: #fff;
+    opacity: 0;
+    animation: edgeCircleFade 420ms ease forwards;
+}
+
+@keyframes edgeCircleFade {
+    from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
 
 /* Top-right menu close button style */
 .menu-color-box.menu-close-btn {

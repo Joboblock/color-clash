@@ -2,6 +2,15 @@
 const PLAYER_NAME_LENGTH = 12;
 document.addEventListener('DOMContentLoaded', () => {
     // Shared name sanitization and validity functions (top-level)
+    // On load, if grid is visible and no menu is open, show edge circles
+    setTimeout(() => {
+        const gridEl = document.querySelector('.grid');
+        const menus = [document.getElementById('firstMenu'), document.getElementById('mainMenu'), document.getElementById('onlineMenu')];
+        const anyMenuVisible = menus.some(m => m && !m.classList.contains('hidden'));
+        if (gridEl && gridEl.offsetParent !== null && !anyMenuVisible) {
+            try { createEdgeCircles(); } catch { /* ignore */ }
+        }
+    }, 0);
     function sanitizeName(raw) {
         if (typeof raw !== 'string') return '';
         let s = raw.replace(/\s+/g, '_');
@@ -266,6 +275,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentPlayer = 0;
                     document.body.className = activeColors()[currentPlayer];
                     updateGrid();
+                    try { createEdgeCircles(); } catch { /* ignore */ }
                 } catch (err) {
                     console.error('[Online] Failed to start online game', err);
                 }
@@ -1756,6 +1766,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (mainMenu) mainMenu.classList.add('hidden');
             trainMode = false;
             recreateGrid(s, p);
+            createEdgeCircles();
         } else if (mode === 'host') {
             // Host the room when clicking the start button in host mode
             hostRoom();
@@ -1778,6 +1789,7 @@ document.addEventListener('DOMContentLoaded', () => {
             trainMode = true;
             try { aiDepth = Math.max(1, parseInt(String(aiPreviewValue), 10)); } catch { /* ignore */ }
             recreateGrid(s, p);
+            createEdgeCircles();
         }
     });
 
@@ -1817,6 +1829,68 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     //#endregion
+
+    // Edge circles overlay: 4 corner dots plus 2+2 on the non-restricting sides
+
+    function getRestrictionType() {
+        const vw = window.innerWidth || document.documentElement.clientWidth || 1;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 1;
+        return vw < vh ? 'side' : 'top';
+    }
+
+    function createEdgeCircles() {
+        // Remove old container
+        const old = document.getElementById('edgeCirclesContainer');
+        if (old && old.parentNode) old.parentNode.removeChild(old);
+
+        // Do not show when any menu overlay is visible
+        const anyMenuVisible = [document.getElementById('firstMenu'), document.getElementById('mainMenu'), document.getElementById('onlineMenu')]
+            .some(m => m && !m.classList.contains('hidden'));
+        if (anyMenuVisible) return;
+
+        const container = document.createElement('div');
+        container.id = 'edgeCirclesContainer';
+        container.className = 'edge-circles-container';
+        container.setAttribute('data-restrict', getRestrictionType());
+
+        // Use color palette for 8 circles
+        const colors = (() => {
+            try {
+                const n = playerColors.length;
+                const seq = [];
+                for (let i = 0; i < 8; i++) seq.push(playerColors[(startingColorIndex + i) % n]);
+                return seq;
+            } catch { return ['green','red','blue','yellow','magenta','cyan','orange','purple']; }
+        })();
+        const colorHex = (key) => {
+            try { return innerCircleColors[key] || '#fff'; } catch { return '#fff'; }
+        };
+        for (let i = 0; i < 8; i++) {
+            const d = document.createElement('div');
+            d.className = 'edge-circle c' + i;
+            d.style.setProperty('--circle-color', colorHex(colors[i % colors.length]));
+            container.appendChild(d);
+        }
+        document.body.appendChild(container);
+        // Set circle size variable
+        const vw = window.innerWidth || document.documentElement.clientWidth || 1;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 1;
+        const base = Math.floor(Math.min(vw, vh) / 3 - 8);
+        const size = Math.max(22, Math.min(base, 160));
+        document.documentElement.style.setProperty('--edge-circle-size', size + 'px');
+    }
+
+    // Only need to update the restriction type on resize
+    window.addEventListener('resize', () => {
+        const container = document.getElementById('edgeCirclesContainer');
+        if (container) container.setAttribute('data-restrict', getRestrictionType());
+            // Also update circle size variable
+            const vw = window.innerWidth || document.documentElement.clientWidth || 1;
+            const vh = window.innerHeight || document.documentElement.clientHeight || 1;
+            const base = Math.floor(Math.min(vw, vh) / 3 - 16);
+            const size = Math.max(22, Math.min(base, 160));
+            document.documentElement.style.setProperty('--edge-circle-size', size + 'px');
+    }, { passive: true });
 
 
     //#region Menu Functions
@@ -1858,6 +1932,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         gameColors = computeSelectedColors(p);
         recreateGrid(Math.max(3, s), p);
+        createEdgeCircles();
     }
     // Note: color cycler remains active during slider animations; no lock/disable needed.
     /**

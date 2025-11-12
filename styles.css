@@ -17,10 +17,11 @@
     animation: edgeCircleFade 420ms ease forwards;
     width: var(--edge-circle-size, 44px);
     --circle-color: #fff;
+    transform: translate(-50%, -50%);
 }
 @keyframes edgeCircleFade {
-    from { opacity: 0; transform: scale(0.6); }
-    to { opacity: 1; transform: scale(1); }
+    from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 
 /* Positioning for 8 circles: 0-3 corners, 4-7 edge-mids. Use restriction class for layout. */

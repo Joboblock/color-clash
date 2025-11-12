@@ -1871,26 +1871,46 @@ document.addEventListener('DOMContentLoaded', () => {
             d.style.setProperty('--circle-color', colorHex(colors[i % colors.length]));
             container.appendChild(d);
         }
-        document.body.appendChild(container);
-        // Set circle size variable
-        const vw = window.innerWidth || document.documentElement.clientWidth || 1;
-        const vh = window.innerHeight || document.documentElement.clientHeight || 1;
-        const base = Math.floor(Math.min(vw, vh) / 3 - 8);
-        const size = Math.max(22, Math.min(base, 160));
-        document.documentElement.style.setProperty('--edge-circle-size', size + 'px');
+    document.body.appendChild(container);
+    // Set circle size variable using viewport and grid dimensions
+    document.documentElement.style.setProperty('--edge-circle-size', computeEdgeCircleSize() + 'px');
     }
 
     // Only need to update the restriction type on resize
     window.addEventListener('resize', () => {
         const container = document.getElementById('edgeCirclesContainer');
         if (container) container.setAttribute('data-restrict', getRestrictionType());
-            // Also update circle size variable
-            const vw = window.innerWidth || document.documentElement.clientWidth || 1;
-            const vh = window.innerHeight || document.documentElement.clientHeight || 1;
-            const base = Math.floor(Math.min(vw, vh) / 3 - 16);
-            const size = Math.max(22, Math.min(base, 160));
-            document.documentElement.style.setProperty('--edge-circle-size', size + 'px');
+        // Also update circle size variable
+        document.documentElement.style.setProperty('--edge-circle-size', computeEdgeCircleSize() + 'px');
     }, { passive: true });
+
+    // Compute edge circle size considering viewport, grid, and caps
+    function computeEdgeCircleSize() {
+        const vw = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+        const vh = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+
+        // Base: just under 1/3 of shorter side, minus margin, hard-capped
+        const base = Math.floor(Math.min(vw, vh) / 3 - 16);
+        const hardCap = 160;
+        let size = Math.max(22, Math.min(base, hardCap));
+
+        // Additional restriction: diameter <= (larger screen dim - matching grid dim - 16px)
+        try {
+            const gridEl = document.querySelector('.grid');
+            if (gridEl) {
+                const rect = gridEl.getBoundingClientRect();
+                const useWidth = vw >= vh; // pick the larger screen dimension
+                const screenDim = useWidth ? vw : vh;
+                const gridDim = useWidth ? rect.width : rect.height;
+                const spare = Math.max(0, Math.floor(screenDim - gridDim));
+                // 16px safety margin to avoid touching grid
+                const gridCap = Math.max(0, spare - 16);
+                size = Math.max(22, Math.min(size, gridCap));
+            }
+        } catch { /* ignore measure issues */ }
+
+        return size;
+    }
 
 
     //#region Menu Functions

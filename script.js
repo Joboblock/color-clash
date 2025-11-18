@@ -1389,7 +1389,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // inner circle strong color (hex)
         document.documentElement.style.setProperty(`--inner-${key}`, hex);
         // cell color: pastel mix toward white (opaque), use 50% white by default
-        const pastel = mixWithWhite(hex, 0.5);
+    // Pastel cell color: mix original toward white (grayscale 255) by 50%
+    const pastel = mixTowardGray(hex, 255, 0.5);
         document.documentElement.style.setProperty(`--cell-${key}`, pastel);
         // body color: slightly darker by multiplying channels
         const dark = (c) => Math.max(0, Math.min(255, Math.round(c * 0.88)));
@@ -1870,7 +1871,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const key = ac[idx % ac.length];
             const base = colorHex(key);
             d.style.setProperty('--circle-color', base);
-            d.style.setProperty('--circle-color-dim', mixWithBlack(base, 0.25));
+            // Dim inactive circle color: mix original toward black (grayscale 0) by 25%
+            d.style.setProperty('--circle-color-dim', mixTowardGray(base, 0, 0.25));
             container.appendChild(d);
         });
     document.body.appendChild(container);
@@ -2018,6 +2020,30 @@ document.addEventListener('DOMContentLoaded', () => {
             el.classList.toggle('is-active', idx === activeIdx);
             el.classList.toggle('is-inactive', idx !== activeIdx);
         });
+
+        // Also dim the page background toward black when it's not the local player's turn
+        try {
+            const ac = (typeof activeColors === 'function') ? activeColors() : playerColors;
+            const key = ac[activeIdx % ac.length];
+            const baseBody = getComputedStyle(document.documentElement).getPropertyValue(`--body-${key}`).trim();
+            const notMyTurn = (() => {
+                if (typeof onlineGameActive !== 'undefined' && onlineGameActive) {
+                    return typeof myOnlineIndex === 'number' ? (currentPlayer !== myOnlineIndex) : true;
+                }
+                if (typeof trainMode !== 'undefined' && trainMode) {
+                    const hp = (typeof humanPlayer === 'number') ? humanPlayer : 0;
+                    return currentPlayer !== hp;
+                }
+                // Local hotseat: always "my" turn (no dimming)
+                return false;
+            })();
+            if (notMyTurn) {
+                document.body.style.backgroundColor = mixTowardGray(baseBody || '#000', 128, 0.66);
+            } else {
+                // Clear inline style so the class-based background applies
+                document.body.style.backgroundColor = '';
+            }
+        } catch { /* no-op */ }
     }
 
 
@@ -2457,6 +2483,47 @@ document.addEventListener('DOMContentLoaded', () => {
         for (let i = 0; i < c; i++) arr.push(playerColors[(startingColorIndex + i) % n]);
         return arr;
     }
+
+    /**
+     * Generic mix of a hex color toward a grayscale target value.
+     * Replaces mixWithWhite and mixWithBlack.
+     * @param {string} hex - source color (#rgb or #rrggbb).
+     * @param {number} [gray=128] - grayscale target channel 0..255 (0=black, 255=white).
+     * @param {number} [factor=0.5] - blend factor 0..1 (0 = original, 1 = fully gray).
+     * @returns {string} css rgb(r,g,b) color string.
+     */
+    function mixTowardGray(color, gray = 128, factor = 0.5) {
+        // Clamp inputs
+        if (typeof gray !== 'number' || isNaN(gray)) gray = 128;
+        gray = Math.max(0, Math.min(255, Math.round(gray)));
+        if (typeof factor !== 'number' || isNaN(factor)) factor = 0.5;
+        factor = Math.max(0, Math.min(1, factor));
+        const { r, g, b } = cssColorToRgb(color);
+        const mix = (c) => Math.round((1 - factor) * c + factor * gray);
+        return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+    }
+
+    /**
+     * Parse a CSS color string (#hex or rgb/rgba) into RGB channels.
+     * @param {string} color - CSS color string.
+     * @returns {{r:number,g:number,b:number}}
+     */
+    function cssColorToRgb(color) {
+        if (!color || typeof color !== 'string') return { r: 0, g: 0, b: 0 };
+        const c = color.trim();
+        if (c.startsWith('#')) return hexToRgb(c);
+        // rgb or rgba
+        const m = c.match(/rgba?\s*\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/i);
+        if (m) {
+            const r = Math.max(0, Math.min(255, parseInt(m[1], 10)));
+            const g = Math.max(0, Math.min(255, parseInt(m[2], 10)));
+            const b = Math.max(0, Math.min(255, parseInt(m[3], 10)));
+            return { r, g, b };
+        }
+        // Fallback
+        return { r: 0, g: 0, b: 0 };
+    }
+
     /**
      * Convert hex color string (#rgb or #rrggbb) to RGB components.
      * @param {string} hex - color in hex form.
@@ -2467,32 +2534,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
         const bigint = parseInt(full, 16);
         return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
-    }
-
-
-    /**
-     * Mix a hex color with white to produce a pastel RGB color.
-     * @param {string} hex - base hex color.
-     * @param {number} [factor=0.5] - portion of white (0..1).
-     * @returns {string} css rgb(r,g,b) color string.
-     */
-    function mixWithWhite(hex, factor = 0.5) {
-        // factor = portion of white (0..1)
-        const { r, g, b } = hexToRgb(hex);
-        const mix = (c) => Math.round((1 - factor) * c + factor * 255);
-        return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
-    }
-
-    /**
-     * Mix a hex color with black to dim it toward black.
-     * @param {string} hex - base hex color.
-     * @param {number} [factor=0.45] - portion of black (0..1).
-     * @returns {string} css rgb(r,g,b) color string.
-     */
-    function mixWithBlack(hex, factor = 0.45) {
-        const { r, g, b } = hexToRgb(hex);
-        const mix = (c) => Math.round((1 - factor) * c + factor * 0);
-        return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
     }
 
     /**

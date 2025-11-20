@@ -7,7 +7,7 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Launch Server & Open Browser",
+      "name": "Server Start",
       "program": "${workspaceFolder}/server.js",
       "console": "integratedTerminal",
       "serverReadyAction": {

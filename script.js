@@ -1,4 +1,7 @@
 import { PlayerBoxSlider } from './src/components/playerBoxSlider.js';
+import { ColorCycler } from './src/components/colorCycler.js';
+import { GridSizeTile } from './src/components/gridSizeTile.js';
+
 // Player name length limit (base, not including suffix)
 const PLAYER_NAME_LENGTH = 12;
 document.addEventListener('DOMContentLoaded', () => {
@@ -315,13 +318,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     if (Number.isInteger(msg.gridSize)) {
                         const s = Math.max(3, Math.min(16, parseInt(msg.gridSize, 10)));
-                        // Sync display value but don't alter selected player count here
                         menuGridSizeVal = s;
-                        if (typeof reflectGridSizeDisplay === 'function') reflectGridSizeDisplay();
-                        if (s !== gridSize) {
-                            // Keep current playerCount for background; size is what matters here
-                            recreateGrid(s, playerCount);
-                        }
+                        try { gridSizeTile && gridSizeTile.setSize(s, 'network', { silent: true, bump: false }); } catch { /* ignore */ }
+                        if (s !== gridSize) recreateGrid(s, playerCount);
                     }
                 } catch { /* ignore */ }
                 updateStartButtonState();
@@ -953,6 +952,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const playerNameInput = document.getElementById('playerName');
     const gridDecBtn = document.getElementById('gridDec');
     const gridIncBtn = document.getElementById('gridInc');
+    // GridSizeTile component (ESM) replacing legacy reflect/adjust functions
+    let gridSizeTile = null;
+    try {
+        gridSizeTile = new GridSizeTile({
+            decButtonEl: gridDecBtn,
+            incButtonEl: gridIncBtn,
+            valueEl: gridValueEl,
+            getPlayerCount: () => menuPlayerCount,
+            getRecommendedSize: (p) => recommendedGridSize(p),
+            getGameGridSize: () => gridSize,
+            initialSize: Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : recommendedGridSize(menuPlayerCount),
+            onSizeChange: (newSize, reason) => {
+                menuGridSizeVal = newSize; // keep legacy variable for transitional code paths
+                if (newSize !== gridSize) {
+                    try { recreateGrid(newSize, playerCount); } catch { /* ignore */ }
+                }
+                console.debug('[GridSizeTile] onSizeChange ->', newSize, `(reason=${reason})`);
+            }
+        });
+    } catch (e) { console.debug('[GridSizeTile] init failed', e); }
     const aiPreviewCell = document.getElementById('aiPreviewCell');
 
     // Initialize AI preview value from URL (?ai_depth=) if present, else 1; clamp to 1..5 for UI
@@ -1433,10 +1452,11 @@ document.addEventListener('DOMContentLoaded', () => {
     menuPlayerCount = clampPlayers(playerCount);
     updateSizeBoundsForPlayers(menuPlayerCount);
 
-    // Initialize color cycler component for main and online menus
+    // Initialize color cycler component for main and online menus (ESM)
     const onlineMenuColorCycle = document.getElementById('onlineMenuColorCycle');
-    (window.ColorCycler)
-        ? new window.ColorCycler({
+    console.debug('[ColorCycler][ESM] import ok:', { selected: ColorCycler?.name || 'anonymous' });
+    const colorCycler = ColorCycler
+        ? new ColorCycler({
             mainEl: menuColorCycle,
             onlineEl: onlineMenuColorCycle,
             getColors: () => playerColors,
@@ -1449,11 +1469,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 return !!(m1 || m2);
             },
             onChange: (idx) => {
+                console.debug('[ColorCycler] onChange ->', idx);
                 try { slider && slider.previewShiftLeftThenSnap(() => slider.updateColorsForIndex(idx)); } catch { /* ignore */ }
                 try { updateAIPreview(); } catch { /* ignore */ }
             }
         })
         : null;
+    if (!ColorCycler) {
+        console.debug('[ColorCycler][ESM] import missing; instantiate skipped');
+    } else {
+        console.debug('[ColorCycler] instance created:', !!colorCycler);
+    }
     // Ensure initial slider colors and AI preview are in sync
     try {
         if (slider) {
@@ -1474,64 +1500,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch { /* ignore */ }
     });
 
-    // Stepper buttons for grid size
-    function setAriaDisabledButton(btn, disabled) {
-        if (!btn) return;
-        // Always keep native disabled off so element stays focusable
-        try { btn.disabled = false; } catch { /* ignore */ }
-        if (disabled) {
-            btn.setAttribute('aria-disabled', 'true');
-        } else {
-            btn.removeAttribute('aria-disabled');
-        }
-    }
-    function reflectGridSizeDisplay() {
-        if (gridValueEl) {
-            gridValueEl.textContent = String(menuGridSizeVal);
-        }
-        // Dynamic lower bound depends on player count
-        const minForPlayers = recommendedGridSize(menuPlayerCount);
-        // Keep buttons focusable but mark non-interactive via aria-disabled
-        setAriaDisabledButton(gridDecBtn, menuGridSizeVal <= minForPlayers);
-        setAriaDisabledButton(gridIncBtn, menuGridSizeVal >= 16);
-    }
-
-    function bumpValueAnimation() {
-        if (!gridValueEl) return;
-        gridValueEl.classList.remove('bump');
-        // force reflow to restart animation
-        void gridValueEl.offsetWidth;
-        gridValueEl.classList.add('bump');
-    }
-
-    function adjustGridSize(delta) {
-        const minForPlayers = recommendedGridSize(menuPlayerCount);
-        let v = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : recommendedGridSize(menuPlayerCount);
-        v = Math.max(minForPlayers, Math.min(16, v + delta));
-        menuGridSizeVal = v;
-        reflectGridSizeDisplay();
-        bumpValueAnimation();
-        if (v !== gridSize) recreateGrid(v, playerCount);
-    }
-    if (gridDecBtn) gridDecBtn.addEventListener('click', (e) => {
-        if (gridDecBtn.getAttribute('aria-disabled') === 'true') { e.preventDefault(); e.stopPropagation(); return; }
-        adjustGridSize(-1);
-    });
-    if (gridIncBtn) gridIncBtn.addEventListener('click', (e) => {
-        if (gridIncBtn.getAttribute('aria-disabled') === 'true') { e.preventDefault(); e.stopPropagation(); return; }
-        adjustGridSize(1);
-    });
-
-    // Make +/- controls operable via keyboard even if not native buttons
-    function makeAccessibleButton(el) {
-        if (!el) return;
-        const isButton = el.tagName && el.tagName.toLowerCase() === 'button';
-        if (!isButton) {
-            el.setAttribute('role', 'button');
-            if (!el.hasAttribute('tabindex')) el.tabIndex = 0;
-        }
-    }
-    makeAccessibleButton(gridDecBtn);
+    // Stepper buttons for grid size now handled by GridSizeTile component
     // Utility: check if any menu overlay is open
     function isAnyMenuOpen() {
         const menus = [mainMenu, firstMenu, document.getElementById('onlineMenu')];
@@ -2176,11 +2145,10 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function updateSizeBoundsForPlayers(pCount) {
         const minForPlayers = recommendedGridSize(pCount);
-        // If current selection below new minimum, bump it; otherwise keep user custom size
         if (!Number.isInteger(menuGridSizeVal) || menuGridSizeVal < minForPlayers) {
             menuGridSizeVal = minForPlayers;
         }
-        reflectGridSizeDisplay();
+        try { gridSizeTile && gridSizeTile.applyPlayerCountBounds({ silent: true }); } catch { /* ignore */ }
     }
 
     // Sync functions
@@ -2200,20 +2168,14 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} may recreate the grid to reflect new settings.
      */
     function onMenuPlayerCountChanged(newCount) {
-        // Only update if the resulting grid size would change
         const minForPlayers = recommendedGridSize(newCount);
         const desired = defaultGridSizeForPlayers(newCount);
         const newGridSize = Math.max(minForPlayers, desired);
         if (newGridSize !== menuGridSizeVal) {
             menuPlayerCount = newCount;
             menuGridSizeVal = newGridSize;
-            reflectGridSizeDisplay();
-            bumpValueAnimation();
-
-            // Recreate grid immediately to the auto-selected default for this player count
+            try { gridSizeTile && gridSizeTile.setSize(newGridSize, 'playerCount'); } catch { /* ignore */ }
             recreateGrid(menuGridSizeVal, newCount);
-
-            // Update UI highlights afterward via slider (no extra grid work)
             try { slider && slider.setCount(newCount, { silent: true }); } catch { /* ignore */ }
         }
     }
@@ -2476,8 +2438,8 @@ document.addEventListener('DOMContentLoaded', () => {
         try { updateEdgeCirclesActive(); } catch { /* ignore */ }
 
         // Reflect actual grid size in display value while menu is present
-        menuGridSizeVal = Math.max(3, newSize);
-        reflectGridSizeDisplay();
+    menuGridSizeVal = Math.max(3, newSize);
+    try { gridSizeTile && gridSizeTile.setSize(menuGridSizeVal, 'gridRebuild', { silent: true, bump: false }); } catch { /* ignore */ }
 
         // Ensure the visual player boxes reflect new player count via component
         try { slider && slider.setCount(clampPlayers(playerCount), { silent: true }); } catch { /* ignore */ }

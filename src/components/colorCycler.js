@@ -1,8 +1,7 @@
-;(function (global) {
-	'use strict';
+// ES Module version of ColorCycler
 
-	/**
-	 * ColorCycler manages the starting color selection UI across one or two cycler elements.
+/**
+ * ColorCycler manages the starting color selection UI across one or two cycler elements.
 	 * It applies CSS variables to the cycler buttons, persists selection, and can tint the page
 	 * background while a menu is open. It does not own game logic; callers provide get/set index
 	 * and can react to changes via onChange.
@@ -121,8 +120,7 @@
 		return elOrId;
 	}
 
-	function ensureFn(fn, fallback) { return (typeof fn === 'function') ? fn : fallback; }
-	function tryParseInt(s) { try { const n = parseInt(String(s), 10); return Number.isNaN(n) ? null : n; } catch { return null; } }
+function ensureFn(fn, fallback) { return (typeof fn === 'function') ? fn : fallback; }
+function tryParseInt(s) { try { const n = parseInt(String(s), 10); return Number.isNaN(n) ? null : n; } catch { return null; } }
 
-	global.ColorCycler = ColorCycler;
-})(window);
+export { ColorCycler };

@@ -1093,7 +1093,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 setHidden(firstMenu, false);
         }
         // When showing any menu overlay, ensure background color mirrors cycler
-        setMenuBodyColor();
+        try {
+            const colorKey = playerColors[startingColorIndex] || 'green';
+            document.body.className = colorKey;
+        } catch { /* ignore */ }
         // Update AI preview if train menu is shown
         if (menuKey === 'train') {
             try { updateAIPreview(); } catch { /* ignore */ }
@@ -1415,61 +1418,30 @@ document.addEventListener('DOMContentLoaded', () => {
     menuPlayerCount = clampPlayers(playerCount);
     updateSizeBoundsForPlayers(menuPlayerCount);
 
-    // Initialize and bind
-    applyMenuColorBox(playerColors[startingColorIndex]);
-    // Ensure the first box colors match the cycler initially
-    try { slider && slider.updateColors(); } catch { /* ignore */ }
-    // Set initial background to match current cycler while menu is open
-    setMenuBodyColor();
-    if (menuColorCycle) {
-        menuColorCycle.tabIndex = 0; // focusable for accessibility
-        // Load saved color cycler index from localStorage if available
-        const savedColorIndex = localStorage.getItem('colorCyclerIndex');
-        if (savedColorIndex !== null && !isNaN(savedColorIndex)) {
-            startingColorIndex = Math.max(0, Math.min(playerColors.length - 1, parseInt(savedColorIndex, 10)));
-            applyMenuColorBox(playerColors[startingColorIndex]);
-            try { slider && slider.updateColors(); } catch { /* ignore */ }
-            setMenuBodyColor();
-        }
-        menuColorCycle.addEventListener('click', () => {
-            // Advance color and animate slider shift; component handles preview animation
-            cycleStartingColor();
-            const idx = startingColorIndex; // capture the intended mapping index for this animation
-            try { slider && slider.previewShiftLeftThenSnap(() => slider.updateColorsForIndex(idx)); } catch { /* ignore */ }
-            updateAIPreview();
-            // Save color cycler index to localStorage
-            localStorage.setItem('colorCyclerIndex', startingColorIndex);
-        });
-    }
-
-    // Online menu color cycler functionality (reuse main cycler logic)
+    // Initialize color cycler component for main and online menus
     const onlineMenuColorCycle = document.getElementById('onlineMenuColorCycle');
-    if (onlineMenuColorCycle) {
-        onlineMenuColorCycle.tabIndex = 0;
-        // Load saved color cycler index from localStorage if available
-        const savedColorIndex = localStorage.getItem('colorCyclerIndex');
-        if (savedColorIndex !== null && !isNaN(savedColorIndex)) {
-            startingColorIndex = Math.max(0, Math.min(playerColors.length - 1, parseInt(savedColorIndex, 10)));
-            applyMenuColorBox(playerColors[startingColorIndex]);
-            try { slider && slider.updateColors(); } catch { /* ignore */ }
-        } else {
-            applyMenuColorBox(playerColors[startingColorIndex]);
-        }
-        const onlineMenu = document.getElementById('onlineMenu');
-        onlineMenuColorCycle.addEventListener('click', () => {
-            cycleStartingColor();
-            const idx = startingColorIndex;
-            try { slider && slider.previewShiftLeftThenSnap(() => slider.updateColorsForIndex(idx)); } catch { /* ignore */ }
-            updateAIPreview();
-            // Save color cycler index to localStorage
-            localStorage.setItem('colorCyclerIndex', startingColorIndex);
-            // Change background color for online menu
-            if (onlineMenu && !onlineMenu.classList.contains('hidden')) {
-                const colorKey = playerColors[startingColorIndex] || 'green';
-                document.body.className = colorKey;
+    (window.ColorCycler)
+        ? new window.ColorCycler({
+            mainEl: menuColorCycle,
+            onlineEl: onlineMenuColorCycle,
+            getColors: () => playerColors,
+            getIndex: () => startingColorIndex,
+            setIndex: (idx) => { startingColorIndex = Math.max(0, Math.min(playerColors.length - 1, idx|0)); },
+            isMenuOpen: () => {
+                const m1 = mainMenu && !mainMenu.classList.contains('hidden');
+                const om = document.getElementById('onlineMenu');
+                const m2 = om && !om.classList.contains('hidden');
+                return !!(m1 || m2);
+            },
+            onChange: (idx) => {
+                try { slider && slider.previewShiftLeftThenSnap(() => slider.updateColorsForIndex(idx)); } catch { /* ignore */ }
+                try { updateAIPreview(); } catch { /* ignore */ }
             }
-        });
-    }
+        })
+        : null;
+    // Ensure initial slider colors and AI preview are in sync
+    try { slider && slider.updateColors(); } catch { /* ignore */ }
+    try { updateAIPreview(); } catch { /* ignore */ }
 
     // Handle browser navigation to toggle between menu and game instead of leaving the app
     window.addEventListener('popstate', applyStateFromUrl);
@@ -2074,24 +2046,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return idx >= 0 ? idx : 0;
     }
 
-    /**
-     * Update the color cycler UI element to reflect the provided color key.
-     * @param {string} colorKey - selected base color.
-     * @returns {void}
-     */
-    function applyMenuColorBox(colorKey) {
-        // Apply color to both main and online cyclers if present
-        const cyclers = [
-            document.getElementById('menuColorCycle'),
-            document.getElementById('onlineMenuColorCycle')
-        ].filter(Boolean);
-        const outer = getComputedStyle(document.documentElement).getPropertyValue(`--cell-${colorKey}`) || '';
-        const inner = getComputedStyle(document.documentElement).getPropertyValue(`--inner-${colorKey}`) || '';
-        cyclers.forEach(cycler => {
-            cycler.style.setProperty('--menu-outer-color', outer.trim());
-            cycler.style.setProperty('--menu-inner-color', inner.trim());
-        });
-    }
 
     /**
      * Update the AI preview tile to show the next color after the current starting color.
@@ -2127,26 +2081,6 @@ document.addEventListener('DOMContentLoaded', () => {
         aiPreviewCell.setAttribute('role', 'button');
         aiPreviewCell.tabIndex = 0;
         aiPreviewCell.addEventListener('click', onAIPreviewClick);
-    }
-
-    /**
-     * While the menu is open, tint the page background to the current cycler color.
-     * @returns {void}
-     */
-    function setMenuBodyColor() {
-        if (!mainMenu || mainMenu.classList.contains('hidden')) return;
-        const colorKey = playerColors[startingColorIndex] || 'green';
-        document.body.className = colorKey;
-    }
-
-    /**
-     * Advance the starting color cycler by one and update dependent UI.
-     * @returns {void}
-     */
-    function cycleStartingColor() {
-        startingColorIndex = (startingColorIndex + 1) % playerColors.length;
-        applyMenuColorBox(playerColors[startingColorIndex]);
-        setMenuBodyColor();
     }
 
     /**

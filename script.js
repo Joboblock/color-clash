@@ -1,5 +1,12 @@
 import { OnlineConnection } from './src/online/connection.js';
 import { AIStrengthTile } from './src/components/aiStrengthTile.js';
+// Page modules & registry
+import firstPage from './src/pages/first.js';
+import localPage from './src/pages/local.js';
+import onlinePage from './src/pages/online.js';
+import hostPage from './src/pages/host.js';
+import practicePage from './src/pages/practice.js';
+import { pageRegistry } from './src/pages/registry.js';
 
 import { MenuCloseButton } from './src/components/menuCloseButton.js';
 import { PlayerNameFields } from './src/components/playerNameFields.js';
@@ -795,57 +802,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showMenuFor(menuKey) {
-        const onlineMenu = document.getElementById('onlineMenu');
-        // Default hide all
-        setHidden(firstMenu, true);
-        setHidden(mainMenu, true);
-        if (onlineMenu) setHidden(onlineMenu, true);
-        // Clear host marker unless entering host
-        if (mainMenu) {
-            try { delete mainMenu.dataset.openedBy; } catch { /* ignore */ }
-        }
-        switch (menuKey) {
-            case 'first':
-                setHidden(firstMenu, false);
-                break;
-            case 'local':
-                setHidden(mainMenu, false);
-                setMainMenuMode('local');
-                break;
-            case 'online':
-                if (onlineMenu) setHidden(onlineMenu, false);
-                // reflect any online state on button
-                updateStartButtonState();
-                // Always show a reconnecting banner by default when opening the Online menu;
-                // it will be hidden automatically once a connection is established (on ws.onopen)
-                if (!onlineConnection.isConnected()) {
-                    showConnBanner('Reconnecting…', 'info');
-                } else {
-                    hideConnBanner();
-                }
-                break;
-            case 'host':
-                setHidden(mainMenu, false);
-                setMainMenuMode('host');
-                if (mainMenu) mainMenu.dataset.openedBy = 'host';
-                break;
-            case 'practice':
-                setHidden(mainMenu, false);
-                setMainMenuMode('practice');
-                break;
-            default:
-                // Fallback to first
-                setHidden(firstMenu, false);
-        }
-        // When showing any menu overlay, ensure background color mirrors cycler
-        try {
-            const colorKey = playerColors[startingColorIndex] || 'green';
-            document.body.className = colorKey;
-        } catch { /* ignore */ }
-        // Update AI preview if practice menu is shown
-        if (menuKey === 'practice') {
-            try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch { /* ignore */ }
-        }
+        // Build shared context object for page lifecycle hooks.
+        const ctx = {
+            onlineConnection,
+            showConnBanner,
+            hideConnBanner,
+            updateStartButtonState,
+            setMainMenuMode,
+            aiStrengthTile,
+            playerColors,
+            startingColorIndex
+        };
+        pageRegistry.open(menuKey, ctx);
     }
 
     function navigateToMenu(menuKey) {
@@ -885,6 +853,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (aiStrengthTile) aiStrengthTile.style.display = (mode === 'practice') ? '' : 'none';
     }
     // Initial routing based on typed menu param
+    // Register page modules (one-time) & initialize them with shared context
+    const sharedCtx = {
+        onlineConnection,
+        showConnBanner,
+        hideConnBanner,
+        updateStartButtonState,
+        setMainMenuMode,
+        aiStrengthTile,
+        playerColors,
+        startingColorIndex
+    };
+    pageRegistry.register([firstPage, localPage, onlinePage, hostPage, practicePage]);
+    pageRegistry.initAll(sharedCtx);
+
     const typedMenu = getMenuParam();
     if (!typedMenu && hasPlayersOrSize) {
         // Explicit game state: ensure all menus hidden

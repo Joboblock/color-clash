@@ -36,9 +36,9 @@ export class MenuCloseButton {
 
     _computeTargetMenu(current) {
         if (!current) return null;
-        // Match original script.js logic
+        // Match original script.js logic and extended for 'practice'
         if (current === 'host') return 'online';
-        if (current === 'local' || current === 'train' || current === 'online') return 'first';
+        if (current === 'local' || current === 'online' || current === 'practice') return 'first';
         return null;
     }
 

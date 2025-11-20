@@ -1330,9 +1330,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const m2 = om && !om.classList.contains('hidden');
                 return !!(m1 || m2);
             },
-            onChange: (idx) => {
-                console.debug('[ColorCycler] onChange ->', idx);
-                try { slider && slider.previewShiftLeftThenSnap(() => slider.updateColorsForIndex(idx)); } catch { /* ignore */ }
+            onChange: (idx, reason) => {
+                console.debug('[ColorCycler] onChange ->', idx, `(reason=${reason})`);
+                // Suppress initial animation triggered at construction to prevent first-load preview shift
+                if (reason !== 'init') {
+                    try { slider && slider.previewShiftLeftThenSnap(() => slider.updateColorsForIndex(idx)); } catch { /* ignore */ }
+                } else {
+                    // Just apply colors without animation on initial load
+                    try { slider && slider.updateColorsForIndex(idx); } catch { /* ignore */ }
+                }
                 try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch { /* ignore */ }
             }
         })

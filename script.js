@@ -923,8 +923,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.documentElement.style.setProperty('--delay-explosion', `${delayExplosion}ms`);
     document.documentElement.style.setProperty('--delay-animation', `${delayAnimation}ms`);
-    // Global lock to block the color cycler while slider animations run
-    let sliderAnimLocks = 0;
     document.documentElement.style.setProperty('--grid-size', gridSize);
 
     /**
@@ -1346,7 +1344,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Build visual player box slider
     const playerBoxSlider = document.getElementById('playerBoxSlider');
     // inner container that holds the clickable boxes (may be same as slider if wrapper missing)
-    let sliderCells = playerBoxSlider ? (playerBoxSlider.querySelector('.slider-cells') || playerBoxSlider) : null;
+    // PlayerBoxSlider manages its own internal cells container
     // inner-circle color map (match styles.css .inner-circle.* colors)
     const innerCircleColors = {
         red: '#d55f5f',
@@ -1379,18 +1377,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return tips;
     }
 
-    // Cache for computed shadows used by the slider animation
-    let sliderShadowCache = null; // { inactive: string, active: string }
-    // Track the currently running slider preview animation to allow instant finalize on re-trigger
-    let currentSliderPreview = null; // { finalizeNow: () => void, finished: boolean }
-
     // Ensure CSS variables for colors are set on :root BEFORE building boxes
     Object.entries(innerCircleColors).forEach(([key, hex]) => {
         // inner circle strong color (hex)
         document.documentElement.style.setProperty(`--inner-${key}`, hex);
         // cell color: pastel mix toward white (opaque), use 50% white by default
-    // Pastel cell color: mix original toward white (grayscale 255) by 50%
-    const pastel = mixTowardGray(hex, 255, 0.5);
+        // Pastel cell color: mix original toward white (grayscale 255) by 50%
+        const pastel = mixTowardGray(hex, 255, 0.5);
         document.documentElement.style.setProperty(`--cell-${key}`, pastel);
         // body color: slightly darker by multiplying channels
         const dark = (c) => Math.max(0, Math.min(255, Math.round(c * 0.88)));
@@ -1398,52 +1391,34 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.style.setProperty(`--body-${key}`, `rgb(${dark(rr)}, ${dark(gg)}, ${dark(bb)})`);
     });
 
-    // Starting color cycler: init to green and cycle through playerColors on click
-
-    buildPlayerBoxes();
-    // Make the player slider keyboard-accessible
-    if (playerBoxSlider) {
-        playerBoxSlider.setAttribute('role', 'slider');
-        playerBoxSlider.setAttribute('aria-label', 'Player Count');
-        playerBoxSlider.setAttribute('aria-valuemin', '2');
-        playerBoxSlider.setAttribute('aria-valuemax', String(maxPlayers));
-        if (!playerBoxSlider.hasAttribute('tabindex')) playerBoxSlider.tabIndex = 0;
-
-        // Arrow/Home/End keys adjust the player count when the slider itself is focused
-        playerBoxSlider.addEventListener('keydown', (e) => {
-            const key = e.key;
-            let handled = false;
-            let newCount = menuPlayerCount;
-            if (key === 'ArrowLeft' || key === 'a' || key === 'A') {
-                newCount = clampPlayers(menuPlayerCount - 1); handled = true;
-            }
-            else if (key === 'ArrowRight' || key === 'd' || key === 'D') {
-                newCount = clampPlayers(menuPlayerCount + 1); handled = true;
-            }
-            else if (key === 'Home') { newCount = 2; handled = true; }
-            else if (key === 'End') { newCount = maxPlayers; handled = true; }
-            if (handled) {
-                e.preventDefault();
+    // Starting color cycler: init to green and initialize player box slider component
+    const slider = (window.PlayerBoxSlider || window.PlayerSlider)
+        ? new (window.PlayerBoxSlider || window.PlayerSlider)({
+            rootEl: playerBoxSlider,
+            maxPlayers,
+            minPlayers: 2,
+            initialCount: clampPlayers(playerCount),
+            delayAnimation,
+            getPlayerColors: () => playerColors,
+            getStartingColorIndex: () => startingColorIndex,
+            onCountChange: (newCount) => {
                 onMenuPlayerCountChanged(newCount);
             }
-        });
-    }
-    // highlight using initial URL or default
+        })
+        : null;
+
+    // highlight using initial URL or default (without triggering grid rebuild)
     const initialPlayersToShow = clampPlayers(playerCount);
-    highlightPlayerBoxes(initialPlayersToShow);
+    if (slider) slider.setCount(initialPlayersToShow, { silent: true });
 
     // Start with URL or defaults
     menuPlayerCount = clampPlayers(playerCount);
     updateSizeBoundsForPlayers(menuPlayerCount);
 
-    // startingColorIndex declared earlier so it's available to builders below
-
-    // No global dynamic style needed; element-scoped CSS vars control colors
-
     // Initialize and bind
     applyMenuColorBox(playerColors[startingColorIndex]);
-    // Ensure the first box color matches the cycler initially
-    updatePlayerBoxColors();
+    // Ensure the first box colors match the cycler initially
+    try { slider && slider.updateColors(); } catch { /* ignore */ }
     // Set initial background to match current cycler while menu is open
     setMenuBodyColor();
     if (menuColorCycle) {
@@ -1453,15 +1428,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (savedColorIndex !== null && !isNaN(savedColorIndex)) {
             startingColorIndex = Math.max(0, Math.min(playerColors.length - 1, parseInt(savedColorIndex, 10)));
             applyMenuColorBox(playerColors[startingColorIndex]);
-            updatePlayerBoxColors();
+            try { slider && slider.updateColors(); } catch { /* ignore */ }
             setMenuBodyColor();
         }
         menuColorCycle.addEventListener('click', () => {
-            // Advance color and animate slider shift; if a previous animation is in-flight,
-            // it will be finalized and a fresh animation will start.
+            // Advance color and animate slider shift; component handles preview animation
             cycleStartingColor();
             const idx = startingColorIndex; // capture the intended mapping index for this animation
-            previewShiftLeftThenSnap(() => applyPlayerBoxColorsForIndex(idx));
+            try { slider && slider.previewShiftLeftThenSnap(() => slider.updateColorsForIndex(idx)); } catch { /* ignore */ }
             updateAIPreview();
             // Save color cycler index to localStorage
             localStorage.setItem('colorCyclerIndex', startingColorIndex);
@@ -1477,7 +1451,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (savedColorIndex !== null && !isNaN(savedColorIndex)) {
             startingColorIndex = Math.max(0, Math.min(playerColors.length - 1, parseInt(savedColorIndex, 10)));
             applyMenuColorBox(playerColors[startingColorIndex]);
-            updatePlayerBoxColors();
+            try { slider && slider.updateColors(); } catch { /* ignore */ }
         } else {
             applyMenuColorBox(playerColors[startingColorIndex]);
         }
@@ -1485,7 +1459,7 @@ document.addEventListener('DOMContentLoaded', () => {
         onlineMenuColorCycle.addEventListener('click', () => {
             cycleStartingColor();
             const idx = startingColorIndex;
-            previewShiftLeftThenSnap(() => applyPlayerBoxColorsForIndex(idx));
+            try { slider && slider.previewShiftLeftThenSnap(() => slider.updateColorsForIndex(idx)); } catch { /* ignore */ }
             updateAIPreview();
             // Save color cycler index to localStorage
             localStorage.setItem('colorCyclerIndex', startingColorIndex);
@@ -1507,34 +1481,6 @@ document.addEventListener('DOMContentLoaded', () => {
             menuHistoryStack.push(stateMenu);
         } catch { /* ignore */ }
     });
-
-    // Make the visual box slider draggable like a real slider
-    let isDragging = false;
-
-    playerBoxSlider.addEventListener('pointerdown', (e) => {
-        // Ignore pointer events that originate on the color cycler
-        const target = e.target.closest('.menu-color-box');
-        if (target) return;
-        isDragging = true;
-        playerBoxSlider.setPointerCapture(e.pointerId);
-        setPlayerCountFromPointer(e.clientX);
-    });
-
-    playerBoxSlider.addEventListener('pointermove', (e) => {
-        if (!isDragging) return;
-        setPlayerCountFromPointer(e.clientX);
-    });
-
-    playerBoxSlider.addEventListener('pointerup', (e) => {
-        isDragging = false;
-        try { playerBoxSlider.releasePointerCapture(e.pointerId); } catch (e2) { /* empty */ void e2; }
-    });
-
-    // Also handle pointercancel/leave
-    playerBoxSlider.addEventListener('pointercancel', () => { isDragging = false; });
-    playerBoxSlider.addEventListener('pointerleave', (e) => { if (isDragging) setPlayerCountFromPointer(e.clientX); });
-
-    // Input removed: no key handlers required
 
     // Stepper buttons for grid size
     function setAriaDisabledButton(btn, disabled) {
@@ -1875,11 +1821,11 @@ document.addEventListener('DOMContentLoaded', () => {
             d.style.setProperty('--circle-color-dim', mixTowardGray(base, 0, 0.25));
             container.appendChild(d);
         });
-    document.body.appendChild(container);
-    // Set circle size variable using viewport and grid dimensions
-    document.documentElement.style.setProperty('--edge-circle-size', computeEdgeCircleSize() + 'px');
-    // Initialize active/inactive states on the next frame so CSS transitions run from opacity:0
-    requestAnimationFrame(() => { try { updateEdgeCirclesActive(); } catch { /* ignore */ } });
+        document.body.appendChild(container);
+        // Set circle size variable using viewport and grid dimensions
+        document.documentElement.style.setProperty('--edge-circle-size', computeEdgeCircleSize() + 'px');
+        // Initialize active/inactive states on the next frame so CSS transitions run from opacity:0
+        requestAnimationFrame(() => { try { updateEdgeCirclesActive(); } catch { /* ignore */ } });
     }
 
     // Only need to update the restriction type on resize
@@ -2088,23 +2034,6 @@ document.addEventListener('DOMContentLoaded', () => {
         recreateGrid(Math.max(3, s), p);
         createEdgeCircles();
     }
-    // Note: color cycler remains active during slider animations; no lock/disable needed.
-    /**
-     * Acquire a temporary animation lock for the slider and auto-release later.
-     * @param {number} durationMs - expected animation duration in ms.
-     * @returns {() => void} call to release early/explicitly.
-     */
-    function beginSliderAnimation(durationMs) {
-        sliderAnimLocks++;
-        let released = false;
-        const release = () => {
-            if (released) return;
-            released = true;
-            sliderAnimLocks = Math.max(0, sliderAnimLocks - 1);
-        };
-        if (durationMs && durationMs > 0) setTimeout(release, durationMs + 32);
-        return release;
-    }
 
     /**
      * Pick a random entry from a weighted list of tips.
@@ -2132,232 +2061,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tip && tip.html) menuHint.innerHTML = tip.text; else menuHint.textContent = tip ? tip.text : '';
     }
 
-    // --- FLIP helpers for player slider boxes ---
-    /**
-     * Measure bounding client rects for a list of elements.
-     * @param {Element[]} els - elements to measure.
-     * @returns {DOMRect[]} list of rects.
-     */
-    function measureRects(els) {
-        return els.map(el => el.getBoundingClientRect());
-    }
-
-    /**
-     * Get computed background-color strings for elements.
-     * @param {Element[]} els - elements to inspect.
-     * @returns {string[]} CSS color strings.
-     */
-    function measureBackgroundColors(els) {
-        return els.map(el => getComputedStyle(el).backgroundColor);
-    }
-
-    /**
-     * Compute and cache the inactive/active box-shadow styles used by slider boxes.
-     * @returns {{inactive:string, active:string}} cached shadow values.
-     */
-    function getSliderShadows() {
-        if (sliderShadowCache) return sliderShadowCache;
-        try {
-            const probeContainer = document.createElement('div');
-            probeContainer.className = 'player-box-slider';
-            Object.assign(probeContainer.style, {
-                position: 'fixed',
-                left: '-10000px',
-                top: '0',
-                width: '0',
-                height: '0',
-                overflow: 'hidden'
-            });
-            const probe = document.createElement('div');
-            probe.className = 'box';
-            probe.style.width = '40px';
-            probe.style.height = '40px';
-            probeContainer.appendChild(probe);
-            document.body.appendChild(probeContainer);
-
-            const csInactive = getComputedStyle(probe).boxShadow;
-            probe.classList.add('active');
-            const csActive = getComputedStyle(probe).boxShadow;
-
-            document.body.removeChild(probeContainer);
-            sliderShadowCache = { inactive: csInactive, active: csActive };
-            return sliderShadowCache;
-        } catch (e) {
-            void e;
-            sliderShadowCache = { inactive: '0 4px 10px rgba(0,0,0,0.12)', active: '0 8px 20px rgba(0,0,0,0.18)' };
-            return sliderShadowCache;
-        }
-    }
-
-    /**
-     * Infer the color key of a slider box from its inline CSS vars.
-     * @param {HTMLElement} box - slider box element.
-     * @returns {string|null} color key like 'green' or null on failure.
-     */
-    function extractColorKeyFromBox(box) {
-        const innerVar = box.style.getPropertyValue('--box-inner');
-        const cellVar = box.style.getPropertyValue('--box-cell');
-        const from = innerVar || cellVar || '';
-        const mInner = /--inner-([a-z]+)/i.exec(from);
-        if (mInner && mInner[1]) return mInner[1].toLowerCase();
-        const mCell = /--cell-([a-z]+)/i.exec(from);
-        if (mCell && mCell[1]) return mCell[1].toLowerCase();
-        return null;
-    }
-
-    /**
-     * Perform a FLIP-like preview animation shifting boxes left, then snap and run mutateFn.
-     * @param {() => void} mutateFn - called after animation to apply final state.
-     * @returns {void}
-     */
-    function previewShiftLeftThenSnap(mutateFn) {
-        // If a previous preview animation is running, snap it to end-state immediately
-        // then proceed to start a new animation for this trigger.
-        if (currentSliderPreview && typeof currentSliderPreview.finalizeNow === 'function' && !currentSliderPreview.finished) {
-            try { currentSliderPreview.finalizeNow(); } catch { /* ignore */ }
-        }
-
-        const container = sliderCells || playerBoxSlider;
-        if (!container) { mutateFn && mutateFn(); return; }
-        const els = Array.from(container.querySelectorAll('.box'));
-        if (els.length === 0) { mutateFn && mutateFn(); return; }
-
-        const releaseLock = beginSliderAnimation(delayAnimation);
-
-        const rects = measureRects(els);
-        const colors = measureBackgroundColors(els);
-        const animations = [];
-
-        for (let i = 0; i < els.length; i++) {
-            const el = els[i];
-            try { el.getAnimations().forEach(a => a.cancel()); } catch (e) { /* ignore */ void e; }
-            const hasActive = el.classList.contains('active');
-            const baseline = hasActive ? ' translateY(-18%) scale(1.06)' : '';
-            const baseTransform = baseline ? baseline : 'none';
-
-            if (i === 0) {
-                const outBase = delayAnimation * 0.4;
-                const outDur = outBase * 0.5;
-                const inDur = delayAnimation - outDur;
-                const fadeOut = el.animate(
-                    [{ transform: baseTransform, opacity: 1 }, { transform: baseTransform, opacity: 0 }],
-                    { duration: outDur, easing: 'linear', fill: 'forwards' }
-                );
-
-                const n = els.length;
-                const src0 = rects[0];
-                const dstR = rects[n - 1];
-                const srcCx = src0.left + src0.width / 2;
-                const srcCy = src0.top + src0.height / 2;
-                const rightCx = dstR.left + dstR.width / 2;
-                const rightCy = dstR.top + dstR.height / 2;
-                const startDx = (rightCx + dstR.width) - srcCx;
-                const startDy = rightCy - srcCy;
-                const endDx = rightCx - srcCx;
-                const endDy = rightCy - srcCy;
-                const sx = dstR.width / (src0.width || 1);
-                const sy = dstR.height / (src0.height || 1);
-
-                const slideIn = el.animate(
-                    [
-                        { transform: `translate(${startDx}px, ${startDy}px) scale(${sx}, ${sy})${baseline}`, opacity: 0 },
-                        { transform: `translate(${endDx}px, ${endDy}px) scale(${sx}, ${sy})${baseline}`, opacity: 1 }
-                    ],
-                    { duration: inDur, delay: outDur, easing: 'cubic-bezier(0.05, 0.5, 0.5, 1)', fill: 'forwards' }
-                );
-                animations.push(fadeOut, slideIn);
-                continue;
-            }
-
-            const src = rects[i];
-            const dst = rects[i - 1];
-            const srcCx = src.left + src.width / 2;
-            const srcCy = src.top + src.height / 2;
-            const dstCx = dst.left + dst.width / 2;
-            const dstCy = dst.top + dst.height / 2;
-            const dx = dstCx - srcCx;
-            const dy = dstCy - srcCy;
-            const sx = dst.width / (src.width || 1);
-            const sy = dst.height / (src.height || 1);
-
-            const anim = el.animate(
-                [
-                    { transform: baseTransform },
-                    { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})${baseline}` }
-                ],
-                { duration: delayAnimation, easing: 'cubic-bezier(0.5, 1, 0.75, 1)', fill: 'forwards' }
-            );
-            animations.push(anim);
-        }
-
-        const n = els.length;
-        const rootStyle = getComputedStyle(document.documentElement);
-        for (let i = 0; i < n; i++) {
-            const el = els[i];
-            const fromColor = colors[i];
-            const leftIdx = (i - 1 + n) % n;
-            const leftIsActive = els[leftIdx].classList.contains('active');
-            const key = extractColorKeyFromBox(el);
-            if (!key) continue;
-            const varName = leftIsActive ? `--inner-${key}` : `--cell-${key}`;
-            const toColor = rootStyle.getPropertyValue(varName).trim();
-            if (!fromColor || !toColor || fromColor === toColor) continue;
-            try {
-                el.animate(
-                    [{ backgroundColor: fromColor }, { backgroundColor: toColor }],
-                    { duration: delayAnimation, easing: 'ease', fill: 'none' }
-                );
-            } catch (e) { /* ignore */ void e; }
-        }
-
-        const shadows = getSliderShadows();
-        for (let i = 0; i < n; i++) {
-            const el = els[i];
-            const fromShadow = getComputedStyle(el).boxShadow;
-            const leftIdx = (i - 1 + n) % n;
-            const leftIsActive = els[leftIdx].classList.contains('active');
-            const toShadow = leftIsActive ? shadows.active : shadows.inactive;
-            if (!fromShadow || !toShadow || fromShadow === toShadow) continue;
-            try {
-                el.animate(
-                    [{ boxShadow: fromShadow }, { boxShadow: toShadow }],
-                    { duration: delayAnimation, easing: 'ease', fill: 'none' }
-                );
-            } catch (e) { /* ignore */ void e; }
-        }
-
-        const instance = { finished: false };
-
-        // Expose a finalize function to instantly finish the current animation cycle
-        instance.finalizeNow = () => {
-            if (instance.finished) return;
-            // Instantly clear any running animations and their transforms
-            for (const el of els) {
-                try {
-                    el.getAnimations().forEach(a => { try { a.cancel(); } catch { /* ignore */ } });
-                } catch { /* ignore */ }
-            }
-            try { mutateFn && mutateFn(); } catch { /* ignore */ }
-            try { releaseLock && releaseLock(); } catch { /* ignore */ }
-            instance.finished = true;
-            if (currentSliderPreview === instance) currentSliderPreview = null;
-        };
-
-        currentSliderPreview = instance;
-
-        const done = animations.length ? Promise.allSettled(animations.map(a => a.finished)) : Promise.resolve();
-        done.finally(() => {
-            if (instance.finished) return; // already finalized by a newer trigger
-            for (const el of els) {
-                try { el.getAnimations().forEach(a => a.cancel()); } catch (e) { /* ignore */ void e; }
-            }
-            mutateFn && mutateFn();
-            releaseLock();
-            instance.finished = true;
-            if (currentSliderPreview === instance) currentSliderPreview = null;
-        });
-    }
-
     // Helpers tied to player color selection and UI reflection
 
     /**
@@ -2369,31 +2072,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedKey = playerColors[startingColorIndex];
         const idx = ac.indexOf(selectedKey);
         return idx >= 0 ? idx : 0;
-    }
-
-    /**
-     * Apply current rotated color mapping to all player boxes via CSS vars.
-     * @returns {void}
-     */
-    function updatePlayerBoxColors() {
-        if (!playerBoxSlider) return;
-        applyPlayerBoxColorsForIndex(startingColorIndex);
-    }
-
-    /**
-     * Apply box color CSS vars as if the rotation index were a specific value.
-     * @param {number} index - rotation index into playerColors used for mapping.
-     * @returns {void}
-     */
-    function applyPlayerBoxColorsForIndex(index) {
-        if (!playerBoxSlider) return;
-        const boxes = Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box'));
-        const n = playerColors.length;
-        boxes.forEach((box, idx) => {
-            const colorKey = playerColors[(index + (idx % n) + n) % n];
-            box.style.setProperty('--box-inner', `var(--inner-${colorKey})`);
-            box.style.setProperty('--box-cell', `var(--cell-${colorKey})`);
-        });
     }
 
     /**
@@ -2537,72 +2215,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * Build the visual player "box slider" (1..maxPlayers) and attach handlers.
-     * @returns {void} updates DOM under #playerBoxSlider.
-     */
-    function buildPlayerBoxes() {
-        // Preserve the color cycler if it's inside the slider
-        const cycler = playerBoxSlider.querySelector('#menuColorCycle');
-        if (cycler && cycler.parentElement === playerBoxSlider) {
-            playerBoxSlider.removeChild(cycler);
-        }
-
-        // Remove existing player boxes only
-        Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box')).forEach(n => n.remove());
-
-        for (let count = 1; count <= maxPlayers; count++) {
-            const box = document.createElement('div');
-            box.className = 'box';
-            box.dataset.count = String(count); // the player count this box represents
-            box.title = `${count} player${count > 1 ? 's' : ''}`;
-            const colorKey = playerColors[(startingColorIndex + count - 1) % playerColors.length];
-            // set per-box CSS variables pointing to the global color vars
-            box.style.setProperty('--box-inner', `var(--inner-${colorKey})`);
-            box.style.setProperty('--box-cell', `var(--cell-${colorKey})`);
-
-            box.addEventListener('click', () => {
-                // clamp to minimum 2
-                const raw = parseInt(box.dataset.count, 10);
-                const val = Math.max(2, clampPlayers(raw));
-                onMenuPlayerCountChanged(val);
-            });
-
-            // Disable native dragging/selection that can interfere with pointer interactions
-            box.setAttribute('draggable', 'false');
-            box.addEventListener('dragstart', (ev) => ev.preventDefault());
-
-            (sliderCells || playerBoxSlider).appendChild(box);
-        }
-
-        // Re-append the cycler; CSS grid places it to row 2, col 1
-        if (cycler) playerBoxSlider.appendChild(cycler);
-    }
-
-    /**
-     * Toggle active state for player boxes up to the selected count and sync UI/state.
-     * @param {number} count - selected player count.
-     * @returns {void} updates aria attributes, internal selection, and grid if needed.
-     */
-    function highlightPlayerBoxes(count) {
-        (sliderCells || playerBoxSlider).querySelectorAll('.box').forEach((child) => {
-            const boxCount = parseInt(child.dataset.count, 10);
-            if (boxCount <= count) child.classList.add('active'); else child.classList.remove('active');
-        });
-        playerBoxSlider.setAttribute('aria-valuenow', String(count));
-        // update internal selection
-        menuPlayerCount = count;
-
-        // Sizing/alignment handled purely via CSS
-
-        if (count !== playerCount) {
-            // Only auto-grow up to recommended minimum, don't shrink below if user chose larger
-            const minForPlayers = recommendedGridSize(count);
-            const targetSize = Math.max(minForPlayers, gridSize);
-            recreateGrid(targetSize, count);
-        }
-    }
-
-    /**
      * Update grid-size input to match the recommended size for a player count.
      * @param {number} pCount - selected player count.
      * @returns {void} sets menuGridSize.value.
@@ -2628,38 +2240,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * Validate and normalize the grid size input to [3..16].
-     * @returns {void} adjusts input to a valid number.
-     */
-    // Input removed: grid size is controlled via +/- and reflected in menuGridSizeVal
-
-    /**
-     * Map a pointer x-position to the nearest player box and update selection.
-     * @param {number} clientX - pointer x-coordinate in viewport space.
-     * @returns {void} updates selected player count via onMenuPlayerCountChanged.
-     */
-    function setPlayerCountFromPointer(clientX) {
-        // Only consider player boxes for mapping, skip the color cycler
-        const children = Array.from((sliderCells || playerBoxSlider).querySelectorAll('.box'));
-        if (children.length === 0) return;
-        // find nearest box center to clientX
-        let nearest = children[0];
-        let nearestDist = Infinity;
-        children.forEach(child => {
-            const r = child.getBoundingClientRect();
-            const center = r.left + r.width / 2;
-            const d = Math.abs(clientX - center);
-            if (d < nearestDist) {
-                nearestDist = d;
-                nearest = child;
-            }
-        });
-        // clamp to minimum 2
-        const mapped = Math.max(2, clampPlayers(parseInt(nearest.dataset.count, 10)));
-        onMenuPlayerCountChanged(mapped);
-    }
-
-    /**
      * Central handler when menu player count changes; syncs size, UI, and grid.
      * @param {number} newCount - selected player count.
      * @returns {void} may recreate the grid to reflect new settings.
@@ -2678,8 +2258,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Recreate grid immediately to the auto-selected default for this player count
             recreateGrid(menuGridSizeVal, newCount);
 
-            // Update UI highlights afterward
-            highlightPlayerBoxes(newCount);
+            // Update UI highlights afterward via slider (no extra grid work)
+            try { slider && slider.setCount(newCount, { silent: true }); } catch { /* ignore */ }
         }
     }
     //#endregion
@@ -2937,15 +2517,15 @@ document.addEventListener('DOMContentLoaded', () => {
         // highlight invalid positions with new layout
         highlightInvalidInitialPositions();
         document.body.className = activeColors()[currentPlayer];
-    // Sync active circle emphasis after grid rebuild
-    try { updateEdgeCirclesActive(); } catch { /* ignore */ }
+        // Sync active circle emphasis after grid rebuild
+        try { updateEdgeCirclesActive(); } catch { /* ignore */ }
 
         // Reflect actual grid size in display value while menu is present
         menuGridSizeVal = Math.max(3, newSize);
         reflectGridSizeDisplay();
 
-        // Ensure the visual player boxes reflect new player count
-        highlightPlayerBoxes(clampPlayers(playerCount));
+        // Ensure the visual player boxes reflect new player count via component
+        try { slider && slider.setCount(clampPlayers(playerCount), { silent: true }); } catch { /* ignore */ }
 
         // If train mode is enabled, force human to be first color and
         // set the current player to the human (so they control the first color)
@@ -3358,9 +2938,9 @@ document.addEventListener('DOMContentLoaded', () => {
             tried++;
         }
 
-    document.body.className = activeColors()[currentPlayer];
-    // Update edge circle emphasis for new active player
-    try { updateEdgeCirclesActive(); } catch { /* ignore */ }
+        document.body.className = activeColors()[currentPlayer];
+        // Update edge circle emphasis for new active player
+        try { updateEdgeCirclesActive(); } catch { /* ignore */ }
         clearCellFocus();
         updateGrid();
         // Restore focus to last focused cell for this player, if any

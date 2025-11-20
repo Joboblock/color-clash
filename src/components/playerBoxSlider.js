@@ -1,7 +1,5 @@
-(function (global) {
-    'use strict';
-
-    function noop() { }
+// ES Module version of PlayerBoxSlider
+function noop() { }
 
     /**
      * PlayerBoxSlider component controlling the player count slider UI.
@@ -27,6 +25,16 @@
         this.getPlayerColors = typeof opts.getPlayerColors === 'function' ? opts.getPlayerColors : function () { return ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'orange', 'purple']; };
         this.getStartingColorIndex = typeof opts.getStartingColorIndex === 'function' ? opts.getStartingColorIndex : function () { return 0; };
         this.onCountChange = typeof opts.onCountChange === 'function' ? opts.onCountChange : noop;
+
+        // Debug: constructor called and key options
+        try {
+            console.debug('[PlayerBoxSlider] ctor', {
+                hasRootEl: !!this.rootEl,
+                maxPlayers: this.maxPlayers,
+                minPlayers: this.minPlayers,
+                delayAnimation: this.delayAnimation
+            });
+        } catch { /* ignore */ }
 
         this._currentPreview = null;
         this._isDragging = false;
@@ -379,7 +387,4 @@
         } catch { /* ignore */ }
     };
 
-    // Export new name; keep old alias for backward compatibility (temporary)
-    global.PlayerBoxSlider = PlayerBoxSlider;
-    global.PlayerSlider = PlayerBoxSlider;
-})(window);
+export { PlayerBoxSlider };

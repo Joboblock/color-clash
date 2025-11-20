@@ -1,3 +1,4 @@
+import { PlayerBoxSlider } from './src/components/playerBoxSlider.js';
 // Player name length limit (base, not including suffix)
 const PLAYER_NAME_LENGTH = 12;
 document.addEventListener('DOMContentLoaded', () => {
@@ -73,6 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let wsConnected = false; // reflects stable connection state
     let wsBackoffMs = 500;   // exponential backoff starting delay
     let wsReconnectTimer = null;
+    /* eslint-disable-next-line no-unused-vars */
     let wsEverOpened = false; // used to know if we should try to rejoin
     let hostedRoom = null;
     // Desired grid size chosen in Host menu; null means use server default (playerCount+3)
@@ -149,10 +151,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bar) bar.style.display = 'none';
     }
 
+    /* eslint-disable-next-line no-unused-vars */
     function scheduleReconnect() {
         if (wsReconnectTimer) return;
         const delay = Math.min(wsBackoffMs, 5000);
-        console.debug(`[WebSocket] Scheduling reconnect in ${delay}ms`);
+        //console.debug(`[WebSocket] Scheduling reconnect in ${delay}ms`);
         showConnBanner('Reconnecting…', 'info');
         wsReconnectTimer = setTimeout(() => {
             wsReconnectTimer = null;
@@ -167,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const wsUrl = getConfiguredWebSocketUrl();
         ws = new WebSocket(wsUrl);
         ws.onopen = () => {
-            console.debug('[WebSocket] Connected, requesting room list');
+            //console.debug('[WebSocket] Connected, requesting room list');
             wsConnected = true;
             wsEverOpened = true;
             wsBackoffMs = 500;
@@ -445,7 +448,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch { /* ignore */ }
             }
         };
-        ws.onerror = () => {
+        /*ws.onerror = () => {
             console.warn('[WebSocket] Error');
         };
         ws.onclose = () => {
@@ -454,7 +457,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Show banner if we had connected before (avoid showing at initial load offline)
             if (wsEverOpened) showConnBanner('Connection lost. Reconnecting…', 'error');
             scheduleReconnect();
-        };
+        };*/
     }
 
     let myJoinedRoom = null; // track the room this tab is in
@@ -1346,6 +1349,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Build visual player box slider
     const playerBoxSlider = document.getElementById('playerBoxSlider');
+    console.debug('[PlayerBoxSlider] element lookup:', playerBoxSlider ? '#playerBoxSlider found' : 'not found');
     // inner container that holds the clickable boxes (may be same as slider if wrapper missing)
     // PlayerBoxSlider manages its own internal cells container
     // inner-circle color map (match styles.css .inner-circle.* colors)
@@ -1394,9 +1398,11 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.style.setProperty(`--body-${key}`, `rgb(${dark(rr)}, ${dark(gg)}, ${dark(bb)})`);
     });
 
-    // Starting color cycler: init to green and initialize player box slider component
-    const slider = (window.PlayerBoxSlider || window.PlayerSlider)
-        ? new (window.PlayerBoxSlider || window.PlayerSlider)({
+    // Starting color cycler: init to green and initialize player box slider component (ESM)
+    const SliderCtor = PlayerBoxSlider;
+    console.debug('[PlayerBoxSlider][ESM] import ok:', { selected: SliderCtor?.name || 'anonymous' });
+    const slider = SliderCtor
+        ? new SliderCtor({
             rootEl: playerBoxSlider,
             maxPlayers,
             minPlayers: 2,
@@ -1405,14 +1411,23 @@ document.addEventListener('DOMContentLoaded', () => {
             getPlayerColors: () => playerColors,
             getStartingColorIndex: () => startingColorIndex,
             onCountChange: (newCount) => {
+                console.debug('[PlayerBoxSlider] onCountChange ->', newCount);
                 onMenuPlayerCountChanged(newCount);
             }
         })
         : null;
+    if (!SliderCtor) {
+        console.debug('[PlayerBoxSlider][ESM] import missing; instantiate skipped');
+    } else {
+        console.debug('[PlayerBoxSlider] instance created:', !!slider);
+    }
 
     // highlight using initial URL or default (without triggering grid rebuild)
     const initialPlayersToShow = clampPlayers(playerCount);
-    if (slider) slider.setCount(initialPlayersToShow, { silent: true });
+    if (slider) {
+        slider.setCount(initialPlayersToShow, { silent: true });
+        console.debug('[PlayerBoxSlider] initial setCount(silent):', initialPlayersToShow);
+    }
 
     // Start with URL or defaults
     menuPlayerCount = clampPlayers(playerCount);
@@ -1440,7 +1455,12 @@ document.addEventListener('DOMContentLoaded', () => {
         })
         : null;
     // Ensure initial slider colors and AI preview are in sync
-    try { slider && slider.updateColors(); } catch { /* ignore */ }
+    try {
+        if (slider) {
+            console.debug('[PlayerBoxSlider] updateColors (initial sync)');
+            slider.updateColors();
+        }
+    } catch { /* ignore */ }
     try { updateAIPreview(); } catch { /* ignore */ }
 
     // Handle browser navigation to toggle between menu and game instead of leaving the app
@@ -1560,6 +1580,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         // Prevent left/right navigation from moving focus when slider is focused
         if ((mappedKey === 'ArrowLeft' || mappedKey === 'ArrowRight') && focused === playerBoxSlider) {
+            console.debug('[PlayerBoxSlider] focus guard: intercept left/right while slider focused');
             return false;
         }
         const curRect = focused.getBoundingClientRect();

@@ -853,4 +853,4 @@ function generateRoomKey() {
     return key;
 }
 
-console.log(`WebSocket server running on ws://localhost:${PORT}`);
+console.log(`Server running at http://localhost:${PORT}`);

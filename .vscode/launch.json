@@ -5,10 +5,16 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "type": "chrome",
+      "type": "node",
       "request": "launch",
-      "name": "Open index.html",
-      "file": "${workspaceFolder}/index.html"
+      "name": "Launch Server & Open Browser",
+      "program": "${workspaceFolder}/server.js",
+      "console": "integratedTerminal",
+      "serverReadyAction": {
+        "pattern": "Server running at (https?://[^\\s]+)",
+        "uriFormat": "%s",
+        "action": "debugWithChrome"
+      }
     }
   ]
 }

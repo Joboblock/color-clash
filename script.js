@@ -3,7 +3,8 @@ import { ColorCycler } from './src/components/colorCycler.js';
 import { GridSizeTile } from './src/components/gridSizeTile.js';
 import { MenuCloseButton } from './src/components/menuCloseButton.js';
 import { PlayerNameFields } from './src/components/playerNameFields.js';
-import { sanitizeName, PLAYER_NAME_LENGTH } from './src/utils/nameUtils.js';
+import { sanitizeName } from './src/utils/nameUtils.js';
+import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js'; // some imported constants applied later
 
 // PLAYER_NAME_LENGTH now imported from nameUtils.js
 document.addEventListener('DOMContentLoaded', () => {
@@ -60,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Multiplayer room logic
     let ws;
     let wsConnected = false; // reflects stable connection state
-    let wsBackoffMs = 500;   // exponential backoff starting delay
+    let wsBackoffMs = WS_INITIAL_BACKOFF_MS;   // exponential backoff starting delay
     let wsReconnectTimer = null;
     /* eslint-disable-next-line no-unused-vars */
     let wsEverOpened = false; // used to know if we should try to rejoin
@@ -142,14 +143,14 @@ document.addEventListener('DOMContentLoaded', () => {
     /* eslint-disable-next-line no-unused-vars */
     function scheduleReconnect() {
         if (wsReconnectTimer) return;
-        const delay = Math.min(wsBackoffMs, 5000);
+    const delay = Math.min(wsBackoffMs, WS_MAX_BACKOFF_MS);
         //console.debug(`[WebSocket] Scheduling reconnect in ${delay}ms`);
         showConnBanner('Reconnecting…', 'info');
         wsReconnectTimer = setTimeout(() => {
             wsReconnectTimer = null;
             try { connectWebSocket(); } catch { /* ignore */ }
             // increase backoff for next attempt
-            wsBackoffMs = Math.min(wsBackoffMs * 2, 5000);
+            wsBackoffMs = Math.min(wsBackoffMs * 2, WS_MAX_BACKOFF_MS);
         }, delay);
     }
 
@@ -161,7 +162,7 @@ document.addEventListener('DOMContentLoaded', () => {
             //console.debug('[WebSocket] Connected, requesting room list');
             wsConnected = true;
             wsEverOpened = true;
-            wsBackoffMs = 500;
+            wsBackoffMs = WS_INITIAL_BACKOFF_MS;
             hideConnBanner();
             if (wsReconnectTimer) { try { clearTimeout(wsReconnectTimer); } catch { /* noop */ } wsReconnectTimer = null; }
             ws.send(JSON.stringify({ type: 'list' }));
@@ -752,7 +753,7 @@ document.addEventListener('DOMContentLoaded', () => {
     gridElement.addEventListener('click', onGridClick, { passive: true });
 
     let lastTapTime = 0;
-    const doubleTapThreshold = 300; // ms
+    const doubleTapThreshold = DOUBLE_TAP_THRESHOLD_MS;
     /**
      * Handle pointer down and toggle fullscreen on mobile after a double-tap outside the grid.
      * @param {PointerEvent|MouseEvent|TouchEvent} ev - The pointer event.
@@ -888,13 +889,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!Number.isInteger(gridSize)) gridSize = defaultGridSizeForPlayers(playerCount);
 
     // Game Parameters
-    const maxCellValue = 5;
-    const initialPlacementValue = 5;
-    const cellExplodeThreshold = 4;
-    const delayExplosion = 500;
-    const delayAnimation = 300;
-    const delayGameEnd = 2000;
-    const performanceModeCutoff = 16;
+    const maxCellValue = MAX_CELL_VALUE;
+    const initialPlacementValue = INITIAL_PLACEMENT_VALUE;
+    const cellExplodeThreshold = CELL_EXPLODE_THRESHOLD;
+    const delayExplosion = DELAY_EXPLOSION_MS;
+    const delayAnimation = DELAY_ANIMATION_MS;
+    const delayGameEnd = DELAY_GAME_END_MS;
+    const performanceModeCutoff = PERFORMANCE_MODE_CUTOFF;
 
     document.documentElement.style.setProperty('--delay-explosion', `${delayExplosion}ms`);
     document.documentElement.style.setProperty('--delay-animation', `${delayAnimation}ms`);

@@ -4,8 +4,7 @@
  * can share consistent behaviour.
  */
 
-/** Maximum base length (not including numeric suffix logic handled elsewhere) */
-export const PLAYER_NAME_LENGTH = 12;
+import { PLAYER_NAME_LENGTH } from '../config/index.js';
 
 /**
  * Sanitize a raw player name: collapse whitespace to underscore, strip non-alphanumerics/underscore,

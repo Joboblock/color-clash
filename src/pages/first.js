@@ -1,32 +1,37 @@
-// First menu page module
-// Provides a consistent interface consumed by the central page registry.
-// Contract (lightweight):
-//  id        unique key matching ?menu param value
-//  selector  CSS selector resolving to the root element
-//  init(ctx) one-time setup after DOMContentLoaded (optional)
-//  show(ctx) invoked when page becomes active (optional)
-//  hide(ctx) invoked when page is hidden (optional)
+// First (landing) menu page module.
+// Adds menu close button component for first + online menus.
 
-const firstPage = {
+import { MenuCloseButton } from '../components/menuCloseButton.js';
+
+export const firstPage = {
 	id: 'first',
 	selector: '#firstMenu',
-	init() {
-		// Placeholder for any future event wiring specific to the first screen.
-		// ctx can provide shared utilities if needed later.
+	components: {},
+	init(ctx = {}) {
+		// Initialize menu close button component (top-right buttons)
+		const menuTopRightBtn = document.getElementById('menuTopRightBtn');
+		const onlineTopRightBtn = document.getElementById('onlineTopRightBtn');
+		let closeButtons = null;
+		try {
+			closeButtons = new MenuCloseButton({
+				buttons: [menuTopRightBtn, onlineTopRightBtn],
+				getCurrentMenu: () => (new URLSearchParams(window.location.search)).get('menu'),
+				navigateToMenu: (target) => ctx.showMenuFor && ctx.showMenuFor(target),
+				setMenuParam: (menu, push) => ctx.setMenuParam && ctx.setMenuParam(menu, push),
+				menuHistoryStack: ctx.menuHistoryStack || []
+			});
+		} catch {/* ignore */}
+		this.components = { closeButtons };
 	},
 	show(ctx) {
-		// Ensure body color mirrors current starting color if provided.
 		try {
 			const { playerColors, startingColorIndex } = ctx || {};
-			if (Array.isArray(playerColors)) {
-				const colorKey = playerColors[startingColorIndex || 0] || playerColors[0];
-				if (colorKey) document.body.className = colorKey;
+			if (Array.isArray(playerColors) && typeof startingColorIndex === 'number') {
+				document.body.className = playerColors[startingColorIndex] || 'green';
 			}
 		} catch {/* ignore */}
 	},
-	hide() {
-		// No-op for now.
-	}
+	hide() { /* no-op */ }
 };
 
 export default firstPage;

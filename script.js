@@ -1,19 +1,9 @@
 import { OnlineConnection } from './src/online/connection.js';
-import { AIStrengthTile } from './src/components/aiStrengthTile.js';
-// Page modules & registry
-import firstPage from './src/pages/first.js';
-import localPage from './src/pages/local.js';
-import onlinePage from './src/pages/online.js';
-import hostPage from './src/pages/host.js';
-import practicePage from './src/pages/practice.js';
+// Page modules & registry (menu modularization). Component imports moved into page modules.
 import { pageRegistry } from './src/pages/registry.js';
-
-import { MenuCloseButton } from './src/components/menuCloseButton.js';
-import { PlayerNameFields } from './src/components/playerNameFields.js';
-import { PlayerBoxSlider } from './src/components/playerBoxSlider.js';
-import { ColorCycler } from './src/components/colorCycler.js';
-import { GridSizeTile } from './src/components/gridSizeTile.js';
-import { OnlineRoomList } from './src/components/onlineRoomList.js';
+import { firstPage } from './src/pages/first.js';
+import { onlinePage } from './src/pages/online.js';
+import { mainPage } from './src/pages/main.js';
 
 import { sanitizeName } from './src/utils/nameUtils.js';
 import { computeAIMove } from './src/ai/engine.js';
@@ -74,16 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Online connection (extracted to OnlineConnection module) ---
     // hostedRoom removed (legacy variable no longer needed after OnlineConnection extraction)
     let hostedDesiredGridSize = null; // Desired grid size chosen in Host menu
-    const roomListElement = document.getElementById('roomList');
-    // Extracted online room list component
-    const roomListView = new OnlineRoomList({
-        rootEl: roomListElement,
-        getCurrentRoom: () => myJoinedRoom,
-        getPlayerName: () => (localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player').trim(),
-        onHost: () => hostRoom(),
-        onJoin: (roomName) => joinRoom(roomName),
-        onLeave: (roomName) => leaveRoom(roomName)
-    });
+    // OnlineRoomList now initialized inside onlinePage module.
     // Online bottom action button in online menu
     const hostCustomGameBtnRef = document.getElementById('hostCustomGameBtn');
     // Track last applied server move sequence to avoid duplicates
@@ -179,7 +160,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.debug(`[RoomList] Room: ${roomName} | Players: ? (${info.currentPlayers}/${info.maxPlayers})`);
             }
         });
-        roomListView.render(rooms);
+        const rlView = pageRegistry.get('online')?.components?.roomListView;
+        try { rlView && rlView.render(rooms); } catch { /* ignore */ }
         updateStartButtonState(rooms);
     });
     onlineConnection.on('started', (msg) => {
@@ -225,7 +207,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (Number.isInteger(msg.gridSize)) {
                 const s = Math.max(3, Math.min(16, parseInt(msg.gridSize, 10)));
                 menuGridSizeVal = s;
-                try { gridSizeTile && gridSizeTile.setSize(s, 'network', { silent: true, bump: false }); } catch { /* ignore */ }
+                try {
+                    const gridSizeTile = pageRegistry.get('main')?.components?.gridSizeTile;
+                    gridSizeTile && gridSizeTile.setSize(s, 'network', { silent: true, bump: false });
+                } catch { /* ignore */ }
                 if (s !== gridSize) recreateGrid(s, playerCount);
             }
         } catch { /* ignore */ }
@@ -371,7 +356,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (onlineConnection.isConnected()) sendHost(); else onlineConnection.on('open', sendHost);
     }
 
-    function joinRoom(roomName) {
+    // Expose to onlinePage via context (used there)
+    window.joinRoom = function joinRoom(roomName) {
         console.debug('[Join] Joining room:', roomName);
         // For debug: send player name, but do not use for logic
         let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player'));
@@ -401,7 +387,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (onlineConnection.isConnected()) doJoin(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doJoin); }
     }
 
-    function leaveRoom(roomName) {
+    // Expose to onlinePage via context (used there)
+    window.leaveRoom = function leaveRoom(roomName) {
         console.debug('[Leave] Leaving room:', roomName);
         const doLeave = () => { onlineConnection.leave(roomName); };
         onlineConnection.ensureConnected();
@@ -657,7 +644,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let menuPlayerCount = playerCount; // current selection from visual slider
 
     // Grid size display only (input removed)
-    const gridValueEl = document.getElementById('gridValue');
+    // gridValueEl kept for legacy access; mainPage handles display
+    window.gridValueEl = document.getElementById('gridValue');
     let menuGridSizeVal = 0; // set after initial clamps
     const startBtn = document.getElementById('startBtn');
     const practiceBtn = document.getElementById('practiceBtn');
@@ -665,52 +653,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // playerNameInput now handled via PlayerNameFields component (fetched at instantiation)
     const gridDecBtn = document.getElementById('gridDec');
     const gridIncBtn = document.getElementById('gridInc');
-    // GridSizeTile component (ESM) replacing legacy reflect/adjust functions
-    let gridSizeTile = null;
-    try {
-        gridSizeTile = new GridSizeTile({
-            decButtonEl: gridDecBtn,
-            incButtonEl: gridIncBtn,
-            valueEl: gridValueEl,
-            getPlayerCount: () => menuPlayerCount,
-            getRecommendedSize: (p) => recommendedGridSize(p),
-            getGameGridSize: () => gridSize,
-            initialSize: Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : recommendedGridSize(menuPlayerCount),
-            onSizeChange: (newSize, reason) => {
-                menuGridSizeVal = newSize; // keep legacy variable for transitional code paths
-                if (newSize !== gridSize) {
-                    try { recreateGrid(newSize, playerCount); } catch { /* ignore */ }
-                }
-                console.debug('[GridSizeTile] onSizeChange ->', newSize, `(reason=${reason})`);
-            }
-        });
-    } catch (e) { console.debug('[GridSizeTile] init failed', e); }
-    const aiPreviewCell = document.getElementById('aiPreviewCell');
-    let aiStrengthTile = null;
-    try {
-        aiStrengthTile = new AIStrengthTile({
-            previewCellEl: aiPreviewCell,
-            getPlayerColors: () => playerColors,
-            getStartingColorIndex: () => startingColorIndex,
-            initialStrength: (() => {
-                const params = new URLSearchParams(window.location.search);
-                const ad = parseInt(params.get('ai_depth') || '', 10);
-                return (!Number.isNaN(ad) && ad >= 1) ? Math.max(1, Math.min(5, ad)) : 1;
-            })(),
-            onStrengthChange: (val) => {
-                try {
-                    const params = new URLSearchParams(window.location.search);
-                    if (getMenuParam() === 'practice') {
-                        params.set('ai_depth', String(val));
-                        const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-                        window.history.replaceState({ ...(window.history.state||{}), ai_depth: val }, '', url);
-                    }
-                } catch { /* ignore */ }
-            },
-            updateValueCircles: undefined // will inject later once function is defined
-        });
-        // console.debug('[AIStrengthTile] component initialized');
-    } catch (e) { console.debug('[AIStrengthTile] init failed', e); }
+    // gridSizeTile / aiStrengthTile now provided by mainPage.components
 
     // Decide initial menu visibility using typed menu values
     const initialParams = new URLSearchParams(window.location.search);
@@ -801,19 +744,25 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch { /* ignore */ }
     }
 
+    // Modular menu display now delegated to PageRegistry & page modules.
     function showMenuFor(menuKey) {
-        // Build shared context object for page lifecycle hooks.
-        const ctx = {
+        let targetId = menuKey;
+        let subMode = null;
+        if (['local', 'host', 'practice'].includes(menuKey)) {
+            targetId = 'main';
+            subMode = menuKey; // main page handles sub-mode selection
+        }
+        pageRegistry.open(targetId, {
+            subMode,
             onlineConnection,
+            updateStartButtonState,
             showConnBanner,
             hideConnBanner,
-            updateStartButtonState,
             setMainMenuMode,
-            aiStrengthTile,
+            // aiStrengthTile provided via mainPage components
             playerColors,
             startingColorIndex
-        };
-        pageRegistry.open(menuKey, ctx);
+        });
     }
 
     function navigateToMenu(menuKey) {
@@ -852,21 +801,37 @@ document.addEventListener('DOMContentLoaded', () => {
         const aiStrengthTile = document.getElementById('aiStrengthTile');
         if (aiStrengthTile) aiStrengthTile.style.display = (mode === 'practice') ? '' : 'none';
     }
+    // Register and init page modules (after setMainMenuMode is defined so context functions exist)
+    pageRegistry.register([firstPage, onlinePage, mainPage]);
+    try {
+        pageRegistry.initAll({
+            onlineConnection,
+            updateStartButtonState,
+            showConnBanner,
+            hideConnBanner,
+            setMainMenuMode,
+            // component palette & state
+            playerColors,
+            startingColorIndex,
+            recommendedGridSize,
+            defaultGridSizeForPlayers,
+            recreateGrid,
+            getPlayerColors: () => playerColors,
+            getStartingColorIndex: () => startingColorIndex,
+            setStartingColorIndex: (idx) => { startingColorIndex = Math.max(0, Math.min(playerColors.length - 1, idx|0)); },
+            onMenuPlayerCountChanged,
+            clampPlayers: (n) => Math.max(2, Math.min(playerColors.length, Math.floor(n) || 2)),
+            getMenuPlayerCount: () => menuPlayerCount,
+            setMenuPlayerCount: (n) => { menuPlayerCount = Math.max(2, Math.min(playerColors.length, Math.floor(n) || 2)); },
+            getMenuGridSizeVal: () => menuGridSizeVal,
+            setMenuGridSizeVal: (v) => { menuGridSizeVal = v; },
+            delayAnimation,
+            showMenuFor,
+            setMenuParam,
+            menuHistoryStack
+        });
+    } catch { /* ignore */ }
     // Initial routing based on typed menu param
-    // Register page modules (one-time) & initialize them with shared context
-    const sharedCtx = {
-        onlineConnection,
-        showConnBanner,
-        hideConnBanner,
-        updateStartButtonState,
-        setMainMenuMode,
-        aiStrengthTile,
-        playerColors,
-        startingColorIndex
-    };
-    pageRegistry.register([firstPage, localPage, onlinePage, hostPage, practicePage]);
-    pageRegistry.initAll(sharedCtx);
-
     const typedMenu = getMenuParam();
     if (!typedMenu && hasPlayersOrSize) {
         // Explicit game state: ensure all menus hidden
@@ -882,7 +847,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Non-fatal: preserve previous side-effects
         try { updateRandomTip(); } catch { /* ignore */ }
-    try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch { /* ignore */ }
+    try { pageRegistry.get('main')?.components?.aiStrengthTile?.updatePreview(); } catch { /* ignore */ }
     }
 
     // Initialize history.state and our stack to the current menu once
@@ -909,34 +874,12 @@ document.addEventListener('DOMContentLoaded', () => {
         practiceMainBtn?.addEventListener('click', () => navigateToMenu('practice'));
     }
 
-    // Close button logic now handled by MenuCloseButton component
-    const menuTopRightBtn = document.getElementById('menuTopRightBtn');
-    const onlineTopRightBtn = document.getElementById('onlineTopRightBtn');
-    // Replace direct listeners with MenuCloseButton component
-    try {
-        new MenuCloseButton({
-            buttons: [menuTopRightBtn, onlineTopRightBtn],
-            getCurrentMenu: () => new URLSearchParams(window.location.search).get('menu'),
-            navigateToMenu: (target) => showMenuFor(target),
-            setMenuParam: (menu, push) => setMenuParam(menu, push),
-            menuHistoryStack
-        });
-    } catch (e) { console.debug('[MenuCloseButton] init failed', e); }
+    // MenuCloseButton now initialized inside firstPage.
     // --- Main Menu Logic ---
 
     // Helper to toggle Practice Mode UI state in mainMenu
 
-    // Initialize unified player name fields component once both elements are available
-    try {
-        new PlayerNameFields({
-            localInputEl: document.getElementById('playerName'),
-            onlineInputEl: onlinePlayerNameInput,
-            onNameChange: (name) => {
-                console.debug('[PlayerNameFields] name changed ->', name);
-            }
-        });
-        console.debug('[PlayerNameFields] component initialized');
-    } catch (e) { console.debug('[PlayerNameFields] init failed', e); }
+    // PlayerNameFields now initialized inside mainPage.
 
     // set dynamic bounds
     const maxPlayers = playerColors.length;
@@ -992,83 +935,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.style.setProperty(`--body-${key}`, `rgb(${dark(rr)}, ${dark(gg)}, ${dark(bb)})`);
     });
 
-    // Starting color cycler: init to green and initialize player box slider component (ESM)
-    const SliderCtor = PlayerBoxSlider;
-    console.debug('[PlayerBoxSlider][ESM] import ok:', { selected: SliderCtor?.name || 'anonymous' });
-    const slider = SliderCtor
-        ? new SliderCtor({
-            rootEl: playerBoxSlider,
-            maxPlayers,
-            minPlayers: 2,
-            initialCount: clampPlayers(playerCount),
-            delayAnimation,
-            getPlayerColors: () => playerColors,
-            getStartingColorIndex: () => startingColorIndex,
-            onCountChange: (newCount) => {
-                console.debug('[PlayerBoxSlider] onCountChange ->', newCount);
-                onMenuPlayerCountChanged(newCount);
-            }
-        })
-        : null;
-    if (!SliderCtor) {
-        console.debug('[PlayerBoxSlider][ESM] import missing; instantiate skipped');
-    } else {
-        console.debug('[PlayerBoxSlider] instance created:', !!slider);
-    }
-
-    // highlight using initial URL or default (without triggering grid rebuild)
-    const initialPlayersToShow = clampPlayers(playerCount);
-    if (slider) {
-        slider.setCount(initialPlayersToShow, { silent: true });
-        console.debug('[PlayerBoxSlider] initial setCount(silent):', initialPlayersToShow);
-    }
+    // PlayerBoxSlider now initialized inside mainPage.
 
     // Start with URL or defaults
     menuPlayerCount = clampPlayers(playerCount);
     updateSizeBoundsForPlayers(menuPlayerCount);
 
-    // Initialize color cycler component for main and online menus (ESM)
-    const onlineMenuColorCycle = document.getElementById('onlineMenuColorCycle');
-    console.debug('[ColorCycler][ESM] import ok:', { selected: ColorCycler?.name || 'anonymous' });
-    const colorCycler = ColorCycler
-        ? new ColorCycler({
-            mainEl: menuColorCycle,
-            onlineEl: onlineMenuColorCycle,
-            getColors: () => playerColors,
-            getIndex: () => startingColorIndex,
-            setIndex: (idx) => { startingColorIndex = Math.max(0, Math.min(playerColors.length - 1, idx|0)); },
-            isMenuOpen: () => {
-                const m1 = mainMenu && !mainMenu.classList.contains('hidden');
-                const om = document.getElementById('onlineMenu');
-                const m2 = om && !om.classList.contains('hidden');
-                return !!(m1 || m2);
-            },
-            onChange: (idx, reason) => {
-                console.debug('[ColorCycler] onChange ->', idx, `(reason=${reason})`);
-                // Suppress initial animation triggered at construction to prevent first-load preview shift
-                if (reason !== 'init') {
-                    try { slider && slider.previewShiftLeftThenSnap(() => slider.updateColorsForIndex(idx)); } catch { /* ignore */ }
-                } else {
-                    // Just apply colors without animation on initial load
-                    try { slider && slider.updateColorsForIndex(idx); } catch { /* ignore */ }
-                }
-                try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch { /* ignore */ }
-            }
-        })
-        : null;
-    if (!ColorCycler) {
-        console.debug('[ColorCycler][ESM] import missing; instantiate skipped');
-    } else {
-        console.debug('[ColorCycler] instance created:', !!colorCycler);
-    }
-    // Ensure initial slider colors and AI preview are in sync
-    try {
-        if (slider) {
-            console.debug('[PlayerBoxSlider] updateColors (initial sync)');
-            slider.updateColors();
-        }
-    } catch { /* ignore */ }
-    try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch { /* ignore */ }
+    // ColorCycler now initialized inside mainPage.
 
     // Handle browser navigation to toggle between menu and game instead of leaving the app
     window.addEventListener('popstate', applyStateFromUrl);
@@ -1277,13 +1150,19 @@ document.addEventListener('DOMContentLoaded', () => {
             params.delete('menu');
             params.set('players', String(p));
             params.set('size', String(s));
-            if (aiStrengthTile) params.set('ai_depth', String(aiStrengthTile.getStrength()));
+            try {
+                const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
+                if (aiStrengthTile) params.set('ai_depth', String(aiStrengthTile.getStrength()));
+            } catch { /* ignore */ }
             const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
             window.history.pushState({ mode: 'ai', players: p, size: s }, '', newUrl);
             gameColors = computeSelectedColors(p);
             if (mainMenu) mainMenu.classList.add('hidden');
             practiceMode = true;
-            try { aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10)); } catch { /* ignore */ }
+            try {
+                const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
+                aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
+            } catch { /* ignore */ }
             recreateGrid(s, p);
             createEdgeCircles();
         }
@@ -1308,7 +1187,10 @@ document.addEventListener('DOMContentLoaded', () => {
             params.set('players', String(p));
             params.set('size', String(s));
             // Set AI strength parameter from the preview value (1..5)
-            if (aiStrengthTile) params.set('ai_depth', String(aiStrengthTile.getStrength()));
+            try {
+                const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
+                if (aiStrengthTile) params.set('ai_depth', String(aiStrengthTile.getStrength()));
+            } catch { /* ignore */ }
             const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
             // push a new history entry so Back returns to the menu instead of previous/blank
             window.history.pushState({ mode: 'ai', players: p, size: s }, '', newUrl);
@@ -1320,7 +1202,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (mainMenu) mainMenu.classList.add('hidden');
             practiceMode = true;
             // Apply the chosen AI depth immediately for this session
-            try { aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10)); } catch { /* ignore */ }
+            try {
+                const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
+                aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
+            } catch { /* ignore */ }
             recreateGrid(s, p);
         });
     }
@@ -1558,8 +1443,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Reflect AI strength to UI if present
             const ad = parseInt(params.get('ai_depth') || '', 10);
             if (!Number.isNaN(ad) && ad >= 1) {
-                try { aiStrengthTile && aiStrengthTile.setStrength(Math.max(1, Math.min(5, ad))); } catch { /* ignore */ }
-                try { aiStrengthTile && aiStrengthTile.onStartingColorChanged(); } catch { /* ignore */ }
+                try {
+                    const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
+                    aiStrengthTile && aiStrengthTile.setStrength(Math.max(1, Math.min(5, ad)));
+                    aiStrengthTile && aiStrengthTile.onStartingColorChanged && aiStrengthTile.onStartingColorChanged();
+                } catch { /* ignore */ }
             }
             try { (playerBoxSlider || menuColorCycle || startBtn)?.focus(); } catch { /* ignore */ }
             exitFullscreenIfPossible();
@@ -1706,7 +1594,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!Number.isInteger(menuGridSizeVal) || menuGridSizeVal < minForPlayers) {
             menuGridSizeVal = minForPlayers;
         }
-        try { gridSizeTile && gridSizeTile.applyPlayerCountBounds({ silent: true }); } catch { /* ignore */ }
+        try {
+            const gridSizeTile = pageRegistry.get('main')?.components?.gridSizeTile;
+            gridSizeTile && gridSizeTile.applyPlayerCountBounds({ silent: true });
+        } catch { /* ignore */ }
     }
 
     // Sync functions
@@ -1725,6 +1616,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {number} newCount - selected player count.
      * @returns {void} may recreate the grid to reflect new settings.
      */
+    // onMenuPlayerCountChanged used by mainPage slider via ctx; keep for backward compatibility.
     function onMenuPlayerCountChanged(newCount) {
         const minForPlayers = recommendedGridSize(newCount);
         const desired = defaultGridSizeForPlayers(newCount);
@@ -1732,9 +1624,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (newGridSize !== menuGridSizeVal) {
             menuPlayerCount = newCount;
             menuGridSizeVal = newGridSize;
-            try { gridSizeTile && gridSizeTile.setSize(newGridSize, 'playerCount'); } catch { /* ignore */ }
+            try {
+                const gridSizeTile = pageRegistry.get('main')?.components?.gridSizeTile;
+                gridSizeTile && gridSizeTile.setSize(newGridSize, 'playerCount');
+            } catch { /* ignore */ }
             recreateGrid(menuGridSizeVal, newCount);
-            try { slider && slider.setCount(newCount, { silent: true }); } catch { /* ignore */ }
+            try {
+                const slider = pageRegistry.get('main')?.components?.slider;
+                slider && slider.setCount(newCount, { silent: true });
+            } catch { /* ignore */ }
         }
     }
     //#endregion
@@ -1808,7 +1706,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // create initial grid
     recreateGrid(gridSize, playerCount);
     // Initialize AI preview after initial color application
-    try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch { /* ignore */ }
+    try { pageRegistry.get('main')?.components?.aiStrengthTile?.updatePreview(); } catch { /* ignore */ }
 
     // Keyboard navigation for game grid
     document.addEventListener('keydown', (e) => {
@@ -1990,10 +1888,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Reflect actual grid size in display value while menu is present
     menuGridSizeVal = Math.max(3, newSize);
-    try { gridSizeTile && gridSizeTile.setSize(menuGridSizeVal, 'gridRebuild', { silent: true, bump: false }); } catch { /* ignore */ }
+    try {
+        const gridSizeTile = pageRegistry.get('main')?.components?.gridSizeTile;
+        gridSizeTile && gridSizeTile.setSize(menuGridSizeVal, 'gridRebuild', { silent: true, bump: false });
+    } catch { /* ignore */ }
 
         // Ensure the visual player boxes reflect new player count via component
-        try { slider && slider.setCount(clampPlayers(playerCount), { silent: true }); } catch { /* ignore */ }
+        try {
+            const slider = pageRegistry.get('main')?.components?.slider;
+            slider && slider.setCount(clampPlayers(playerCount), { silent: true });
+        } catch { /* ignore */ }
 
         // If practice mode is enabled, force human to be first color and
         // set the current player to the human (so they control the first color)
@@ -2386,7 +2290,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Provide updateValueCircles to AI strength tile after its definition (late injection)
-    try { aiStrengthTile && aiStrengthTile.setValueRenderer(updateValueCircles); } catch { /* ignore */ }
+    try { pageRegistry.get('main')?.components?.aiStrengthTile?.setValueRenderer(updateValueCircles); } catch { /* ignore */ }
 
     /**
      * Advance to the next active player and update body color; trigger AI in practice mode.

@@ -1,30 +1,41 @@
-// Online menu page module.
-// Handles visibility of #onlineMenu and can trigger connection banners.
+// Online menu page module: hosts room list component.
+import { OnlineRoomList } from '../components/onlineRoomList.js';
 
-const onlinePage = {
-    id: 'online',
-    selector: '#onlineMenu',
-    init() {
-        // Reserved for future: populate room list, bind buttons, etc.
-    },
-    show(ctx) {
-        // Initiate (re)connection if not already connected.
-        try { ctx && ctx.onlineConnection && ctx.onlineConnection.ensureConnected(); } catch { /* ignore */ }
-        // If not connected, request banner display.
-        try {
-            if (ctx && ctx.onlineConnection && !ctx.onlineConnection.isConnected()) {
-                ctx.showConnBanner && ctx.showConnBanner('Reconnecting…', 'info');
-            } else {
-                ctx.hideConnBanner && ctx.hideConnBanner();
-            }
-        } catch { /* ignore */ }
-        // Refresh start button state if provided.
-        try { ctx && ctx.updateStartButtonState && ctx.updateStartButtonState(); } catch { /* ignore */ }
-    },
-    hide(ctx) {
-        // Hide connection banner when leaving online page.
-        try { ctx && ctx.hideConnBanner && ctx.hideConnBanner(); } catch { /* ignore */ }
-    }
+export const onlinePage = {
+	id: 'online',
+	selector: '#onlineMenu',
+	components: {},
+	init(ctx = {}) {
+		const roomListElement = document.getElementById('roomList');
+		let roomListView = null;
+		try {
+			roomListView = new OnlineRoomList({
+				rootEl: roomListElement,
+				getCurrentRoom: () => ctx.getMyJoinedRoom && ctx.getMyJoinedRoom(),
+				getPlayerName: () => ctx.getPlayerName && ctx.getPlayerName(),
+				onHost: () => ctx.hostRoom && ctx.hostRoom(),
+				onJoin: (roomName) => ctx.joinRoom && ctx.joinRoom(roomName),
+				onLeave: (roomName) => ctx.leaveRoom && ctx.leaveRoom(roomName)
+			});
+		} catch {/* ignore */}
+		this.components = { roomListView };
+	},
+	show(ctx) {
+		const { onlineConnection, updateStartButtonState, showConnBanner, hideConnBanner } = ctx || {};
+		try { updateStartButtonState && updateStartButtonState(); } catch {/* ignore */}
+		try {
+			if (onlineConnection && !onlineConnection.isConnected()) {
+				showConnBanner && showConnBanner('Reconnecting…', 'info');
+				onlineConnection.ensureConnected && onlineConnection.ensureConnected();
+			} else {
+				hideConnBanner && hideConnBanner();
+			}
+		} catch {/* ignore */}
+	},
+	hide(ctx) {
+		const { hideConnBanner } = ctx || {};
+		try { hideConnBanner && hideConnBanner(); } catch {/* ignore */}
+	}
 };
 
 export default onlinePage;

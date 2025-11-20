@@ -1,6 +1,7 @@
 import { PlayerBoxSlider } from './src/components/playerBoxSlider.js';
 import { ColorCycler } from './src/components/colorCycler.js';
 import { GridSizeTile } from './src/components/gridSizeTile.js';
+import { MenuCloseButton } from './src/components/menuCloseButton.js';
 
 // Player name length limit (base, not including suffix)
 const PLAYER_NAME_LENGTH = 12;
@@ -1204,34 +1205,19 @@ document.addEventListener('DOMContentLoaded', () => {
         trainMainBtn?.addEventListener('click', () => navigateToMenu('train'));
     }
 
-    // Combined top-right close button logic for local and online menus
-    function handleMenuClose() {
-        // Determine current menu context
-        const params = new URLSearchParams(window.location.search);
-        const currentMenu = params.get('menu');
-        const expectedMenu = (
-            currentMenu === 'host' ? 'online' :
-                (currentMenu === 'local' || currentMenu === 'train' || currentMenu === 'online') ? 'first' :
-                    null
-        );
-        if (!expectedMenu) return;
-        // If our previous stack entry matches, use real back(); else do a replace
-        const prev = menuHistoryStack.length >= 2 ? menuHistoryStack[menuHistoryStack.length - 2] : null;
-        if (prev === expectedMenu) {
-            window.history.back();
-            return;
-        }
-        setMenuParam(expectedMenu, false); // replaceState (no popstate)
-        showMenuFor(expectedMenu);
-    }
+    // Close button logic now handled by MenuCloseButton component
     const menuTopRightBtn = document.getElementById('menuTopRightBtn');
-    if (menuTopRightBtn) {
-        menuTopRightBtn.addEventListener('click', handleMenuClose);
-    }
     const onlineTopRightBtn = document.getElementById('onlineTopRightBtn');
-    if (onlineTopRightBtn) {
-        onlineTopRightBtn.addEventListener('click', handleMenuClose);
-    }
+    // Replace direct listeners with MenuCloseButton component
+    try {
+        new MenuCloseButton({
+            buttons: [menuTopRightBtn, onlineTopRightBtn],
+            getCurrentMenu: () => new URLSearchParams(window.location.search).get('menu'),
+            navigateToMenu: (target) => showMenuFor(target),
+            setMenuParam: (menu, push) => setMenuParam(menu, push),
+            menuHistoryStack
+        });
+    } catch (e) { console.debug('[MenuCloseButton] init failed', e); }
     // --- Main Menu Logic ---
 
     // Helper to toggle Train Mode UI state in mainMenu

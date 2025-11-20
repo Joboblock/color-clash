@@ -4,6 +4,7 @@ import { GridSizeTile } from './src/components/gridSizeTile.js';
 import { MenuCloseButton } from './src/components/menuCloseButton.js';
 import { PlayerNameFields } from './src/components/playerNameFields.js';
 import { sanitizeName } from './src/utils/nameUtils.js';
+import { AIStrengthTile } from './src/components/aiStrengthTile.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js'; // some imported constants applied later
 
 // PLAYER_NAME_LENGTH now imported from nameUtils.js
@@ -947,14 +948,31 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     } catch (e) { console.debug('[GridSizeTile] init failed', e); }
     const aiPreviewCell = document.getElementById('aiPreviewCell');
-
-    // Initialize AI preview value from URL (?ai_depth=) if present, else 1; clamp to 1..5 for UI
-    let aiPreviewValue = 1;
-    {
-        const params = new URLSearchParams(window.location.search);
-        const ad = parseInt(params.get('ai_depth') || '', 10);
-        if (!Number.isNaN(ad) && ad >= 1) aiPreviewValue = Math.max(1, Math.min(5, ad));
-    }
+    let aiStrengthTile = null;
+    try {
+        aiStrengthTile = new AIStrengthTile({
+            previewCellEl: aiPreviewCell,
+            getPlayerColors: () => playerColors,
+            getStartingColorIndex: () => startingColorIndex,
+            initialStrength: (() => {
+                const params = new URLSearchParams(window.location.search);
+                const ad = parseInt(params.get('ai_depth') || '', 10);
+                return (!Number.isNaN(ad) && ad >= 1) ? Math.max(1, Math.min(5, ad)) : 1;
+            })(),
+            onStrengthChange: (val) => {
+                try {
+                    const params = new URLSearchParams(window.location.search);
+                    if (getMenuParam() === 'train') {
+                        params.set('ai_depth', String(val));
+                        const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+                        window.history.replaceState({ ...(window.history.state||{}), ai_depth: val }, '', url);
+                    }
+                } catch { /* ignore */ }
+            },
+            updateValueCircles: undefined // will inject later once function is defined
+        });
+        // console.debug('[AIStrengthTile] component initialized');
+    } catch (e) { console.debug('[AIStrengthTile] init failed', e); }
 
     // Decide initial menu visibility using typed menu values
     const initialParams = new URLSearchParams(window.location.search);
@@ -1095,7 +1113,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch { /* ignore */ }
         // Update AI preview if train menu is shown
         if (menuKey === 'train') {
-            try { updateAIPreview(); } catch { /* ignore */ }
+            try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch { /* ignore */ }
         }
     }
 
@@ -1151,7 +1169,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Non-fatal: preserve previous side-effects
         try { updateRandomTip(); } catch { /* ignore */ }
-        try { updateAIPreview(); } catch { /* ignore */ }
+    try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch { /* ignore */ }
     }
 
     // Initialize history.state and our stack to the current menu once
@@ -1315,7 +1333,7 @@ document.addEventListener('DOMContentLoaded', () => {
             onChange: (idx) => {
                 console.debug('[ColorCycler] onChange ->', idx);
                 try { slider && slider.previewShiftLeftThenSnap(() => slider.updateColorsForIndex(idx)); } catch { /* ignore */ }
-                try { updateAIPreview(); } catch { /* ignore */ }
+                try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch { /* ignore */ }
             }
         })
         : null;
@@ -1331,7 +1349,7 @@ document.addEventListener('DOMContentLoaded', () => {
             slider.updateColors();
         }
     } catch { /* ignore */ }
-    try { updateAIPreview(); } catch { /* ignore */ }
+    try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch { /* ignore */ }
 
     // Handle browser navigation to toggle between menu and game instead of leaving the app
     window.addEventListener('popstate', applyStateFromUrl);
@@ -1534,13 +1552,13 @@ document.addEventListener('DOMContentLoaded', () => {
             params.delete('menu');
             params.set('players', String(p));
             params.set('size', String(s));
-            params.set('ai_depth', String(aiPreviewValue));
+            if (aiStrengthTile) params.set('ai_depth', String(aiStrengthTile.getStrength()));
             const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
             window.history.pushState({ mode: 'ai', players: p, size: s }, '', newUrl);
             gameColors = computeSelectedColors(p);
             if (mainMenu) mainMenu.classList.add('hidden');
             trainMode = true;
-            try { aiDepth = Math.max(1, parseInt(String(aiPreviewValue), 10)); } catch { /* ignore */ }
+            try { aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10)); } catch { /* ignore */ }
             recreateGrid(s, p);
             createEdgeCircles();
         }
@@ -1565,7 +1583,7 @@ document.addEventListener('DOMContentLoaded', () => {
             params.set('players', String(p));
             params.set('size', String(s));
             // Set AI strength parameter from the preview value (1..5)
-            params.set('ai_depth', String(aiPreviewValue));
+            if (aiStrengthTile) params.set('ai_depth', String(aiStrengthTile.getStrength()));
             const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
             // push a new history entry so Back returns to the menu instead of previous/blank
             window.history.pushState({ mode: 'ai', players: p, size: s }, '', newUrl);
@@ -1577,7 +1595,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (mainMenu) mainMenu.classList.add('hidden');
             trainMode = true;
             // Apply the chosen AI depth immediately for this session
-            try { aiDepth = Math.max(1, parseInt(String(aiPreviewValue), 10)); } catch { /* ignore */ }
+            try { aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10)); } catch { /* ignore */ }
             recreateGrid(s, p);
         });
     }
@@ -1815,8 +1833,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Reflect AI strength to UI if present
             const ad = parseInt(params.get('ai_depth') || '', 10);
             if (!Number.isNaN(ad) && ad >= 1) {
-                aiPreviewValue = Math.max(1, Math.min(5, ad));
-                try { updateAIPreview(); } catch { /* ignore */ }
+                try { aiStrengthTile && aiStrengthTile.setStrength(Math.max(1, Math.min(5, ad))); } catch { /* ignore */ }
+                try { aiStrengthTile && aiStrengthTile.onStartingColorChanged(); } catch { /* ignore */ }
             }
             try { (playerBoxSlider || menuColorCycle || startBtn)?.focus(); } catch { /* ignore */ }
             exitFullscreenIfPossible();
@@ -1886,36 +1904,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * Includes inner-circle coloring and a single centered value dot.
      * @returns {void}
      */
-    function updateAIPreview() {
-        if (!aiPreviewCell) return;
-        const nextColor = playerColors[(startingColorIndex + 1) % playerColors.length];
-        // apply cell background color via class
-        aiPreviewCell.className = `cell ${nextColor}`;
-        // ensure inner-circle exists and colored
-        let inner = aiPreviewCell.querySelector('.inner-circle');
-        if (!inner) {
-            inner = document.createElement('div');
-            inner.className = 'inner-circle';
-            aiPreviewCell.appendChild(inner);
-        }
-        inner.className = `inner-circle ${nextColor}`;
-        // show current preview value (1..5)
-        try { updateValueCircles(inner, aiPreviewValue, false); } catch { /* ignore */ }
-    }
-
-    // Allow interacting with the preview cell to cycle its value 1→5 then wrap to 1
-    function onAIPreviewClick() {
-        aiPreviewValue = (aiPreviewValue % 5) + 1; // 1..5 loop
-        const inner = aiPreviewCell && aiPreviewCell.querySelector('.inner-circle');
-        if (inner) {
-            try { updateValueCircles(inner, aiPreviewValue, false); } catch { /* ignore */ }
-        }
-    }
-    if (aiPreviewCell) {
-        aiPreviewCell.setAttribute('role', 'button');
-        aiPreviewCell.tabIndex = 0;
-        aiPreviewCell.addEventListener('click', onAIPreviewClick);
-    }
+    // Legacy AI preview logic removed; handled by AIStrengthTile component.
 
     /**
      * Compute the active game palette starting from cycler color, for given player count.
@@ -2094,7 +2083,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // create initial grid
     recreateGrid(gridSize, playerCount);
     // Initialize AI preview after initial color application
-    updateAIPreview();
+    try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch { /* ignore */ }
 
     // Keyboard navigation for game grid
     document.addEventListener('keydown', (e) => {
@@ -2677,6 +2666,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // Provide updateValueCircles to AI strength tile after its definition (late injection)
+    try { aiStrengthTile && aiStrengthTile.setValueRenderer(updateValueCircles); } catch { /* ignore */ }
 
     /**
      * Advance to the next active player and update body color; trigger AI in train mode.

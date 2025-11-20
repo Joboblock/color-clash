@@ -2,9 +2,10 @@ import { PlayerBoxSlider } from './src/components/playerBoxSlider.js';
 import { ColorCycler } from './src/components/colorCycler.js';
 import { GridSizeTile } from './src/components/gridSizeTile.js';
 import { MenuCloseButton } from './src/components/menuCloseButton.js';
+import { PlayerNameFields } from './src/components/playerNameFields.js';
+import { sanitizeName, PLAYER_NAME_LENGTH } from './src/utils/nameUtils.js';
 
-// Player name length limit (base, not including suffix)
-const PLAYER_NAME_LENGTH = 12;
+// PLAYER_NAME_LENGTH now imported from nameUtils.js
 document.addEventListener('DOMContentLoaded', () => {
     // Shared name sanitization and validity functions (top-level)
     // On load, if grid is visible and no menu is open, show edge circles
@@ -16,24 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try { createEdgeCircles(); } catch { /* ignore */ }
         }
     }, 0);
-    function sanitizeName(raw) {
-        if (typeof raw !== 'string') return '';
-        let s = raw.replace(/\s+/g, '_');
-        s = s.replace(/[^A-Za-z0-9_]/g, '');
-        if (s.length > PLAYER_NAME_LENGTH) s = s.slice(0, PLAYER_NAME_LENGTH);
-        return s;
-    }
-
-    function reflectValidity(inputEl, val) {
-        const tooShort = val.length > 0 && val.length < 3;
-        if (tooShort) {
-            inputEl.classList.add('invalid');
-            inputEl.setAttribute('aria-invalid', 'true');
-        } else {
-            inputEl.classList.remove('invalid');
-            inputEl.removeAttribute('aria-invalid');
-        }
-    }
+    // sanitizeName & reflectValidity now provided by nameUtils module (imported above)
     function showModalError(html) {
         let modal = document.getElementById('modalError');
         if (!modal) {
@@ -715,19 +699,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ...existing code...
     // Declare name input fields before sync function
     const onlinePlayerNameInput = document.getElementById('onlinePlayerName');
-    // Utility: synchronize all player name fields
-    function syncPlayerNameFields(newName) {
-        const name = sanitizeName(newName || '');
-        if (playerNameInput) {
-            playerNameInput.value = name;
-            reflectValidity(playerNameInput, name);
-        }
-        if (onlinePlayerNameInput) {
-            onlinePlayerNameInput.value = name;
-            reflectValidity(onlinePlayerNameInput, name);
-        }
-        // Add more fields here if needed
-    }
+    // PlayerNameFields component will handle synchronization between inputs later once both elements are known
     const gridElement = document.querySelector('.grid');
     // Online game state and guards
     let onlineGameActive = false;
@@ -950,7 +922,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const startBtn = document.getElementById('startBtn');
     const trainBtn = document.getElementById('trainBtn');
     const menuColorCycle = document.getElementById('menuColorCycle');
-    const playerNameInput = document.getElementById('playerName');
+    // playerNameInput now handled via PlayerNameFields component (fetched at instantiation)
     const gridDecBtn = document.getElementById('gridDec');
     const gridIncBtn = document.getElementById('gridInc');
     // GridSizeTile component (ESM) replacing legacy reflect/adjust functions
@@ -1222,132 +1194,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Helper to toggle Train Mode UI state in mainMenu
 
-    // Sanitize player name: replace spaces with underscores, remove non-alphanumerics, limit to PLAYER_NAME_LENGTH (13th reserved for suffix if needed)
-    if (playerNameInput) {
-        try { playerNameInput.maxLength = PLAYER_NAME_LENGTH; } catch { /* ignore */ }
-        // Shared name sanitization and validity functions
-        function sanitizeName(raw) {
-            if (typeof raw !== 'string') return '';
-            let s = raw.replace(/\s+/g, '_');
-            s = s.replace(/[^A-Za-z0-9_]/g, '');
-            if (s.length > PLAYER_NAME_LENGTH) s = s.slice(0, PLAYER_NAME_LENGTH);
-            return s;
-        }
-
-        function reflectValidity(inputEl, val) {
-            const tooShort = val.length > 0 && val.length < 3;
-            if (tooShort) {
-                inputEl.classList.add('invalid');
-                inputEl.setAttribute('aria-invalid', 'true');
-            } else {
-                inputEl.classList.remove('invalid');
-                inputEl.removeAttribute('aria-invalid');
+    // Initialize unified player name fields component once both elements are available
+    try {
+        new PlayerNameFields({
+            localInputEl: document.getElementById('playerName'),
+            onlineInputEl: onlinePlayerNameInput,
+            onNameChange: (name) => {
+                console.debug('[PlayerNameFields] name changed ->', name);
             }
-        }
-        // Load player name from localStorage if available
-        const savedName = localStorage.getItem('playerName');
-        if (savedName) {
-            syncPlayerNameFields(savedName);
-        } else {
-            syncPlayerNameFields(playerNameInput.value || '');
-        }
-        function handleSanitize(e) {
-            const v = e.target.value;
-            const cleaned = sanitizeName(v);
-            if (v !== cleaned) {
-                const pos = Math.min(cleaned.length, PLAYER_NAME_LENGTH);
-                e.target.value = cleaned;
-                try { e.target.setSelectionRange(pos, pos); } catch { /* ignore */ }
-            }
-            reflectValidity(e.target, e.target.value);
-            // Save player name to localStorage and sync all fields
-            localStorage.setItem('playerName', e.target.value);
-            syncPlayerNameFields(e.target.value);
-        }
-        // Shared keydown handler for name inputs
-        function nameInputKeydownHandler(e) {
-            const el = e.target;
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                el.blur();
-            } else if (e.key === ' ') {
-                e.preventDefault();
-                const start = el.selectionStart;
-                const end = el.selectionEnd;
-                const value = el.value;
-                if (value.length < PLAYER_NAME_LENGTH) {
-                    el.value = value.slice(0, start) + '_' + value.slice(end);
-                    el.setSelectionRange(start + 1, start + 1);
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                }
-            }
-            // Only allow arrow navigation out if input is empty
-            if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && el.value === '') {
-                // Allow default behavior (navigation)
-            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                // Prevent navigation if not empty
-                e.stopPropagation();
-            }
-        }
-        playerNameInput.addEventListener('input', handleSanitize);
-        playerNameInput.addEventListener('blur', handleSanitize);
-        playerNameInput.addEventListener('change', handleSanitize);
-        playerNameInput.addEventListener('keydown', nameInputKeydownHandler);
-    }
-
-    // Online menu name input restrictions (reuse shared logic)
-    if (onlinePlayerNameInput) {
-        try { onlinePlayerNameInput.maxLength = PLAYER_NAME_LENGTH; } catch { /* ignore */ }
-        // Load player name from localStorage if available
-        const savedName = localStorage.getItem('playerName');
-        if (savedName) {
-            syncPlayerNameFields(savedName);
-        } else {
-            syncPlayerNameFields(onlinePlayerNameInput.value || '');
-        }
-        const handleSanitize = (e) => {
-            const v = e.target.value;
-            const cleaned = sanitizeName(v);
-            if (v !== cleaned) {
-                const pos = Math.min(cleaned.length, PLAYER_NAME_LENGTH);
-                e.target.value = cleaned;
-                try { e.target.setSelectionRange(pos, pos); } catch { /* ignore */ }
-            }
-            reflectValidity(e.target, e.target.value);
-            // Save player name to localStorage and sync all fields
-            localStorage.setItem('playerName', e.target.value);
-            syncPlayerNameFields(e.target.value);
-        };
-        onlinePlayerNameInput.addEventListener('input', handleSanitize);
-        onlinePlayerNameInput.addEventListener('blur', handleSanitize);
-        onlinePlayerNameInput.addEventListener('change', handleSanitize);
-        onlinePlayerNameInput.addEventListener('keydown', nameInputKeydownHandler);
-        // Shared keydown handler for name inputs
-        function nameInputKeydownHandler(e) {
-            const el = e.target;
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                el.blur();
-            } else if (e.key === ' ') {
-                e.preventDefault();
-                const start = el.selectionStart;
-                const end = el.selectionEnd;
-                const value = el.value;
-                if (value.length < PLAYER_NAME_LENGTH) {
-                    el.value = value.slice(0, start) + '_' + value.slice(end);
-                    el.setSelectionRange(start + 1, start + 1);
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                }
-            }
-            // Only allow arrow navigation out if input is empty
-            if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && el.value === '') {
-                // Allow default behavior (navigation)
-            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                // Prevent navigation if not empty
-                e.stopPropagation();
-            }
-        }
-    }
+        });
+        console.debug('[PlayerNameFields] component initialized');
+    } catch (e) { console.debug('[PlayerNameFields] init failed', e); }
 
     // set dynamic bounds
     const maxPlayers = playerColors.length;

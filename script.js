@@ -5,6 +5,7 @@ import { MenuCloseButton } from './src/components/menuCloseButton.js';
 import { PlayerNameFields } from './src/components/playerNameFields.js';
 import { sanitizeName } from './src/utils/nameUtils.js';
 import { AIStrengthTile } from './src/components/aiStrengthTile.js';
+import { computeAIMove } from './src/ai/engine.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js'; // some imported constants applied later
 
 // PLAYER_NAME_LENGTH now imported from nameUtils.js
@@ -2877,13 +2878,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     //#region Training / AI helpers (dataRespect + debug)
-    // AI debug mode
+    // AI parameters (core logic now in src/ai/engine.js)
     const aiDebug = true;
-    // Configure dataRespect branching factor K via URL param ai_k, default 3
     const dataRespectK = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_k')) || 25);
-    // number of plies (AI-perspective). Example: 3 (AI -> opp -> AI)
     let aiDepth = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_depth')) || 4);
-    const maxExplosionsToAssumeLoop = gridSize * 3;
 
 
     /**
@@ -2891,12 +2889,8 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} may schedule aiMakeMoveFor with a short delay.
      */
     function maybeTriggerAIMove() {
-        if (!trainMode) return;
-        if (gameWon || isProcessing) return;
-        if (currentPlayer === humanPlayer) return;
-        // If the menu is open/visible, do not run AI moves
+        if (!trainMode || gameWon || isProcessing || currentPlayer === humanPlayer) return;
         if (mainMenu && !mainMenu.classList.contains('hidden')) return;
-
         setTimeout(() => {
             if (isProcessing || gameWon || currentPlayer === humanPlayer) return;
             if (mainMenu && !mainMenu.classList.contains('hidden')) return;
@@ -2904,672 +2898,81 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 350);
     }
 
-    /**
-     * Deep-copy a simulated grid structure to avoid mutation across branches.
-     * @param {Array<Array<{value:number,player:string}>>} simGrid - the grid to copy.
-     * @returns {Array<Array<{value:number,player:string}>>} same-shaped deep copy of simGrid.
-     */
-    function deepCloneGrid(simGrid) {
-        const out = [];
-        for (let r = 0; r < gridSize; r++) {
-            out[r] = [];
-            for (let c = 0; c < gridSize; c++) {
-                out[r][c] = { value: simGrid[r][c].value, player: simGrid[r][c].player };
-            }
-        }
-        return out;
-    }
-
-    /**
-     * Evaluate a grid by summing values of cells owned by a given player.
-     * @param {Array<Array<{value:number,player:string}>>} simGrid - the grid to evaluate.
-     * @param {number} playerIndex - player index.
-     * @returns {number} total owned cell value of given player.
-     */
-    function totalOwnedOnGrid(simGrid, playerIndex) {
-        let total = 0;
-        for (let r = 0; r < gridSize; r++) {
-            for (let c = 0; c < gridSize; c++) {
-                if (simGrid[r][c].player === activeColors()[playerIndex]) total += simGrid[r][c].value;
-            }
-        }
-        return total;
-    }
-
-    /**
-     * Run explosion propagation on a simulated grid until stable or runaway detected.
-     * @param {Array<Array<{value:number,player:string}>>} simGrid - simulated grid.
-     * @param {boolean[]} simInitialPlacements - initial placement flags.
-     * @returns {{grid: Array<Array<{value:number,player:string}>>, explosionCount: number, runaway: boolean}} updated grid, number of explosions, runaway flag.
-     */
-    function simulateExplosions(simGrid, simInitialPlacements) {
-        const maxCellValueLocal = maxCellValue;
-        let explosionCount = 0;
-        let iteration = 0;
-
-        while (true) {
-            iteration++;
-            if (iteration > maxExplosionsToAssumeLoop) {
-                // runaway detected
-                return { grid: simGrid, explosionCount, runaway: true };
-            }
-
-            const cellsToExplode = [];
-            for (let i = 0; i < gridSize; i++) {
-                for (let j = 0; j < gridSize; j++) {
-                    if (simGrid[i][j].value >= 4) {
-                        cellsToExplode.push({
-                            row: i,
-                            col: j,
-                            player: simGrid[i][j].player,
-                            value: simGrid[i][j].value
-                        });
-                    }
-                }
-            }
-
-            if (cellsToExplode.length === 0) break;
-            explosionCount += cellsToExplode.length;
-
-            for (const cell of cellsToExplode) {
-                const { row, col, player, value } = cell;
-                const explosionValue = value - 3;
-                simGrid[row][col].value = 0;
-
-                const isInitialPlacement = !simInitialPlacements.every(v => v);
-                let extraBackToOrigin = 0;
-                const targets = [];
-
-                if (row > 0) targets.push({ r: row - 1, c: col });
-                else if (isInitialPlacement) extraBackToOrigin++;
-
-                if (row < gridSize - 1) targets.push({ r: row + 1, c: col });
-                else if (isInitialPlacement) extraBackToOrigin++;
-
-                if (col > 0) targets.push({ r: row, c: col - 1 });
-                else if (isInitialPlacement) extraBackToOrigin++;
-
-                if (col < gridSize - 1) targets.push({ r: row, c: col + 1 });
-                else if (isInitialPlacement) extraBackToOrigin++;
-
-                // Apply explosionValue to targets
-                for (const t of targets) {
-                    const prev = simGrid[t.r][t.c].value;
-                    simGrid[t.r][t.c].value = Math.min(maxCellValueLocal, prev + explosionValue);
-                    simGrid[t.r][t.c].player = player;
-                }
-
-                // edge return fragments during initial-placement phase
-                if (extraBackToOrigin > 0 && isInitialPlacement) {
-                    const prev = simGrid[row][col].value;
-                    simGrid[row][col].value = Math.min(maxCellValueLocal, prev + extraBackToOrigin);
-                    simGrid[row][col].player = player;
-                }
-            }
-        }
-
-        return { grid: simGrid, explosionCount, runaway: false };
-    }
-
-    /**
-     * Validate simulated initial placement using current size and simulated occupancy.
-     * @param {Array<Array<{value:number,player:string}>>} simGrid - simulated grid.
-     * @param {number} row - cell row.
-     * @param {number} col - cell column.
-     * @returns {boolean} true if invalid due to center or adjacency.
-     */
-    function isInitialPlacementInvalidOnSim(simGrid, row, col) {
-        // respect the global static invalid center positions
-        if (invalidInitialPositions.some(pos => pos.r === row && pos.c === col)) {
-            return true;
-        }
-
-        // adjacency rule: illegal if any adjacent cell is already occupied in the simulated grid
-        const adjacentPositions = [
-            { r: row - 1, c: col },
-            { r: row + 1, c: col },
-            { r: row, c: col - 1 },
-            { r: row, c: col + 1 }
-        ];
-
-        return adjacentPositions.some(pos =>
-            pos.r >= 0 && pos.r < gridSize && pos.c >= 0 && pos.c < gridSize &&
-            simGrid[pos.r][pos.c].player !== ''
-        );
-    }
-
-    /**
-     * Generate legal moves (initial or increment) for a player on a sim grid.
-     * @param {Array<Array<{value:number,player:string}>>} simGrid - simulated grid.
-     * @param {boolean[]} simInitialPlacements - initial placement flags.
-     * @param {number} playerIndex - player index.
-     * @returns {Array<{r:number,c:number,isInitial:boolean,srcVal:number,sortKey:number}>} candidate moves annotated for ordering.
-     */
-    function generateCandidatesOnSim(simGrid, simInitialPlacements, playerIndex) {
-        const candidates = [];
-        if (!simInitialPlacements[playerIndex]) {
-            for (let r = 0; r < gridSize; r++) {
-                for (let c = 0; c < gridSize; c++) {
-                    // use simulation-aware invalid check here
-                    if (simGrid[r][c].value === 0 && !isInitialPlacementInvalidOnSim(simGrid, r, c)) {
-                        candidates.push({ r, c, isInitial: true, srcVal: 0, sortKey: 0 });
-                    }
-                }
-            }
-        } else {
-            for (let r = 0; r < gridSize; r++) {
-                for (let c = 0; c < gridSize; c++) {
-                    if (simGrid[r][c].player === activeColors()[playerIndex]) {
-                        const key = Math.max(0, Math.min(3, simGrid[r][c].value));
-                        candidates.push({ r, c, isInitial: false, srcVal: simGrid[r][c].value, sortKey: key });
-                    }
-                }
-            }
-        }
-        return candidates;
-    }
-
-    /**
-     * Coalition helper: union of all non-focus players' legal moves, each tagged with owner.
-     * @param {Array<Array<{value:number,player:string}>>} simGrid - simulated grid.
-     * @param {boolean[]} simInitialPlacements - initial placement flags per player.
-     * @param {number} focusPlayerIndex - player index for whom coalition is formed.
-     * @returns {Array<{r:number,c:number,isInitial:boolean,srcVal:number,sortKey:number,owner:number}>} candidates.
-     */
-    function generateCoalitionCandidatesOnSim(simGrid, simInitialPlacements, focusPlayerIndex) {
-        const out = [];
-        for (let idx = 0; idx < playerCount; idx++) {
-            if (idx === focusPlayerIndex) continue;
-            const moves = generateCandidatesOnSim(simGrid, simInitialPlacements, idx);
-            for (const m of moves) out.push({ ...m, owner: idx });
-        }
-        return out;
-    }
-
-    /**
-     * Inject debug CSS styles used by AI visualization if not already present.
-     * @returns {void}
-     */
     function ensureAIDebugStyles() {
         if (document.getElementById('aiDebugStyles')) return;
         const style = document.createElement('style');
         style.id = 'aiDebugStyles';
         style.textContent = `
-            .ai-highlight {
-                outline: 4px solid rgba(255, 235, 59, 0.95) !important;
-                box-shadow: 0 0 18px rgba(255,235,59,0.6);
-                z-index: 50;
-            }
-            #aiDebugPanel {
-                position: fixed;
-                right: 12px;
-                bottom: 12px;
-                background: rgba(18,18,18,0.88);
-                color: #eaeaea;
-                padding: 10px 12px;
-                font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-                font-size: 13px;
-                border-radius: 8px;
-                box-shadow: 0 6px 18px rgba(0,0,0,0.45);
-                max-width: 420px;
-                z-index: 1000;
-            }
-            #aiDebugPanel h4 { margin: 0 0 6px 0; font-size: 13px; }
-            #aiDebugPanel pre { margin: 6px 0 0 0; white-space: pre-wrap; font-family: monospace; font-size: 12px; max-height: 240px; overflow:auto; }
+            .ai-highlight { outline: 4px solid rgba(255,235,59,0.95) !important; box-shadow: 0 0 18px rgba(255,235,59,0.6); z-index:50; }
+            #aiDebugPanel { position:fixed; right:12px; bottom:12px; background:rgba(18,18,18,0.88); color:#eaeaea; padding:10px 12px; font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial; font-size:13px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.45); max-width:420px; z-index:1000; }
+            #aiDebugPanel h4 { margin:0 0 6px 0; font-size:13px; }
+            #aiDebugPanel pre { margin:6px 0 0 0; white-space:pre-wrap; font-family:monospace; font-size:12px; max-height:240px; overflow:auto; }
         `;
         document.head.appendChild(style);
     }
 
-    /**
-     * Render an AI debug panel summarizing chosen move and ordered candidates.
-     * @param {object} info - contains chosen move and ordered candidates meta.
-     * @returns {void} updates/creates a floating panel in the DOM.
-     */
-    function showAIDebugPanelWithResponse(info) {
-        ensureAIDebugStyles();
-        const existing = document.getElementById('aiDebugPanel');
-        if (existing) existing.remove();
-
-        const panel = document.createElement('div');
-        panel.id = 'aiDebugPanel';
-
-        const title = document.createElement('h4');
-        title.textContent = `AI dataRespect — player ${currentPlayer} (${activeColors()[currentPlayer]})`;
-        panel.appendChild(title);
-
-        const summary = document.createElement('div');
-        summary.innerHTML = `<strong>chosen gain:</strong> ${info.chosen ? info.chosen.gain : '—'} &nbsp; <strong>expl:</strong> ${info.chosen ? info.chosen.expl : '—'}`;
-        panel.appendChild(summary);
-        const listTitle = document.createElement('div');
-        listTitle.style.marginTop = '8px';
-        listTitle.innerHTML = `<em>candidates (top ${info.topK}) ordered by AI gain:</em>`;
-        panel.appendChild(listTitle);
-
-        const pre = document.createElement('pre');
-        pre.textContent = info.ordered.map((e, idx) => {
-            return `${idx + 1}. (${e.r},${e.c}) src:${e.src} ` +
-                `expl:${e.expl} gain:${e.gain} ` +
-                `atk:${e.atk} def:${e.def}`;
-        }).join('\n');
-        panel.appendChild(pre);
-
-        document.body.appendChild(panel);
-    }
-
-    /**
-     * Remove AI debug UI components and any highlighted cells.
-     * @returns {void}
-     */
     function clearAIDebugUI() {
         const existing = document.getElementById('aiDebugPanel');
         if (existing) existing.remove();
         document.querySelectorAll('.ai-highlight').forEach(el => el.classList.remove('ai-highlight'));
-
     }
 
-    /**
-     * Apply a move on a cloned grid (initial or increment) and simulate explosions.
-     * @param {Array<Array<{value:number,player:string}>>} simGridInput - input simulated grid.
-     * @param {boolean[]} simInitialPlacementsInput - initial placement flags.
-     * @param {number} moverIndex - player making the move.
-     * @param {number} moveR - move row.
-     * @param {number} moveC - move column.
-     * @param {boolean} isInitialMove - whether it's an initial placement.
-     * @returns {{grid: Array<Array<{value:number,player:string}>>, explosionCount: number, runaway: boolean, simInitial: boolean[]}} post-move state.
-     */
-    function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, moveR, moveC, isInitialMove) {
-        const simGrid = deepCloneGrid(simGridInput);
-        const simInitial = simInitialPlacementsInput.slice();
-
-        if (isInitialMove) simInitial[moverIndex] = true;
-
-        if (isInitialMove) {
-            simGrid[moveR][moveC].value = initialPlacementValue;
-            simGrid[moveR][moveC].player = activeColors()[moverIndex];
-        } else {
-            const prev = simGrid[moveR][moveC].value;
-            simGrid[moveR][moveC].value = Math.min(maxCellValue, prev + 1);
-            simGrid[moveR][moveC].player = activeColors()[moverIndex];
-        }
-
-        const result = simulateExplosions(simGrid, simInitial);
-        return { grid: result.grid, explosionCount: result.explosionCount, runaway: result.runaway, simInitial };
+    function showAIDebugPanelWithResponse(info) {
+        ensureAIDebugStyles();
+        const existing = document.getElementById('aiDebugPanel');
+        if (existing) existing.remove();
+        const panel = document.createElement('div'); panel.id='aiDebugPanel';
+        const title = document.createElement('h4'); title.textContent = `AI dataRespect — player ${currentPlayer} (${activeColors()[currentPlayer]})`; panel.appendChild(title);
+        const summary = document.createElement('div'); summary.innerHTML = `<strong>chosen gain:</strong> ${info.chosen ? info.chosen.gain : '—'} &nbsp; <strong>expl:</strong> ${info.chosen ? info.chosen.expl : '—'}`; panel.appendChild(summary);
+        const listTitle = document.createElement('div'); listTitle.style.marginTop='8px'; listTitle.innerHTML = `<em>candidates (top ${info.topK}) ordered by AI gain:</em>`; panel.appendChild(listTitle);
+        const pre = document.createElement('pre'); pre.textContent = info.ordered.map((e,i)=>`${i+1}. (${e.r},${e.c}) src:${e.src} expl:${e.expl} gain:${e.gain} atk:${e.atk} def:${e.def}`).join('\n'); panel.appendChild(pre);
+        document.body.appendChild(panel);
     }
-
-    /**
-     * Evaluate future plies using minimax with alpha-beta pruning for a focus player.
-     * @param {Array<Array<{value:number,player:string}>>} simGridInput - simulated grid.
-     * @param {boolean[]} simInitialPlacementsInput - initial placement flags.
-     * @param {number} moverIndex - current mover.
-     * @param {number} depth - search depth.
-     * @param {number} alpha - alpha value.
-     * @param {number} beta - beta value.
-     * @param {number} maximizingPlayerIndex - maximizing player.
-     * @param {number} focusPlayerIndex - player to evaluate for.
-     * @returns {{value:number, runaway:boolean, stepsToInfinity?:number}} evaluation score for focus player and plies to +/-Infinity if detected.
-     */
-    function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex) {
-        // Coalition mode always ON: all non-focus players act as a single minimizing opponent.
-
-        // Terminal checks: detect actual game-over (only one player has any cells)
-        // IMPORTANT: Do NOT consider this a terminal state during the initial placement phase,
-        // because early in the game the current mover may be the only player with any cells
-        // simply due to others not having placed yet. That would falsely yield +/-Infinity.
-        const inInitialPlacementPhase = !simInitialPlacementsInput.every(v => v);
-        if (!inInitialPlacementPhase) {
-            // Count owned cells per player; if exactly one player owns >0 cells, game is over.
-            let hasAnyCells = false;
-            let activePlayers = 0;
-            let solePlayerIdx = -1;
-            for (let r = 0; r < gridSize; r++) {
-                for (let c = 0; c < gridSize; c++) {
-                    const owner = simGridInput[r][c].player;
-                    if (owner !== '') {
-                        hasAnyCells = true;
-                        const idx = activeColors().indexOf(owner);
-                        if (idx !== -1) {
-                            if (solePlayerIdx === -1) {
-                                solePlayerIdx = idx;
-                                activePlayers = 1;
-                            } else if (idx !== solePlayerIdx) {
-                                activePlayers = 2; // we can early exit once >1
-                                r = gridSize; // break outer loops
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            if (hasAnyCells && activePlayers === 1) {
-                // Terminal: if the sole active player is the focus, it's a win, else a loss.
-                if (solePlayerIdx === focusPlayerIndex) {
-                    return { value: Infinity, runaway: true, stepsToInfinity: 0 };
-                } else {
-                    return { value: -Infinity, runaway: true, stepsToInfinity: 0 };
-                }
-            }
-        }
-
-        // Depth terminal: evaluate static score if depth exhausted
-        if (depth === 0) {
-            return { value: totalOwnedOnGrid(simGridInput, focusPlayerIndex), runaway: false };
-        }
-
-        const simGrid = deepCloneGrid(simGridInput);
-        const simInitial = simInitialPlacementsInput.slice();
-
-        const isFocusTurn = (moverIndex === focusPlayerIndex);
-
-        // Generate candidates: focus player's legal moves, or coalition union of all opponents
-        let candidates;
-        if (isFocusTurn) {
-            candidates = generateCandidatesOnSim(simGrid, simInitial, focusPlayerIndex).map(c => ({ ...c, owner: focusPlayerIndex }));
-        } else {
-            candidates = generateCoalitionCandidatesOnSim(simGrid, simInitial, focusPlayerIndex);
-        }
-
-        // If no legal move: pass turn (toggle sides) and consume a ply
-        if (candidates.length === 0) {
-            const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
-            return minimaxEvaluate(simGrid, simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex);
-        }
-
-        // Evaluate immediate outcomes for ordering and branch truncation
-        const evaluatedCandidates = [];
-        for (const cand of candidates) {
-            const owner = cand.owner; // must be a real player index
-            const applied = applyMoveAndSim(simGrid, simInitial, owner, cand.r, cand.c, cand.isInitial);
-            const val = totalOwnedOnGrid(applied.grid, focusPlayerIndex);
-
-            if (applied.runaway) {
-                const runawayVal = (owner === focusPlayerIndex) ? Infinity : -Infinity;
-                evaluatedCandidates.push({ cand, owner, value: runawayVal, resultGrid: applied.grid, simInitial: applied.simInitial });
-            } else {
-                evaluatedCandidates.push({ cand, owner, value: val, resultGrid: applied.grid, simInitial: applied.simInitial });
-            }
-        }
-
-        // Order: maximizing for focus turn, minimizing for coalition turn
-        evaluatedCandidates.sort((a, b) => (isFocusTurn ? (b.value - a.value) : (a.value - b.value)));
-
-        // Truncate to top K to limit branching
-        const topCandidates = evaluatedCandidates.slice(0, Math.min(dataRespectK, evaluatedCandidates.length));
-
-        const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
-        let bestValue = isFocusTurn ? -Infinity : Infinity;
-        let bestSteps = undefined;
-
-        for (const entry of topCandidates) {
-            // Immediate runaway short-circuit
-            if (entry.value === Infinity) {
-                if (isFocusTurn) return { value: Infinity, runaway: true, stepsToInfinity: 1 };
-                else return { value: -Infinity, runaway: true, stepsToInfinity: 1 };
-            }
-            if (entry.value === -Infinity) {
-                if (!isFocusTurn) return { value: -Infinity, runaway: true, stepsToInfinity: 1 };
-                else return { value: Infinity, runaway: true, stepsToInfinity: 1 };
-            }
-
-            // Recurse on child node (toggle sides)
-            const childEval = minimaxEvaluate(entry.resultGrid, entry.simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex);
-            const value = childEval.value;
-            const childSteps = typeof childEval.stepsToInfinity === 'number' ? childEval.stepsToInfinity + 1 : undefined;
-
-            if (isFocusTurn) {
-                // maximizing: prefer larger value; if both Infinity, prefer fewer steps
-                if (value > bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (typeof childSteps === 'number' && childSteps < bestSteps)))) {
-                    bestValue = value;
-                    bestSteps = childSteps;
-                }
-                alpha = Math.max(alpha, bestValue);
-                if (alpha >= beta) break; // beta cut-off
-            } else {
-                // minimizing: prefer smaller value; if both Infinity (forced), prefer more steps (delay)
-                if (value < bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (typeof childSteps === 'number' && childSteps > bestSteps)))) {
-                    bestValue = value;
-                    bestSteps = childSteps;
-                }
-                beta = Math.min(beta, bestValue);
-                if (beta <= alpha) break; // alpha cut-off
-            }
-        }
-
-        const isInf = (bestValue === Infinity || bestValue === -Infinity);
-        return { value: bestValue, runaway: isInf, stepsToInfinity: isInf ? bestSteps : undefined };
-    }
-
-    /**
-     * Choose and execute an AI move for the given player using heuristic + search.
-     *
-    * Selection criteria (in order):
-    * - If any candidate yields +Infinity (guaranteed win chain OR detected terminal state \(AI captures all opponent cells\)),
-    *   ignore atk/def and pick the move with the smallest plies-to-win (fastest finish). If multiple, pick randomly among them.
-     * - Otherwise, Main: netResult for each candidate, where netResult uses deep-search `searchScore` if available
-     *   (minimax up to `aiDepth`, relative to current total) or falls back to `immediateGain`.
-     * - Tiebreaker 1: higher atk (AI cells next to weaker enemy cells).
-     * - Tiebreaker 2: higher def (AI cells one away from exploding).
-     * - Final: random among exact ties.
-     *
-    * @param {number} playerIndex - AI player index in activeColors.
-     * @returns {void} either performs a move (handleClick) or advances turn.
-     */
+    
     function aiMakeMoveFor(playerIndex) {
         if (isProcessing || gameWon) return;
-
-        const candidates = generateCandidatesOnSim(grid, initialPlacements, playerIndex);
-        if (candidates.length === 0) {
-            if (!initialPlacements[playerIndex]) { scheduleGameEnd(); return; }
-            initialPlacements[playerIndex] = true; switchPlayer(); return;
-        }
-
-        // Evaluate immediate result grids first (as before) to get candidate.resultGrid
-        const evaluated = [];
-        for (const cand of candidates) {
-            const res = applyMoveAndSim(grid, initialPlacements, playerIndex, cand.r, cand.c, cand.isInitial);
-            evaluated.push({
-                r: cand.r,
-                c: cand.c,
-                isInitial: cand.isInitial,
-                srcVal: cand.srcVal,
-                // If simulation runaways are detected for this immediate result, treat as overwhelmingly good for the mover.
-                immediateGain: (res.runaway ? Infinity : (totalOwnedOnGrid(res.grid, playerIndex) - totalOwnedOnGrid(grid, playerIndex))),
-                explosions: res.explosionCount,
-                resultGrid: res.grid,
-                resultInitial: res.simInitial,
-                runaway: res.runaway
-            });
-        }
-
-        // Sort and pick topK by immediateGain descending
-        evaluated.sort((a, b) => b.immediateGain - a.immediateGain || b.explosions - a.explosions);
-        const topK = evaluated.slice(0, Math.min(dataRespectK, evaluated.length));
-
-        // For each topK entry, run minimaxEvaluate to depth aiDepth (this returns absolute totalOwned estimate)
-        for (const cand of topK) {
-            // If immediate result already runaway, we can set searchScore immediately
-            if (cand.runaway) {
-                cand.searchScore = (cand.immediateGain === Infinity) ? Infinity : -Infinity;
-                if (cand.searchScore === Infinity) cand.winPlies = 1;
-            } else {
-                // Start recursion with coalition opponent as next mover; use aiDepth as plies
-                const nextMover = -1; // coalition pseudo-player
-                const depth = aiDepth; // number of plies to look ahead
-                const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextMover, depth - 1, -Infinity, Infinity, playerIndex, playerIndex);
-                // minimaxEvaluate returns absolute totalOwned for focus; convert to gain relative to current
-                const before = totalOwnedOnGrid(grid, playerIndex);
-                cand.searchScore = (evalRes.value === Infinity || evalRes.value === -Infinity) ? evalRes.value : (evalRes.value - before);
-                if (evalRes.value === Infinity && typeof evalRes.stepsToInfinity === 'number') {
-                    cand.winPlies = evalRes.stepsToInfinity;
-                }
-            }
-        }
-
-        // Fast path: if any +Infinity candidate exists, choose the fastest win and skip atk/def tiebreakers
-        const winning = topK.filter(c => c.searchScore === Infinity);
-        if (winning.length > 0) {
-            const minPlies = Math.min(...winning.map(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY)));
-            const fastest = winning.filter(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY) === minPlies);
-            const chosenFast = fastest.length ? fastest[Math.floor(Math.random() * fastest.length)] : winning[0];
-
-            if (aiDebug) {
-                clearAIDebugUI();
-                if (chosenFast) {
-                    const aiCell = document.querySelector(`.cell[data-row="${chosenFast.r}"][data-col="${chosenFast.c}"]`);
-                    if (aiCell) aiCell.classList.add('ai-highlight');
-                }
-                const info = {
-                    chosen: chosenFast ? {
-                        r: chosenFast.r,
-                        c: chosenFast.c,
-                        src: chosenFast.srcVal,
-                        expl: chosenFast.explosions,
-                        gain: chosenFast.searchScore,
-                        atk: chosenFast.atk,
-                        def: chosenFast.def,
-                        winPlies: chosenFast.winPlies
-                    } : null,
-                    ordered: winning.map(c => ({ r: c.r, c: c.c, src: c.srcVal, expl: c.explosions, gain: c.searchScore, atk: c.atk, def: c.def, winPlies: c.winPlies })),
-                    topK: winning.length
-                };
-                showAIDebugPanelWithResponse(info);
-
-                if (chosenFast) {
-                    const onUserConfirm = (ev) => {
-                        // Accept click (tap release) or Enter/Space keydown
-                        if (ev.type === 'click' || (ev.type === 'keydown' && (ev.key === 'Enter' || ev.key === ' '))) {
-                            ev.stopPropagation();
-                            ev.preventDefault();
-                            document.removeEventListener('click', onUserConfirm, true);
-                            document.removeEventListener('keydown', onUserConfirm, true);
-                            clearAIDebugUI();
-                            handleClick(chosenFast.r, chosenFast.c);
-                        }
-                    };
-                    document.addEventListener('click', onUserConfirm, true);
-                    document.addEventListener('keydown', onUserConfirm, true);
-                } else {
-                    if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
-                    switchPlayer();
-                }
-                return;
-            }
-
-            if (!chosenFast) {
-                if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
-                switchPlayer();
-            } else {
-                handleClick(chosenFast.r, chosenFast.c);
-            }
-            return;
-        }
-
-        // Use searchScore in place of immediate gain when computing netResult and ordering
-        // Compute atk/def for topK as before on each e.resultGrid
-        for (const cand of topK) {
-            const rg = cand.resultGrid;
-            const aiColor = activeColors()[playerIndex];
-            const playerColor = activeColors()[humanPlayer];
-            const nearVal = cellExplodeThreshold - 1;
-            let def = 0, atk = 0;
-            for (let r = 0; r < gridSize; r++) {
-                for (let c = 0; c < gridSize; c++) {
-                    const cell = rg[r][c];
-                    if (cell.player === aiColor) {
-                        if (cell.value === nearVal) def++;
-                        const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
-                        for (const [ar, ac] of adj) {
-                            if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
-                            const adjCell = rg[ar][ac];
-                            if (adjCell.player === playerColor && cell.value > adjCell.value) atk++;
-                        }
-                    }
-                }
-            }
-            cand.def = def;
-            cand.atk = atk;
-            cand.netResult = (typeof cand.searchScore === 'number' ? cand.searchScore : cand.immediateGain) + (typeof cand.worstResponseAIChange === 'number' ? cand.worstResponseAIChange : 0);
-        }
-
-        // Continue with the same selection logic as before but prefer searchScore/netResult instead of immediateGain
-        topK.sort((a, b) =>
-            (b.netResult - a.netResult) ||
-            (b.atk - a.atk) ||
-            (b.def - a.def)
-        );
-
-        // select bestMoves as original logic
-        const bestNet = topK[0] ? topK[0].netResult : -Infinity;
-        const bestByNet = topK.filter(t => t.netResult === bestNet);
-        let bestMoves;
-        if (bestByNet.length === 1) {
-            bestMoves = bestByNet;
-        } else {
-            const maxAtk = Math.max(...bestByNet.map(t => (typeof t.atk === 'number' ? t.atk : -Infinity)));
-            const byAtk = bestByNet.filter(t => (typeof t.atk === 'number' ? t.atk : -Infinity) === maxAtk);
-            if (byAtk.length === 1) {
-                bestMoves = byAtk;
-            } else {
-                const maxDef = Math.max(...byAtk.map(t => (typeof t.def === 'number' ? t.def : -Infinity)));
-                bestMoves = byAtk.filter(t => (typeof t.def === 'number' ? t.def : -Infinity) === maxDef);
-            }
-        }
-        if (!bestMoves || bestMoves.length === 0) bestMoves = topK.length ? [topK[0]] : [];
-
-        const chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
-
-        if (aiDebug) {
-            // reuse existing debug UI code paths: clearAIDebugUI + show highlights + panel info
+        const result = computeAIMove({
+            grid,
+            initialPlacements,
+            playerIndex,
+            playerCount,
+            gridSize,
+            activeColors,
+            invalidInitialPositions
+        }, {
+            maxCellValue,
+            initialPlacementValue,
+            dataRespectK,
+            aiDepth,
+            cellExplodeThreshold,
+            debug: aiDebug
+        });
+        if (result.scheduleGameEnd) { scheduleGameEnd(); return; }
+        if (result.requireAdvanceTurn) { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; switchPlayer(); return; }
+        const move = result.chosen;
+        if (aiDebug && result.debugInfo) {
             clearAIDebugUI();
-            if (chosen) {
-                const aiCell = document.querySelector(`.cell[data-row="${chosen.r}"][data-col="${chosen.c}"]`);
+            if (move) {
+                const aiCell = document.querySelector(`.cell[data-row="${move.r}"][data-col="${move.c}"]`);
                 if (aiCell) aiCell.classList.add('ai-highlight');
-                // no immediate bestResponse available with deep search, keep response highlight removed or estimate via single-step
             }
-            const info = {
-                chosen: chosen ? {
-                    r: chosen.r,                // Placement coordinates
-                    c: chosen.c,                // Placement coordinates
-                    src: chosen.srcVal,         // Value of chosen Cell
-                    expl: chosen.explosions,    // Number of caused Explosions
-                    gain: chosen.searchScore,   // Worst net gain from chosen cell
-                    atk: chosen.atk,            // Number of strong ai cells next to weak enemy cells
-                    def: chosen.def             // Number of ai cells 1 away from exploding
-                } : null,
-                ordered: topK.map(cand => ({
-                    r: cand.r, c: cand.c, src: cand.srcVal, expl: cand.explosions,
-                    gain: cand.searchScore, atk: cand.atk, def: cand.def
-                })),
-                topK: topK.length
-            };
-            showAIDebugPanelWithResponse(info);
-
-            if (chosen) {
+            showAIDebugPanelWithResponse(result.debugInfo);
+            if (move) {
                 const onUserConfirm = (ev) => {
-                    // Accept click (tap release) or Enter/Space keydown
                     if (ev.type === 'click' || (ev.type === 'keydown' && (ev.key === 'Enter' || ev.key === ' '))) {
-                        ev.stopPropagation();
-                        ev.preventDefault();
+                        ev.stopPropagation(); ev.preventDefault();
                         document.removeEventListener('click', onUserConfirm, true);
                         document.removeEventListener('keydown', onUserConfirm, true);
                         clearAIDebugUI();
-                        handleClick(chosen.r, chosen.c);
+                        handleClick(move.r, move.c);
                     }
                 };
                 document.addEventListener('click', onUserConfirm, true);
                 document.addEventListener('keydown', onUserConfirm, true);
-            } else {
-                if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
-                switchPlayer();
+                return;
             }
-            return;
         }
-
-        if (!chosen) {
-            if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
-            switchPlayer();
-        } else {
-            handleClick(chosen.r, chosen.c);
-        }
+        if (move) handleClick(move.r, move.c); else { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; switchPlayer(); }
     }
 
     //#endregion

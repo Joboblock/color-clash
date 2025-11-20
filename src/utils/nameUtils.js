@@ -14,8 +14,11 @@ import { PLAYER_NAME_LENGTH } from '../config/index.js';
  */
 export function sanitizeName(raw) {
   if (typeof raw !== 'string') return '';
-  let s = raw.replace(/\s+/g, '_');
+  // space is replaced with _
+  let s = raw.replace(/\s/g, '_');
+  // Only allow Alphanumerical and _
   s = s.replace(/[^A-Za-z0-9_]/g, '');
+  // Clamp length
   if (s.length > PLAYER_NAME_LENGTH) s = s.slice(0, PLAYER_NAME_LENGTH);
   return s;
 }

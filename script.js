@@ -446,9 +446,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let onlineGameActive = false;
     let onlinePlayers = [];
     let myOnlineIndex = -1;
-    // let suppressNetworkSend = false; // unused after instant send
     /** @type {{row:number,col:number}|null} */
-    // let pendingMove = null; // unused after instant send
 
     /**
      * Delegated grid click handler. Uses event.target.closest('.cell') to
@@ -590,6 +588,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let startingColorIndex = playerColors.indexOf('green');
     if (startingColorIndex < 0) startingColorIndex = 0;
     let gameColors = null; // null until a game is started
+    
     /**
      * Get the current active color palette (game palette if set, otherwise full list).
      * @returns {string[]} array of player color keys.
@@ -1250,6 +1249,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (focusables.length === 0) return;
         const focused = document.activeElement;
         if ((e.key === 'Enter' || e.key === ' ') && focused && openMenu.contains(focused)) {
+            // Allow Space to pass (converts to _ in input)
+            const tag = focused.tagName && focused.tagName.toLowerCase();
+            const editable = (tag === 'input' || tag === 'textarea' || focused.isContentEditable);
+            if (editable && e.key === ' ') {
+                return;
+            }
             e.preventDefault();
             focused.click && focused.click();
             return;

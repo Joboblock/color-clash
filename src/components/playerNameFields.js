@@ -99,12 +99,12 @@ export class PlayerNameFields {
 			// On Enter, commit current sanitized value
 			this.setName(e.target.value);
 		}
-		// Arrow navigation constraints mirroring previous logic
 		const el = e.target;
-		if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') && el.value === '') {
-			// allow default navigation when empty; else prevent bubble for consistency
-		} else {
-			// no-op placeholder for potential future accessibility tweaks
+		// Allow slider / external arrow navigation if input is empty.
+		// If the input has content, stop propagation so PlayerBoxSlider (or other key listeners) doesn't hijack arrow keys.
+		if (el && el.value !== '' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+			// Let the browser handle caret movement but prevent higher-level components from reacting.
+			e.stopPropagation();
 		}
 	}
 

@@ -6,6 +6,7 @@ import { PlayerNameFields } from './src/components/playerNameFields.js';
 import { PlayerBoxSlider } from './src/components/playerBoxSlider.js';
 import { ColorCycler } from './src/components/colorCycler.js';
 import { GridSizeTile } from './src/components/gridSizeTile.js';
+import { OnlineRoomList } from './src/components/onlineRoomList.js';
 
 import { sanitizeName } from './src/utils/nameUtils.js';
 import { computeAIMove } from './src/ai/engine.js';
@@ -67,6 +68,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // hostedRoom removed (legacy variable no longer needed after OnlineConnection extraction)
     let hostedDesiredGridSize = null; // Desired grid size chosen in Host menu
     const roomListElement = document.getElementById('roomList');
+    // Extracted online room list component
+    const roomListView = new OnlineRoomList({
+        rootEl: roomListElement,
+        getCurrentRoom: () => myJoinedRoom,
+        getPlayerName: () => (localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player').trim(),
+        onHost: () => hostRoom(),
+        onJoin: (roomName) => joinRoom(roomName),
+        onLeave: (roomName) => leaveRoom(roomName)
+    });
     // Online bottom action button in online menu
     const hostCustomGameBtnRef = document.getElementById('hostCustomGameBtn');
     // Track last applied server move sequence to avoid duplicates
@@ -162,7 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.debug(`[RoomList] Room: ${roomName} | Players: ? (${info.currentPlayers}/${info.maxPlayers})`);
             }
         });
-        updateRoomList(rooms);
+        roomListView.render(rooms);
         updateStartButtonState(rooms);
     });
     onlineConnection.on('started', (msg) => {
@@ -187,7 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (firstMenu) setHidden(firstMenu, true);
             if (mainMenu) setHidden(mainMenu, true);
             if (onlineMenu) setHidden(onlineMenu, true);
-            trainMode = false;
+            practiceMode = false;
             recreateGrid(s, p);
             currentPlayer = 0;
             document.body.className = activeColors()[currentPlayer];
@@ -333,80 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function updateRoomList(rooms) {
-        window.lastRoomList = rooms;
-        roomListElement.innerHTML = '';
-        const entries = Object.entries(rooms || {});
-        // Partition: my room, joinable, full
-        const my = [];
-        const joinable = [];
-        const full = [];
-        for (const [roomName, infoRaw] of entries) {
-            const info = infoRaw || {};
-            const currentPlayers = Number.isFinite(info.currentPlayers) ? info.currentPlayers : 0;
-            const maxPlayers = Number.isFinite(info.maxPlayers) ? info.maxPlayers : 2;
-            if (roomName === myJoinedRoom) my.push([roomName, info]);
-            else if (currentPlayers < maxPlayers) joinable.push([roomName, info]);
-            else full.push([roomName, info]);
-        }
-        const ordered = [...my, ...joinable, ...full];
-        if (ordered.length === 0) {
-            // Show placeholder empty room
-            const li = document.createElement('li');
-            li.className = 'room-list-item';
-            const btn = document.createElement('button');
-            btn.classList.add('room-btn');
-            btn.textContent = 'Host';
-            btn.onclick = () => {
-                // Host a simple 2-player game via OnlineConnection
-                const debugPlayerName = (localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player').trim();
-                onlineConnection.host({ roomName: debugPlayerName, maxPlayers: 2, gridSize: undefined, debugName: debugPlayerName });
-            };
-            const nameSpan = document.createElement('span');
-            nameSpan.className = 'room-name';
-            nameSpan.textContent = 'Empty Game';
-            const countSpan = document.createElement('span');
-            countSpan.className = 'room-player-count';
-            countSpan.textContent = '(0/2)';
-            li.appendChild(btn);
-            li.appendChild(nameSpan);
-            li.appendChild(countSpan);
-            roomListElement.appendChild(li);
-        } else {
-            ordered.forEach(([roomName, info]) => {
-                const currentPlayers = Number.isFinite(info.currentPlayers) ? info.currentPlayers : 0;
-                const maxPlayers = Number.isFinite(info.maxPlayers) ? info.maxPlayers : 2;
-                const li = document.createElement('li');
-                li.className = 'room-list-item';
-                const btn = document.createElement('button');
-                const isMine = roomName === myJoinedRoom;
-                const isFull = currentPlayers >= maxPlayers;
-                btn.classList.add('room-btn');
-                if (isMine) {
-                    btn.classList.add('leave');
-                    btn.textContent = 'Leave';
-                    btn.onclick = () => leaveRoom(roomName);
-                } else if (isFull) {
-                    btn.classList.add('full');
-                    btn.textContent = 'Full';
-                    btn.disabled = true;
-                } else {
-                    btn.textContent = 'Join';
-                    btn.onclick = () => joinRoom(roomName);
-                }
-                const nameSpan = document.createElement('span');
-                nameSpan.className = 'room-name';
-                nameSpan.textContent = `${roomName}'s Game`;
-                const countSpan = document.createElement('span');
-                countSpan.className = 'room-player-count';
-                countSpan.textContent = `(${currentPlayers}/${maxPlayers})`;
-                li.appendChild(btn);
-                li.appendChild(nameSpan);
-                li.appendChild(countSpan);
-                roomListElement.appendChild(li);
-            });
-        }
-    }
+    // updateRoomList removed: replaced by OnlineRoomList component (roomListView.render)
 
     function hostRoom() {
         const name = onlinePlayerNameInput.value.trim() || 'Player';
@@ -500,7 +437,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch { /* ignore */ }
     })();
-    // ...existing code...
+
     // Declare name input fields before sync function
     const onlinePlayerNameInput = document.getElementById('onlinePlayerName');
     // PlayerNameFields component will handle synchronization between inputs later once both elements are known
@@ -541,7 +478,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 handleClick(row, col);
                 return;
             }
-            // Local / train mode: proceed as usual
+            // Local / Practice mode: proceed as usual
             handleClick(row, col);
         }
     }
@@ -575,10 +512,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Use pointer events for broad device support; passive false so we can preventDefault
     document.body.addEventListener('pointerdown', onBodyPointerDown, { passive: false });
 
-    // Detect train mode via URL param
+    // Detect practice mode via URL param
     const urlParams = new URLSearchParams(window.location.search);
-    // Train mode is enabled if any AI-related parameter is present in the URL
-    const isTrainMode = urlParams.has('ai_depth') || urlParams.has('ai_k');
+    // Practice mode is enabled if any AI-related parameter is present in the URL
+    const isPracticeMode = urlParams.has('ai_depth') || urlParams.has('ai_k');
 
     /**
      * Broad mobile detection using feature hints (coarse pointer, touch points, UA hints).
@@ -717,7 +654,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const gridValueEl = document.getElementById('gridValue');
     let menuGridSizeVal = 0; // set after initial clamps
     const startBtn = document.getElementById('startBtn');
-    const trainBtn = document.getElementById('trainBtn');
+    const practiceBtn = document.getElementById('practiceBtn');
     const menuColorCycle = document.getElementById('menuColorCycle');
     // playerNameInput now handled via PlayerNameFields component (fetched at instantiation)
     const gridDecBtn = document.getElementById('gridDec');
@@ -757,7 +694,7 @@ document.addEventListener('DOMContentLoaded', () => {
             onStrengthChange: (val) => {
                 try {
                     const params = new URLSearchParams(window.location.search);
-                    if (getMenuParam() === 'train') {
+                    if (getMenuParam() === 'practice') {
                         params.set('ai_depth', String(val));
                         const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
                         window.history.replaceState({ ...(window.history.state||{}), ai_depth: val }, '', url);
@@ -777,7 +714,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const mainMenu = document.getElementById('mainMenu');
     const localGameBtn = document.getElementById('localGameBtn');
     const onlineGameBtn = document.getElementById('onlineGameBtn');
-    const trainMainBtn = document.getElementById('trainMainBtn');
+    const practiceMainBtn = document.getElementById('practiceMainBtn');
 
     // --- Helpers ---
     const setHidden = (el, hidden) => {
@@ -793,7 +730,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // New: typed menu param helpers (first|local|online|host|train)
+    // New: typed menu param helpers (first|local|online|host|practice)
     // Lightweight in-app stack of menu states to avoid timeout fallbacks
     let menuHistoryStack = [];
     function getMenuParam() {
@@ -801,7 +738,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const val = (new URLSearchParams(window.location.search)).get('menu');
             if (!val) return null;
             if (val === 'true') return 'first'; // backward compat
-            const allowed = ['first', 'local', 'online', 'host', 'train'];
+            const allowed = ['first', 'local', 'online', 'host', 'practice'];
             return allowed.includes(val) ? val : null;
         } catch { return null; }
     }
@@ -810,7 +747,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const params = new URLSearchParams(window.location.search);
         params.set('menu', menuKey);
         // While in explicit menu, drop transient game-only params so refresh is clean
-        // Keep ai_depth if returning to train menu so the UI can reflect it
+        // Keep ai_depth if returning to practice menu so the UI can reflect it
         if (menuKey !== null) {
             params.delete('players');
             params.delete('size');
@@ -893,9 +830,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 setMainMenuMode('host');
                 if (mainMenu) mainMenu.dataset.openedBy = 'host';
                 break;
-            case 'train':
+            case 'practice':
                 setHidden(mainMenu, false);
-                setMainMenuMode('train');
+                setMainMenuMode('practice');
                 break;
             default:
                 // Fallback to first
@@ -906,8 +843,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const colorKey = playerColors[startingColorIndex] || 'green';
             document.body.className = colorKey;
         } catch { /* ignore */ }
-        // Update AI preview if train menu is shown
-        if (menuKey === 'train') {
+        // Update AI preview if practice menu is shown
+        if (menuKey === 'practice') {
             try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch { /* ignore */ }
         }
     }
@@ -921,9 +858,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Main behaviour preserved, but simplified ---
     /**
-     * Set main menu mode: 'local', 'host', or 'train'.
+     * Set main menu mode: 'local', 'host', or 'practice'.
      * Adjusts header, button visibility, and player name input.
-     * @param {'local'|'host'|'train'} mode
+     * @param {'local'|'host'|'practice'} mode
      */
     function setMainMenuMode(mode) {
         const mainMenu = document.getElementById('mainMenu');
@@ -934,19 +871,19 @@ document.addEventListener('DOMContentLoaded', () => {
         // Persist mode for later checks (e.g., connection banner gating)
         try { mainMenu.dataset.mode = String(mode); } catch { /* ignore */ }
         if (header) {
-            if (mode === 'train') header.textContent = 'Train Mode';
+            if (mode === 'practice') header.textContent = 'Practice Mode';
             else if (mode === 'host') header.textContent = 'Host Game';
             else header.textContent = 'Local Game';
         }
         if (startBtn) {
             startBtn.style.display = '';
-            if (mode === 'train') startBtn.textContent = 'Train';
+            if (mode === 'practice') startBtn.textContent = 'Practice';
             else if (mode === 'host') startBtn.textContent = 'Host';
             else startBtn.textContent = 'Start';
         }
         if (playerNameInput) playerNameInput.style.display = (mode === 'host') ? '' : 'none';
         const aiStrengthTile = document.getElementById('aiStrengthTile');
-        if (aiStrengthTile) aiStrengthTile.style.display = (mode === 'train') ? '' : 'none';
+        if (aiStrengthTile) aiStrengthTile.style.display = (mode === 'practice') ? '' : 'none';
     }
     // Initial routing based on typed menu param
     const typedMenu = getMenuParam();
@@ -987,8 +924,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 navigateToMenu('online');
             });
         }
-        // Train
-        trainMainBtn?.addEventListener('click', () => navigateToMenu('train'));
+        // Practice
+        practiceMainBtn?.addEventListener('click', () => navigateToMenu('practice'));
     }
 
     // Close button logic now handled by MenuCloseButton component
@@ -1006,7 +943,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) { console.debug('[MenuCloseButton] init failed', e); }
     // --- Main Menu Logic ---
 
-    // Helper to toggle Train Mode UI state in mainMenu
+    // Helper to toggle Practice Mode UI state in mainMenu
 
     // Initialize unified player name fields component once both elements are available
     try {
@@ -1046,7 +983,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const tips = [
             { text: 'Tip: You can also set <code>?players=&lt;n&gt;&amp;size=&lt;n&gt;</code> in the URL.', weight: 1, html: true },
             { text: 'Tip: Grid size defaults to a recommended value but can be adjusted manually.', weight: 2 },
-            { text: 'Tip: Use Train mode to observe AI behavior and learn effective strategies.', weight: 1 },
+            { text: 'Tip: Use Practice mode to observe AI behavior and learn effective strategies.', weight: 1 },
             { text: 'Tip: <a href="https://joboblock.github.io" target="_blank">joboblock.github.io</a> redirects to this game.', weight: 2, html: true },
             { text: 'Tip: Give this project a <a href="https://github.com/Joboblock/color-clash" target="_blank">Star</a>, to support its development!', weight: 2, html: true },
             { text: 'Tip: This is a rare message.', weight: 0.1 },
@@ -1329,14 +1266,14 @@ document.addEventListener('DOMContentLoaded', () => {
             await requestFullscreenIfMobile();
             const params = new URLSearchParams(window.location.search);
             params.delete('menu');
-            params.delete('train');
+            params.delete('practice');
             params.set('players', String(p));
             params.set('size', String(s));
             const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
             window.history.pushState({ mode: 'play', players: p, size: s }, '', newUrl);
             gameColors = computeSelectedColors(p);
             if (mainMenu) mainMenu.classList.add('hidden');
-            trainMode = false;
+            practiceMode = false;
             recreateGrid(s, p);
             createEdgeCircles();
         } else if (mode === 'host') {
@@ -1347,7 +1284,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (mode === 'host' && mainMenu && mainMenu.dataset.mode === 'host') {
             window.history.back();
         }
-        else if (mode === 'train') {
+        else if (mode === 'practice') {
             await requestFullscreenIfMobile();
             const params = new URLSearchParams(window.location.search);
             params.delete('menu');
@@ -1358,20 +1295,20 @@ document.addEventListener('DOMContentLoaded', () => {
             window.history.pushState({ mode: 'ai', players: p, size: s }, '', newUrl);
             gameColors = computeSelectedColors(p);
             if (mainMenu) mainMenu.classList.add('hidden');
-            trainMode = true;
+            practiceMode = true;
             try { aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10)); } catch { /* ignore */ }
             recreateGrid(s, p);
             createEdgeCircles();
         }
     });
 
-    // Train button handler
-    if (trainBtn) {
-        trainBtn.textContent = 'Train';
-        trainBtn.id = 'trainBtn';
-        trainBtn.setAttribute('aria-label', 'Train');
+    // Practice button handler
+    if (practiceBtn) {
+        practiceBtn.textContent = 'Practice';
+        practiceBtn.id = 'practiceBtn';
+        practiceBtn.setAttribute('aria-label', 'Practice');
 
-        trainBtn.addEventListener('click', async () => {
+        practiceBtn.addEventListener('click', async () => {
             const p = clampPlayers(menuPlayerCount);
             let s = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : 3;
 
@@ -1392,9 +1329,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // Set the active game palette from the UI selection
             gameColors = computeSelectedColors(p);
 
-            // Hide menu and start train mode immediately
+            // Hide menu and start practice mode immediately
             if (mainMenu) mainMenu.classList.add('hidden');
-            trainMode = true;
+            practiceMode = true;
             // Apply the chosen AI depth immediately for this session
             try { aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10)); } catch { /* ignore */ }
             recreateGrid(s, p);
@@ -1601,7 +1538,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof onlineGameActive !== 'undefined' && onlineGameActive) {
                     return typeof myOnlineIndex === 'number' ? (currentPlayer !== myOnlineIndex) : true;
                 }
-                if (typeof trainMode !== 'undefined' && trainMode) {
+                if (typeof practiceMode !== 'undefined' && practiceMode) {
                     const hp = (typeof humanPlayer === 'number') ? humanPlayer : 0;
                     return currentPlayer !== hp;
                 }
@@ -1649,8 +1586,8 @@ document.addEventListener('DOMContentLoaded', () => {
         setHidden(mainMenu, true);
         const onlineMenu = document.getElementById('onlineMenu');
         if (onlineMenu) setHidden(onlineMenu, true);
-        // Enable train mode if any AI-related parameter exists in the URL
-        trainMode = params.has('ai_depth') || params.has('ai_k');
+        // Enable practice mode if any AI-related parameter exists in the URL
+        practiceMode = params.has('ai_depth') || params.has('ai_k');
         const ad = parseInt(params.get('ai_depth') || '', 10);
         if (!Number.isNaN(ad) && ad >= 1) {
             try { aiDepth = Math.max(1, ad); } catch { /* ignore */ }
@@ -1855,7 +1792,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!gameWon) return;
             stopExplosionLoop();
             clearCellFocus();
-            const targetMenu = onlineGameActive ? 'online' : (trainMode ? 'train' : 'local');
+            const targetMenu = onlineGameActive ? 'online' : (practiceMode ? 'practice' : 'local');
             setMenuParam(targetMenu, false);
             showMenuFor(targetMenu);
             exitFullscreenIfPossible();
@@ -1877,8 +1814,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return false;
     }
 
-    // Train mode globals
-    let trainMode = isTrainMode;
+    // Practice mode globals
+    let practiceMode = isPracticeMode;
     const humanPlayer = 0; // first selected color is player index 0
 
     // create initial grid
@@ -2002,7 +1939,7 @@ document.addEventListener('DOMContentLoaded', () => {
             handleClick(row, col);
             return;
         }
-        if (typeof trainMode !== 'undefined' && trainMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
+        if (typeof practiceMode !== 'undefined' && practiceMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
         if (Number.isInteger(row) && Number.isInteger(col)) {
             e.preventDefault();
             handleClick(row, col);
@@ -2071,9 +2008,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Ensure the visual player boxes reflect new player count via component
         try { slider && slider.setCount(clampPlayers(playerCount), { silent: true }); } catch { /* ignore */ }
 
-        // If train mode is enabled, force human to be first color and
+        // If practice mode is enabled, force human to be first color and
         // set the current player to the human (so they control the first color)
-        if (trainMode) {
+        if (practiceMode) {
             // Ensure humanPlayer index is valid for current playerCount
             // (humanPlayer is 0 by design; defensive check)
             currentPlayer = Math.min(humanPlayer, playerCount - 1);
@@ -2465,7 +2402,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try { aiStrengthTile && aiStrengthTile.setValueRenderer(updateValueCircles); } catch { /* ignore */ }
 
     /**
-     * Advance to the next active player and update body color; trigger AI in train mode.
+     * Advance to the next active player and update body color; trigger AI in practice mode.
      * @returns {void} updates currentPlayer and grid visuals.
      */
     function switchPlayer() {
@@ -2492,7 +2429,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateGrid();
         // Restore focus to last focused cell for this player, if any
         restorePlayerFocus();
-        // If in train mode, possibly trigger AI move for non-human players
+        // If in practice mode, possibly trigger AI move for non-human players
         maybeTriggerAIMove();
         // ...existing code...
         // Online: sending move is now handled instantly in click/keyboard handler
@@ -2503,8 +2440,8 @@ document.addEventListener('DOMContentLoaded', () => {
      * Restore focus to the last cell focused by the current player, if any.
      */
     function restorePlayerFocus() {
-        // Only restore focus for human player (trainMode: currentPlayer === humanPlayer)
-        if (typeof trainMode !== 'undefined' && trainMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
+        // Only restore focus for human player (practiceMode: currentPlayer === humanPlayer)
+        if (typeof practiceMode !== 'undefined' && practiceMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
         const pos = playerLastFocus[currentPlayer];
         if (pos) {
             const cell = document.querySelector(`.cell[data-row="${pos.row}"][data-col="${pos.col}"]`);
@@ -2664,7 +2601,7 @@ document.addEventListener('DOMContentLoaded', () => {
     //#endregion
 
 
-    //#region Training / AI helpers (dataRespect + debug)
+    //#region Practice / AI helpers (dataRespect + debug)
     // AI parameters (core logic now in src/ai/engine.js)
     const aiDebug = true;
     const dataRespectK = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_k')) || 25);
@@ -2672,11 +2609,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     /**
-     * In train mode, trigger AI move if it's currently an AI player's turn.
+     * In practice mode, trigger AI move if it's currently an AI player's turn.
      * @returns {void} may schedule aiMakeMoveFor with a short delay.
      */
     function maybeTriggerAIMove() {
-        if (!trainMode || gameWon || isProcessing || currentPlayer === humanPlayer) return;
+        if (!practiceMode || gameWon || isProcessing || currentPlayer === humanPlayer) return;
         if (mainMenu && !mainMenu.classList.contains('hidden')) return;
         setTimeout(() => {
             if (isProcessing || gameWon || currentPlayer === humanPlayer) return;

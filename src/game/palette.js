@@ -1,5 +1,5 @@
 // Palette and color selection logic extracted from script.js
-import { mixTowardGray, hexToRgb } from '../utils/utilities.js';
+import { mixTowardGray, hexToRgb } from '../utils/generalUtils.js';
 
 // Inner circle strong colors (match CSS classes .inner-circle.*)
 export const innerCircleColors = {

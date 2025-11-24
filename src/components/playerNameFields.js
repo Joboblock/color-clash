@@ -4,7 +4,7 @@
  * for the local and online player name input fields. Falls back gracefully if one
  * of the fields is absent.
  */
-import { sanitizeName, reflectValidity } from '../utils/nameUtils.js';
+import { sanitizeName, reflectValidity } from '../utils/generalUtils.js';
 import { PLAYER_NAME_LENGTH } from '../config/index.js';
 
 export class PlayerNameFields {

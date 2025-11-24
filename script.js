@@ -5,9 +5,8 @@ import { firstPage } from './src/pages/first.js';
 import { onlinePage } from './src/pages/online.js';
 import { mainPage } from './src/pages/main.js';
 
-import { sanitizeName } from './src/utils/nameUtils.js';
-// Extracted utilities & palette
-import { getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, mixTowardGray } from './src/utils/utilities.js';
+// General utilities (merged)
+import { sanitizeName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, mixTowardGray, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
 import { playerColors, innerCircleColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './src/game/palette.js';
 import { computeAIMove } from './src/ai/engine.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js'; // some imported constants applied later
@@ -862,24 +861,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // innerCircleColors & CSS variable application moved to palette.js
 
     // Weighted tips list (some with HTML)
-    function getDeviceTips() {
-        const mobile = isMobileDevice();
-        const tips = [
-            { text: 'Tip: You can also set <code>?players=&lt;n&gt;&amp;size=&lt;n&gt;</code> in the URL.', weight: 1, html: true },
-            { text: 'Tip: Grid size defaults to a recommended value but can be adjusted manually.', weight: 2 },
-            { text: 'Tip: Use Practice mode to observe AI behavior and learn effective strategies.', weight: 1 },
-            { text: 'Tip: <a href="https://joboblock.github.io" target="_blank">joboblock.github.io</a> redirects to this game.', weight: 2, html: true },
-            { text: 'Tip: Give this project a <a href="https://github.com/Joboblock/color-clash" target="_blank">Star</a>, to support its development!', weight: 2, html: true },
-            { text: 'Tip: This is a rare message.', weight: 0.1 },
-            { text: 'Tip: Praise the Raute, embrace the Raute!', weight: 0.1 }
-        ];
-        if (mobile) {
-            tips.push({ text: 'Tip: Double-tap outside the grid to toggle fullscreen on mobile devices.', weight: 3 });
-        } else {
-            tips.push({ text: 'Tip: Use WASD or Arrow keys to move between menu controls and grid cells.', weight: 2 });
-        }
-        return tips;
-    }
 
     // Ensure CSS variables for colors are set on :root BEFORE building boxes
     applyPaletteCssVariables();
@@ -1426,16 +1407,6 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {Array<{text:string, weight?:number, html?:boolean}>} list - candidate tips.
      * @returns {{text:string, weight?:number, html?:boolean}} chosen tip.
      */
-    function pickWeightedTip(list) {
-        let total = 0;
-        for (const t of list) total += (typeof t.weight === 'number' ? t.weight : 1);
-        let roll = Math.random() * total;
-        for (const t of list) {
-            roll -= (typeof t.weight === 'number' ? t.weight : 1);
-            if (roll <= 0) return t;
-        }
-        return list[list.length - 1];
-    }
 
     /**
      * Update the menu hint with a randomly picked weighted tip.

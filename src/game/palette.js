@@ -19,7 +19,18 @@ export const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan'
 let startingColorIndex = playerColors.indexOf('green');
 if (startingColorIndex < 0) startingColorIndex = 0;
 
+/**
+ * Get the current starting color index within `playerColors`.
+ * @returns {number} Zero-based index referencing the first color for palette rotation.
+ */
 export function getStartingColorIndex() { return startingColorIndex; }
+
+/**
+ * Set the starting color index used when generating selected colors.
+ * Values outside the valid range [0..playerColors.length-1] are ignored.
+ * @param {number} idx - Proposed zero-based starting color index.
+ * @returns {void}
+ */
 export function setStartingColorIndex(idx) {
     if (Number.isInteger(idx) && idx >= 0 && idx < playerColors.length) {
         startingColorIndex = idx;
@@ -27,10 +38,19 @@ export function setStartingColorIndex(idx) {
 }
 
 // Active palette (gameColors overrides full list)
+/**
+ * Resolve the active color array, preferring a game-specific palette when provided.
+ * @param {string[]|null|undefined} gameColors - Optional game palette; falls back to full `playerColors` if empty.
+ * @returns {string[]} The array of color keys currently active.
+ */
 export function activeColors(gameColors) {
     return (gameColors && gameColors.length) ? gameColors : playerColors;
 }
 
+/**
+ * Compute the starting player index based on the current cycler color in the active palette.
+ * @returns {number} index into activeColors().
+ */
 export function computeStartPlayerIndex(gameColors) {
     const ac = activeColors(gameColors);
     const selectedKey = playerColors[startingColorIndex];
@@ -38,6 +58,11 @@ export function computeStartPlayerIndex(gameColors) {
     return idx >= 0 ? idx : 0;
 }
 
+/**
+ * Generate `count` amount of colors starting at the currently selected color
+ * @param {number} count - Number of colors to include.
+ * @returns {string[]} Array of colors capped at `count` (clamped to available colors).
+ */
 export function computeSelectedColors(count) {
     const n = playerColors.length;
     const c = Math.max(1, Math.min(count, n));
@@ -46,7 +71,11 @@ export function computeSelectedColors(count) {
     return arr;
 }
 
-// Apply CSS variables based on innerCircleColors
+/**
+ * Apply CSS variables based on innerCircleColors: sets properties for inner, cell, and body colors.
+ * @param {HTMLElement} [root=document.documentElement] - Root element on which to set CSS variables.
+ * @returns {void}
+ */
 export function applyPaletteCssVariables(root = document.documentElement) {
     Object.entries(innerCircleColors).forEach(([key, hex]) => {
         root.style.setProperty(`--inner-${key}`, hex);

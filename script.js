@@ -849,29 +849,16 @@ document.addEventListener('DOMContentLoaded', () => {
         practiceMainBtn?.addEventListener('click', () => navigateToMenu('practice'));
     }
 
-    // set dynamic bounds
-    // maxPlayers now derived directly from playerColors.length via clampPlayers calls
-
     // Build visual player box slider
     const playerBoxSlider = document.getElementById('playerBoxSlider');
     console.debug('[PlayerBoxSlider] element lookup:', playerBoxSlider ? '#playerBoxSlider found' : 'not found');
-    // inner container that holds the clickable boxes (may be same as slider if wrapper missing)
-    // PlayerBoxSlider manages its own internal cells container
-    // inner-circle color map (match styles.css .inner-circle.* colors)
-    // innerCircleColors & CSS variable application moved to palette.js
-
-    // Weighted tips list (some with HTML)
 
     // Ensure CSS variables for colors are set on :root BEFORE building boxes
     applyPaletteCssVariables();
 
-    // PlayerBoxSlider now initialized inside mainPage.
-
     // Start with URL or defaults
     menuPlayerCount = clampPlayers(playerCount, playerColors.length);
     updateSizeBoundsForPlayers(menuPlayerCount);
-
-    // ColorCycler now initialized inside mainPage.
 
     // Handle browser navigation to toggle between menu and game instead of leaving the app
     window.addEventListener('popstate', applyStateFromUrl);
@@ -884,7 +871,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch { /* ignore */ }
     });
 
-    // Stepper buttons for grid size now handled by GridSizeTile component
     // Utility: check if any menu overlay is open
     function isAnyMenuOpen() {
         const menus = [mainMenu, firstMenu, document.getElementById('onlineMenu')];
@@ -1005,7 +991,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return false;
     }
 
-    // Replace menu navigation handler
     // Global keydown handler for menu navigation (angle-based)
     document.addEventListener('keydown', (e) => {
         if (!isAnyMenuOpen()) return;
@@ -1418,12 +1403,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tip && tip.html) menuHint.innerHTML = tip.text; else menuHint.textContent = tip ? tip.text : '';
     }
 
-    // Helpers tied to player color selection and UI reflection
-
-    /**
-     * Compute the starting player index based on the current cycler color in the active palette.
-     * @returns {number} index into activeColors().
-     */
     // computeStartPlayerIndex moved to palette.js (use dynamic gameColors)
     const computeStartPlayerIndexProxy = () => computeStartPlayerIndex(gameColors);
 
@@ -1481,14 +1460,6 @@ document.addEventListener('DOMContentLoaded', () => {
             gridSizeTile && gridSizeTile.applyPlayerCountBounds({ silent: true });
         } catch { /* ignore */ }
     }
-
-    // Sync functions
-    /**
-     * Clamp a numeric player count to valid limits [2..maxPlayers].
-     * @param {number} n - requested player count.
-     * @returns {number} clamped integer within bounds.
-     */
-    // clampPlayers moved to utilities.js (requires maxPlayers passed where used)
 
     /**
      * Central handler when menu player count changes; syncs size, UI, and grid.

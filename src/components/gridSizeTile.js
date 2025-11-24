@@ -15,7 +15,6 @@
  * @property {number} [minSize]
  * @property {number} [maxSize]
  */
-
 export class GridSizeTile {
     /**
      * @param {GridSizeTileOptions} opts

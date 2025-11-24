@@ -6,6 +6,9 @@ import { onlinePage } from './src/pages/online.js';
 import { mainPage } from './src/pages/main.js';
 
 import { sanitizeName } from './src/utils/nameUtils.js';
+// Extracted utilities & palette
+import { getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, mixTowardGray } from './src/utils/utilities.js';
+import { playerColors, innerCircleColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './src/game/palette.js';
 import { computeAIMove } from './src/ai/engine.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js'; // some imported constants applied later
 
@@ -195,7 +198,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) { console.error('[Online] Failed to start online game', err); }
     });
     onlineConnection.on('request_preferred_colors', () => {
-        try { const color = playerColors[startingColorIndex] || 'green'; onlineConnection.sendPreferredColor(color); } catch (e) { console.warn('[Online] Failed preferred_color', e); }
+    try { const color = playerColors[getStartingColorIndex()] || 'green'; onlineConnection.sendPreferredColor(color); } catch (e) { console.warn('[Online] Failed preferred_color', e); }
     });
     onlineConnection.on('joined', (msg) => {
         myJoinedRoom = msg.room;
@@ -258,17 +261,17 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const missed = Array.isArray(msg.recentMoves) ? msg.recentMoves.slice() : [];
             if (missed.length) {
-                missed.sort((a,b)=> (Number(a.seq)||0)-(Number(b.seq)||0));
-                let idx=0; const applyNext=()=>{
-                    if (idx>=missed.length) { updateStartButtonState(); return; }
-                    const m=missed[idx]; const r=Number(m.row), c=Number(m.col), fromIdx=Number(m.fromIndex); const seq=Number(m.seq);
+                missed.sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
+                let idx = 0; const applyNext = () => {
+                    if (idx >= missed.length) { updateStartButtonState(); return; }
+                    const m = missed[idx]; const r = Number(m.row), c = Number(m.col), fromIdx = Number(m.fromIndex); const seq = Number(m.seq);
                     if (Number.isInteger(seq) && seq <= lastAppliedSeq) { idx++; applyNext(); return; }
-                    if (!Number.isInteger(r)||!Number.isInteger(c)||!Number.isInteger(fromIdx)) { idx++; applyNext(); return; }
-                    const doApply=()=>{ if(!onlineGameActive){ idx++; applyNext(); return; } currentPlayer=Math.max(0,Math.min(playerCount-1,fromIdx)); handleClick(r,c); if(Number.isInteger(seq)) lastAppliedSeq=Math.max(lastAppliedSeq,seq); idx++; setTimeout(applyNext,0); };
-                    if(isProcessing){ setTimeout(applyNext,100); } else { doApply(); }
+                    if (!Number.isInteger(r) || !Number.isInteger(c) || !Number.isInteger(fromIdx)) { idx++; applyNext(); return; }
+                    const doApply = () => { if (!onlineGameActive) { idx++; applyNext(); return; } currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx)); handleClick(r, c); if (Number.isInteger(seq)) lastAppliedSeq = Math.max(lastAppliedSeq, seq); idx++; setTimeout(applyNext, 0); };
+                    if (isProcessing) { setTimeout(applyNext, 100); } else { doApply(); }
                 }; applyNext();
             }
-        } catch(e){ console.warn('[Online] Failed to apply catch-up moves', e); }
+        } catch (e) { console.warn('[Online] Failed to apply catch-up moves', e); }
         updateStartButtonState();
     });
     onlineConnection.on('error', (msg) => {
@@ -576,39 +579,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Define available player colors
-    // Start at green, move 5 colors forwards per step (Most contrasting colors)
-    const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'orange', 'purple'];
-    let startingColorIndex = playerColors.indexOf('green');
-    if (startingColorIndex < 0) startingColorIndex = 0;
+    // Palette now provided by palette module
     let gameColors = null; // null until a game is started
-    
-    /**
-     * Get the current active color palette (game palette if set, otherwise full list).
-     * @returns {string[]} array of player color keys.
-     */
-    function activeColors() {
-        return (gameColors && gameColors.length) ? gameColors : playerColors;
-    }
+    const activeColors = () => paletteActiveColors(gameColors);
 
     // Get and cap player count at the number of available colors
     let playerCount = parseInt(getQueryParam('players')) || 2;
     playerCount = Math.min(playerCount, playerColors.length);  // Cap at available colors
 
-    // New recommended grid size schedule (custom minimal bounds)
-    // Assumption for unspecified counts (6,7): use 6 (same as 8).
-    function recommendedGridSize(p) {
-        if (p <= 2) return 3;
-        if (p <= 4) return 4; // covers 3-4
-        if (p === 5) return 5;
-        return 6; // 6-8 players
-    }
-
-    // Default grid size when auto-selecting via player slider changes
-    // Keep legacy behavior: desired = Math.max(3, p + 3)
-    function defaultGridSizeForPlayers(p) {
-        return Math.max(3, (parseInt(p, 10) || 0) + 3);
-    }
+    // recommendedGridSize & defaultGridSizeForPlayers moved to utilities.js
 
     // Get grid size from URL or recommended schedule
     let gridSize = parseInt(getQueryParam('size'));
@@ -627,15 +606,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.documentElement.style.setProperty('--delay-animation', `${delayAnimation}ms`);
     document.documentElement.style.setProperty('--grid-size', gridSize);
 
-    /**
-     * Fetch a query parameter value from the current page URL.
-     * @param {string} param - the query key to retrieve.
-     * @returns {string|null} the parameter value or null if missing.
-     */
-    function getQueryParam(param) {
-        const urlParams = new URLSearchParams(window.location.search);
-        return urlParams.get(param);
-    }
+    // getQueryParam moved to utilities.js
 
 
     //#region Menu Logic
@@ -695,11 +666,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function setMenuParam(menuKey, push = true) {
         const params = new URLSearchParams(window.location.search);
         params.set('menu', menuKey);
-        // While in explicit menu, drop transient game-only params so refresh is clean
-        // Keep ai_depth if returning to practice menu so the UI can reflect it
+        // In any menu state, remove game-only params (players, size, ai_depth) so URL stays clean.
         if (menuKey !== null) {
             params.delete('players');
             params.delete('size');
+            params.delete('ai_depth');
         }
         // Preserve room key param if present while navigating menus
         const existingKey = (new URLSearchParams(window.location.search)).get('key');
@@ -707,7 +678,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
         if (push) {
             window.history.pushState({ menu: menuKey }, '', url);
-            // keep our in-memory stack in sync
             menuHistoryStack.push(menuKey);
         } else {
             window.history.replaceState({ menu: menuKey }, '', url);
@@ -761,13 +731,13 @@ document.addEventListener('DOMContentLoaded', () => {
             setMainMenuMode,
             // aiStrengthTile provided via mainPage components
             playerColors,
-            startingColorIndex
+            startingColorIndex: getStartingColorIndex()
         });
     }
 
     function navigateToMenu(menuKey) {
         // If navigating to online or host, ensure WS is (re)connecting
-    if (menuKey === 'online' || menuKey === 'host') onlineConnection.ensureConnected();
+        if (menuKey === 'online' || menuKey === 'host') onlineConnection.ensureConnected();
         setMenuParam(menuKey, true);
         showMenuFor(menuKey);
     }
@@ -812,13 +782,13 @@ document.addEventListener('DOMContentLoaded', () => {
             setMainMenuMode,
             // component palette & state
             playerColors,
-            startingColorIndex,
+            startingColorIndex: getStartingColorIndex(),
             recommendedGridSize,
             defaultGridSizeForPlayers,
             recreateGrid,
             getPlayerColors: () => playerColors,
-            getStartingColorIndex: () => startingColorIndex,
-            setStartingColorIndex: (idx) => { startingColorIndex = Math.max(0, Math.min(playerColors.length - 1, idx|0)); },
+            getStartingColorIndex: () => getStartingColorIndex(),
+            setStartingColorIndex: (idx) => { setStartingColorIndex(Math.max(0, Math.min(playerColors.length - 1, idx | 0))); },
             onMenuPlayerCountChanged,
             clampPlayers: (n) => Math.max(2, Math.min(playerColors.length, Math.floor(n) || 2)),
             getMenuPlayerCount: () => menuPlayerCount,
@@ -828,6 +798,12 @@ document.addEventListener('DOMContentLoaded', () => {
             delayAnimation,
             showMenuFor,
             setMenuParam,
+            // online menu direct actions (re-added after modularization)
+            hostRoom,
+            joinRoom: (roomName) => window.joinRoom(roomName),
+            leaveRoom: (roomName) => window.leaveRoom(roomName),
+            getMyJoinedRoom: () => myJoinedRoom,
+            getPlayerName: () => myPlayerName,
             menuHistoryStack
         });
     } catch { /* ignore */ }
@@ -847,7 +823,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Non-fatal: preserve previous side-effects
         try { updateRandomTip(); } catch { /* ignore */ }
-    try { pageRegistry.get('main')?.components?.aiStrengthTile?.updatePreview(); } catch { /* ignore */ }
+        try { pageRegistry.get('main')?.components?.aiStrengthTile?.updatePreview(); } catch { /* ignore */ }
     }
 
     // Initialize history.state and our stack to the current menu once
@@ -874,15 +850,8 @@ document.addEventListener('DOMContentLoaded', () => {
         practiceMainBtn?.addEventListener('click', () => navigateToMenu('practice'));
     }
 
-    // MenuCloseButton now initialized inside firstPage.
-    // --- Main Menu Logic ---
-
-    // Helper to toggle Practice Mode UI state in mainMenu
-
-    // PlayerNameFields now initialized inside mainPage.
-
     // set dynamic bounds
-    const maxPlayers = playerColors.length;
+    // maxPlayers now derived directly from playerColors.length via clampPlayers calls
 
     // Build visual player box slider
     const playerBoxSlider = document.getElementById('playerBoxSlider');
@@ -890,16 +859,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // inner container that holds the clickable boxes (may be same as slider if wrapper missing)
     // PlayerBoxSlider manages its own internal cells container
     // inner-circle color map (match styles.css .inner-circle.* colors)
-    const innerCircleColors = {
-        red: '#d55f5f',
-        orange: '#d5a35f',
-        yellow: '#d5d35f',
-        green: '#a3d55f',
-        cyan: '#5fd5d3',
-        blue: '#5f95d5',
-        purple: '#8f5fd5',
-        magenta: '#d35fd3'
-    };
+    // innerCircleColors & CSS variable application moved to palette.js
 
     // Weighted tips list (some with HTML)
     function getDeviceTips() {
@@ -922,23 +882,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Ensure CSS variables for colors are set on :root BEFORE building boxes
-    Object.entries(innerCircleColors).forEach(([key, hex]) => {
-        // inner circle strong color (hex)
-        document.documentElement.style.setProperty(`--inner-${key}`, hex);
-        // cell color: pastel mix toward white (opaque), use 50% white by default
-        // Pastel cell color: mix original toward white (grayscale 255) by 50%
-        const pastel = mixTowardGray(hex, 255, 0.5);
-        document.documentElement.style.setProperty(`--cell-${key}`, pastel);
-        // body color: slightly darker by multiplying channels
-        const dark = (c) => Math.max(0, Math.min(255, Math.round(c * 0.88)));
-        const { r: rr, g: gg, b: bb } = hexToRgb(hex);
-        document.documentElement.style.setProperty(`--body-${key}`, `rgb(${dark(rr)}, ${dark(gg)}, ${dark(bb)})`);
-    });
+    applyPaletteCssVariables();
 
     // PlayerBoxSlider now initialized inside mainPage.
 
     // Start with URL or defaults
-    menuPlayerCount = clampPlayers(playerCount);
+    menuPlayerCount = clampPlayers(playerCount, playerColors.length);
     updateSizeBoundsForPlayers(menuPlayerCount);
 
     // ColorCycler now initialized inside mainPage.
@@ -1119,7 +1068,7 @@ document.addEventListener('DOMContentLoaded', () => {
     startBtn.addEventListener('click', async () => {
         // Determine current menu mode from button text
         const mode = startBtn.textContent.toLowerCase();
-        const p = clampPlayers(menuPlayerCount);
+        const p = clampPlayers(menuPlayerCount, playerColors.length);
         let s = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : 3;
 
         if (mode === 'start') {
@@ -1175,7 +1124,7 @@ document.addEventListener('DOMContentLoaded', () => {
         practiceBtn.setAttribute('aria-label', 'Practice');
 
         practiceBtn.addEventListener('click', async () => {
-            const p = clampPlayers(menuPlayerCount);
+            const p = clampPlayers(menuPlayerCount, playerColors.length);
             let s = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : 3;
 
             // Enter fullscreen on mobile from the same user gesture
@@ -1454,7 +1403,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const p = clampPlayers(parseInt(params.get('players') || '', 10) || 2);
+    const p = clampPlayers(parseInt(params.get('players') || '', 10) || 2, playerColors.length);
         let s = parseInt(params.get('size') || '', 10);
         if (!Number.isInteger(s)) s = Math.max(3, 3 + p);
         setHidden(firstMenu, true);
@@ -1504,12 +1453,8 @@ document.addEventListener('DOMContentLoaded', () => {
      * Compute the starting player index based on the current cycler color in the active palette.
      * @returns {number} index into activeColors().
      */
-    function computeStartPlayerIndex() {
-        const ac = activeColors();
-        const selectedKey = playerColors[startingColorIndex];
-        const idx = ac.indexOf(selectedKey);
-        return idx >= 0 ? idx : 0;
-    }
+    // computeStartPlayerIndex moved to palette.js (use dynamic gameColors)
+    const computeStartPlayerIndexProxy = () => computeStartPlayerIndex(gameColors);
 
 
     /**
@@ -1524,13 +1469,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {number} count - number of players/colors to include.
      * @returns {string[]} ordered color keys.
      */
-    function computeSelectedColors(count) {
-        const n = playerColors.length;
-        const c = Math.max(1, Math.min(count, n));
-        const arr = [];
-        for (let i = 0; i < c; i++) arr.push(playerColors[(startingColorIndex + i) % n]);
-        return arr;
-    }
+    // computeSelectedColors moved to palette.js
 
     /**
      * Generic mix of a hex color toward a grayscale target value.
@@ -1540,49 +1479,21 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {number} [factor=0.5] - blend factor 0..1 (0 = original, 1 = fully gray).
      * @returns {string} css rgb(r,g,b) color string.
      */
-    function mixTowardGray(color, gray = 128, factor = 0.5) {
-        // Clamp inputs
-        if (typeof gray !== 'number' || isNaN(gray)) gray = 128;
-        gray = Math.max(0, Math.min(255, Math.round(gray)));
-        if (typeof factor !== 'number' || isNaN(factor)) factor = 0.5;
-        factor = Math.max(0, Math.min(1, factor));
-        const { r, g, b } = cssColorToRgb(color);
-        const mix = (c) => Math.round((1 - factor) * c + factor * gray);
-        return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
-    }
+    // mixTowardGray moved to utilities.js
 
     /**
      * Parse a CSS color string (#hex or rgb/rgba) into RGB channels.
      * @param {string} color - CSS color string.
      * @returns {{r:number,g:number,b:number}}
      */
-    function cssColorToRgb(color) {
-        if (!color || typeof color !== 'string') return { r: 0, g: 0, b: 0 };
-        const c = color.trim();
-        if (c.startsWith('#')) return hexToRgb(c);
-        // rgb or rgba
-        const m = c.match(/rgba?\s*\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/i);
-        if (m) {
-            const r = Math.max(0, Math.min(255, parseInt(m[1], 10)));
-            const g = Math.max(0, Math.min(255, parseInt(m[2], 10)));
-            const b = Math.max(0, Math.min(255, parseInt(m[3], 10)));
-            return { r, g, b };
-        }
-        // Fallback
-        return { r: 0, g: 0, b: 0 };
-    }
+    // cssColorToRgb moved to utilities.js
 
     /**
      * Convert hex color string (#rgb or #rrggbb) to RGB components.
      * @param {string} hex - color in hex form.
      * @returns {{r:number,g:number,b:number}} RGB channels 0..255.
      */
-    function hexToRgb(hex) {
-        const h = hex.replace('#', '');
-        const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
-        const bigint = parseInt(full, 16);
-        return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255 };
-    }
+    // hexToRgb moved to utilities.js
 
     /**
      * Update grid-size input to match the recommended size for a player count.
@@ -1606,10 +1517,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {number} n - requested player count.
      * @returns {number} clamped integer within bounds.
      */
-    function clampPlayers(n) {
-        const v = Math.max(2, Math.min(maxPlayers, Math.floor(n) || 2));
-        return v;
-    }
+    // clampPlayers moved to utilities.js (requires maxPlayers passed where used)
 
     /**
      * Central handler when menu player count changes; syncs size, UI, and grid.
@@ -1618,8 +1526,8 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     // onMenuPlayerCountChanged used by mainPage slider via ctx; keep for backward compatibility.
     function onMenuPlayerCountChanged(newCount) {
-        const minForPlayers = recommendedGridSize(newCount);
-        const desired = defaultGridSizeForPlayers(newCount);
+    const minForPlayers = recommendedGridSize(newCount);
+    const desired = defaultGridSizeForPlayers(newCount);
         const newGridSize = Math.max(minForPlayers, desired);
         if (newGridSize !== menuGridSizeVal) {
             menuPlayerCount = newCount;
@@ -1643,7 +1551,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let isProcessing = false;
     let performanceMode = false;
     // Start with the first selected color (index 0) instead of a random player
-    let currentPlayer = computeStartPlayerIndex();
+    let currentPlayer = computeStartPlayerIndexProxy();
     let initialPlacements = Array(playerCount).fill(false);
     // Track last focused cell per player: { [playerIndex]: {row, col} }
     let playerLastFocus = Array(playerCount).fill(null);
@@ -1887,16 +1795,16 @@ document.addEventListener('DOMContentLoaded', () => {
         try { updateEdgeCirclesActive(); } catch { /* ignore */ }
 
         // Reflect actual grid size in display value while menu is present
-    menuGridSizeVal = Math.max(3, newSize);
-    try {
-        const gridSizeTile = pageRegistry.get('main')?.components?.gridSizeTile;
-        gridSizeTile && gridSizeTile.setSize(menuGridSizeVal, 'gridRebuild', { silent: true, bump: false });
-    } catch { /* ignore */ }
+        menuGridSizeVal = Math.max(3, newSize);
+        try {
+            const gridSizeTile = pageRegistry.get('main')?.components?.gridSizeTile;
+            gridSizeTile && gridSizeTile.setSize(menuGridSizeVal, 'gridRebuild', { silent: true, bump: false });
+        } catch { /* ignore */ }
 
         // Ensure the visual player boxes reflect new player count via component
         try {
             const slider = pageRegistry.get('main')?.components?.slider;
-            slider && slider.setCount(clampPlayers(playerCount), { silent: true });
+            slider && slider.setCount(clampPlayers(playerCount, playerColors.length), { silent: true });
         } catch { /* ignore */ }
 
         // If practice mode is enabled, force human to be first color and
@@ -2536,14 +2444,14 @@ document.addEventListener('DOMContentLoaded', () => {
         ensureAIDebugStyles();
         const existing = document.getElementById('aiDebugPanel');
         if (existing) existing.remove();
-        const panel = document.createElement('div'); panel.id='aiDebugPanel';
+        const panel = document.createElement('div'); panel.id = 'aiDebugPanel';
         const title = document.createElement('h4'); title.textContent = `AI dataRespect — player ${currentPlayer} (${activeColors()[currentPlayer]})`; panel.appendChild(title);
         const summary = document.createElement('div'); summary.innerHTML = `<strong>chosen gain:</strong> ${info.chosen ? info.chosen.gain : '—'} &nbsp; <strong>expl:</strong> ${info.chosen ? info.chosen.expl : '—'}`; panel.appendChild(summary);
-        const listTitle = document.createElement('div'); listTitle.style.marginTop='8px'; listTitle.innerHTML = `<em>candidates (top ${info.topK}) ordered by AI gain:</em>`; panel.appendChild(listTitle);
-        const pre = document.createElement('pre'); pre.textContent = info.ordered.map((e,i)=>`${i+1}. (${e.r},${e.c}) src:${e.src} expl:${e.expl} gain:${e.gain} atk:${e.atk} def:${e.def}`).join('\n'); panel.appendChild(pre);
+        const listTitle = document.createElement('div'); listTitle.style.marginTop = '8px'; listTitle.innerHTML = `<em>candidates (top ${info.topK}) ordered by AI gain:</em>`; panel.appendChild(listTitle);
+        const pre = document.createElement('pre'); pre.textContent = info.ordered.map((e, i) => `${i + 1}. (${e.r},${e.c}) src:${e.src} expl:${e.expl} gain:${e.gain} atk:${e.atk} def:${e.def}`).join('\n'); panel.appendChild(pre);
         document.body.appendChild(panel);
     }
-    
+
     function aiMakeMoveFor(playerIndex) {
         if (isProcessing || gameWon) return;
         const result = computeAIMove({

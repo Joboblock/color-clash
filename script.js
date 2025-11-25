@@ -425,6 +425,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     onlineConnection.connect();
+
+    // Clean up: leave room when page is refreshing, closing, or navigating away
+    window.addEventListener('beforeunload', () => {
+        if (myJoinedRoom && onlineConnection.isConnected()) {
+            // Use sendBeacon for reliable cleanup during unload
+            try {
+                onlineConnection.leave(myJoinedRoom);
+            } catch (e) {
+                console.debug('[Cleanup] Failed to leave room on unload:', e);
+            }
+        }
+    });
+
     // Auto-join flow: if ?key= present and not already in a room, attempt join_by_key
     (function attemptAutoJoinByKey() {
         try {

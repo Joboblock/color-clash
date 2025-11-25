@@ -6,10 +6,14 @@ import { onlinePage } from './src/pages/online.js';
 import { mainPage } from './src/pages/main.js';
 
 // General utilities (merged)
-import { sanitizeName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, mixTowardGray, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
-import { playerColors, innerCircleColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './src/game/palette.js';
+import { sanitizeName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
+import { playerColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './src/game/palette.js';
 import { computeAIMove } from './src/ai/engine.js';
-import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js'; // some imported constants applied later
+import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
+// Edge circles component
+import { createEdgeCircles, updateEdgeCirclesActive, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
+// Navigation and routing
+import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
 
 // PLAYER_NAME_LENGTH now imported from nameUtils.js
 document.addEventListener('DOMContentLoaded', () => {
@@ -20,7 +24,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const menus = [document.getElementById('firstMenu'), document.getElementById('mainMenu'), document.getElementById('onlineMenu')];
         const anyMenuVisible = menus.some(m => m && !m.classList.contains('hidden'));
         if (gridEl && gridEl.offsetParent !== null && !anyMenuVisible) {
-            try { createEdgeCircles(); } catch { /* ignore */ }
+            // Get player count from URL to ensure correct number of edge circles on reload
+            const urlPlayerCount = parseInt(getQueryParam('players')) || 2;
+            try { createEdgeCircles(urlPlayerCount); } catch { /* ignore */ }
         }
     }, 0);
     // sanitizeName & reflectValidity now provided by nameUtils module (imported above)
@@ -193,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentPlayer = 0;
             document.body.className = activeColors()[currentPlayer];
             updateGrid();
-            try { createEdgeCircles(); } catch { /* ignore */ }
+            try { createEdgeCircles(p); } catch { /* ignore */ }
         } catch (err) { console.error('[Online] Failed to start online game', err); }
     });
     onlineConnection.on('request_preferred_colors', () => {
@@ -651,67 +657,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // New: typed menu param helpers (first|local|online|host|practice)
     // Lightweight in-app stack of menu states to avoid timeout fallbacks
-    let menuHistoryStack = [];
-    function getMenuParam() {
-        try {
-            const val = (new URLSearchParams(window.location.search)).get('menu');
-            if (!val) return null;
-            if (val === 'true') return 'first'; // backward compat
-            const allowed = ['first', 'local', 'online', 'host', 'practice'];
-            return allowed.includes(val) ? val : null;
-        } catch { return null; }
-    }
-
-    function setMenuParam(menuKey, push = true) {
-        const params = new URLSearchParams(window.location.search);
-        params.set('menu', menuKey);
-        // In any menu state, remove game-only params (players, size, ai_depth) so URL stays clean.
-        if (menuKey !== null) {
-            params.delete('players');
-            params.delete('size');
-            params.delete('ai_depth');
-        }
-        // Preserve room key param if present while navigating menus
-        const existingKey = (new URLSearchParams(window.location.search)).get('key');
-        if (existingKey) params.set('key', existingKey);
-        const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-        if (push) {
-            window.history.pushState({ menu: menuKey }, '', url);
-            menuHistoryStack.push(menuKey);
-        } else {
-            window.history.replaceState({ menu: menuKey }, '', url);
-            if (menuHistoryStack.length) menuHistoryStack[menuHistoryStack.length - 1] = menuKey; else menuHistoryStack.push(menuKey);
-        }
-    }
-
-    // Helpers to manage ?key param
-    function updateUrlRoomKey(key) {
-        try {
-            const params = new URLSearchParams(window.location.search);
-            params.set('key', key);
-            const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-            window.history.replaceState({ ...(window.history.state || {}), menu: getMenuParam() || 'first' }, '', url);
-        } catch { /* ignore */ }
-    }
-    function removeUrlRoomKey() {
-        try {
-            const params = new URLSearchParams(window.location.search);
-            params.delete('key');
-            const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-            window.history.replaceState({ ...(window.history.state || {}), menu: getMenuParam() || 'first' }, '', url);
-        } catch { /* ignore */ }
-    }
-
-    // Ensure the current entry has a state and initialize our in-memory stack
-    function ensureHistoryStateInitialized() {
-        try {
-            const current = getMenuParam() || 'first';
-            if (!window.history.state || typeof window.history.state.menu === 'undefined') {
-                window.history.replaceState({ menu: current }, '', window.location.href);
-            }
-            if (!menuHistoryStack.length) menuHistoryStack.push(current);
-        } catch { /* ignore */ }
-    }
+    // Navigation functions now imported from src/pages/navigation.js
 
     // Modular menu display now delegated to PageRegistry & page modules.
     function showMenuFor(menuKey) {
@@ -861,7 +807,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateSizeBoundsForPlayers(menuPlayerCount);
 
     // Handle browser navigation to toggle between menu and game instead of leaving the app
-    window.addEventListener('popstate', applyStateFromUrl);
+    window.addEventListener('popstate', handleStateFromUrl);
     // Keep our in-memory stack aligned with the browser history on back/forward
     window.addEventListener('popstate', (ev) => {
         try {
@@ -1050,7 +996,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (mainMenu) mainMenu.classList.add('hidden');
             practiceMode = false;
             recreateGrid(s, p);
-            createEdgeCircles();
+            createEdgeCircles(p);
         } else if (mode === 'host') {
             // Host the room when clicking the start button in host mode
             hostRoom();
@@ -1079,7 +1025,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
             } catch { /* ignore */ }
             recreateGrid(s, p);
-            createEdgeCircles();
+            createEdgeCircles(p);
         }
     });
 
@@ -1128,54 +1074,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Edge circles overlay: 4 corner dots plus 2+2 on the non-restricting sides
 
-    function getRestrictionType() {
-        const vw = window.innerWidth || document.documentElement.clientWidth || 1;
-        const vh = window.innerHeight || document.documentElement.clientHeight || 1;
-        return vw < vh ? 'side' : 'top';
-    }
-
-    function createEdgeCircles() {
-        // Remove old container
-        const old = document.getElementById('edgeCirclesContainer');
-        if (old && old.parentNode) old.parentNode.removeChild(old);
-
-        // Do not show when any menu overlay is visible
-        const anyMenuVisible = [document.getElementById('firstMenu'), document.getElementById('mainMenu'), document.getElementById('onlineMenu')]
-            .some(m => m && !m.classList.contains('hidden'));
-        if (anyMenuVisible) return;
-
-        const container = document.createElement('div');
-        container.id = 'edgeCirclesContainer';
-        container.className = 'edge-circles-container';
-        container.setAttribute('data-restrict', getRestrictionType());
-
-        // Use color palette for 8 circles
-        const colorHex = (key) => {
-            try { return innerCircleColors[key] || '#fff'; } catch { return '#fff'; }
-        };
-        // Determine number of players (use activeColors when available)
-        const ac = (typeof activeColors === 'function') ? activeColors() : playerColors;
-        const count = Math.min(ac.length || 0, Math.max(2, (typeof playerCount === 'number' ? playerCount : ac.length || 2)));
-        const restrict = getRestrictionType();
-
-        const positions = computeEdgePositions(count, restrict);
-        positions.forEach((posClass, idx) => {
-            const d = document.createElement('div');
-            d.className = 'edge-circle ' + posClass;
-            d.dataset.playerIndex = String(idx);
-            const key = ac[idx % ac.length];
-            const base = colorHex(key);
-            d.style.setProperty('--circle-color', base);
-            // Dim inactive circle color: mix original toward black (grayscale 0) by 25%
-            d.style.setProperty('--circle-color-dim', mixTowardGray(base, 0, 0.25));
-            container.appendChild(d);
-        });
-        document.body.appendChild(container);
-        // Set circle size variable using viewport and grid dimensions
-        document.documentElement.style.setProperty('--edge-circle-size', computeEdgeCircleSize() + 'px');
-        // Initialize active/inactive states on the next frame so CSS transitions run from opacity:0
-        requestAnimationFrame(() => { try { updateEdgeCirclesActive(); } catch { /* ignore */ } });
-    }
+    // Edge circles functions now imported from src/components/edgeCircles.js
 
     // Only need to update the restriction type on resize
     window.addEventListener('resize', () => {
@@ -1186,7 +1085,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (oldRestrict !== newRestrict) {
                 // Rebuild layout when switching between side/top to update positional classes
                 try { container.remove(); } catch { /* ignore */ }
-                createEdgeCircles();
+                createEdgeCircles(playerCount);
                 return; // createEdgeCircles sets size var as well
             } else {
                 container.setAttribute('data-restrict', newRestrict);
@@ -1197,7 +1096,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 .some(m => m && !m.classList.contains('hidden'));
             const gridEl = document.querySelector('.grid');
             if (gridEl && gridEl.offsetParent !== null && !anyMenuVisible) {
-                createEdgeCircles();
+                createEdgeCircles(playerCount);
                 return;
             }
         }
@@ -1205,186 +1104,31 @@ document.addEventListener('DOMContentLoaded', () => {
         document.documentElement.style.setProperty('--edge-circle-size', computeEdgeCircleSize() + 'px');
     }, { passive: true });
 
-    // Compute edge circle size considering viewport, grid, and caps
-    function computeEdgeCircleSize() {
-        const vw = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
-        const vh = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
-
-        // Base: just under 1/3 of shorter side, minus margin, hard-capped
-        const base = Math.floor(Math.min(vw, vh) / 3 - 16);
-        const hardCap = 160;
-        let size = Math.max(22, Math.min(base, hardCap));
-
-        // Additional restriction: diameter <= (larger screen dim - matching grid dim - 16px)
-        try {
-            const gridEl = document.querySelector('.grid');
-            if (gridEl) {
-                const rect = gridEl.getBoundingClientRect();
-                const useWidth = vw >= vh; // pick the larger screen dimension
-                const screenDim = useWidth ? vw : vh;
-                const gridDim = useWidth ? rect.width : rect.height;
-                const spare = Math.max(0, Math.floor(screenDim - gridDim));
-                // 16px safety margin to avoid touching grid
-                const gridCap = Math.max(0, spare - 16);
-                size = Math.max(22, Math.min(size, gridCap));
-            }
-        } catch { /* ignore measure issues */ }
-
-        return size;
-    }
-
-    // Compute positional classes for player edge circles based on count and restriction
-    function computeEdgePositions(count, restrict) {
-        if (count <= 0) return [];
-        // Clockwise orders starting from bottom-left corner
-        const orderSide = [
-            'pos-corner-bl',
-            'pos-bottom-mid1', 'pos-bottom-center', 'pos-bottom-mid2',
-            'pos-corner-br',
-            'pos-corner-tr',
-            'pos-top-mid2', 'pos-top-center', 'pos-top-mid1',
-            'pos-corner-tl'
-        ];
-        const orderTop = [
-            'pos-corner-bl',
-            'pos-left-mid2', 'pos-left-center', 'pos-left-mid1',
-            'pos-corner-tl',
-            'pos-corner-tr',
-            'pos-right-mid1', 'pos-right-center', 'pos-right-mid2',
-            'pos-corner-br'
-        ];
-        const corners = ['pos-corner-bl', 'pos-corner-br', 'pos-corner-tr', 'pos-corner-tl']; // clockwise BL→BR→TR→TL
-
-        // Build the set of allowed positions for this player count and restriction
-        let allowed = new Set();
-        if (count === 2) {
-            allowed = new Set(restrict === 'side'
-                ? ['pos-bottom-center', 'pos-top-center']
-                : ['pos-left-center', 'pos-right-center']
-            );
-        } else if (count === 3) {
-            allowed = new Set(corners.slice(0, 3));
-        } else if (count === 4) {
-            allowed = new Set(corners);
-        } else if (count === 5) {
-            allowed = new Set([
-                ...corners,
-                ...(restrict === 'side' ? ['pos-bottom-center'] : ['pos-left-center'])
-            ]);
-        } else if (count === 6) {
-            allowed = new Set([
-                ...corners,
-                ...(restrict === 'side' ? ['pos-bottom-center', 'pos-top-center'] : ['pos-left-center', 'pos-right-center'])
-            ]);
-        } else if (count === 7) {
-            allowed = new Set([
-                ...corners,
-                ...(restrict === 'side'
-                    ? ['pos-bottom-center', 'pos-top-mid1', 'pos-top-mid2']
-                    : ['pos-right-center', 'pos-left-mid1', 'pos-left-mid2']
-                )
-            ]);
-        } else {
-            // 8 or more
-            allowed = new Set([
-                ...corners,
-                ...(restrict === 'side'
-                    ? ['pos-bottom-mid1', 'pos-bottom-mid2', 'pos-top-mid1', 'pos-top-mid2']
-                    : ['pos-left-mid1', 'pos-left-mid2', 'pos-right-mid1', 'pos-right-mid2']
-                )
-            ]);
-        }
-
-        const order = (restrict === 'side') ? orderSide : orderTop;
-        const out = [];
-        for (const pos of order) {
-            if (allowed.has(pos)) out.push(pos);
-            if (out.length >= count) break;
-        }
-        return out;
-    }
-
-    // Reflect active player on edge circles (full size/opacity for active; smaller/faded for others)
-    function updateEdgeCirclesActive() {
-        const container = document.getElementById('edgeCirclesContainer');
-        if (!container) return;
-        const circles = Array.from(container.querySelectorAll('.edge-circle'));
-        if (!circles.length) return;
-        const activeIdx = Math.max(0, Math.min(circles.length - 1, currentPlayer || 0));
-        circles.forEach((el, idx) => {
-            el.classList.toggle('is-active', idx === activeIdx);
-            el.classList.toggle('is-inactive', idx !== activeIdx);
-        });
-
-        // Also dim the page background toward black when it's not the local player's turn
-        try {
-            const ac = (typeof activeColors === 'function') ? activeColors() : playerColors;
-            const key = ac[activeIdx % ac.length];
-            const baseBody = getComputedStyle(document.documentElement).getPropertyValue(`--body-${key}`).trim();
-            const notMyTurn = (() => {
-                if (typeof onlineGameActive !== 'undefined' && onlineGameActive) {
-                    return typeof myOnlineIndex === 'number' ? (currentPlayer !== myOnlineIndex) : true;
-                }
-                if (typeof practiceMode !== 'undefined' && practiceMode) {
-                    const hp = (typeof humanPlayer === 'number') ? humanPlayer : 0;
-                    return currentPlayer !== hp;
-                }
-                // Local hotseat: always "my" turn (no dimming)
-                return false;
-            })();
-            if (notMyTurn) {
-                document.body.style.backgroundColor = mixTowardGray(baseBody || '#000', 128, 0.66);
-            } else {
-                // Clear inline style so the class-based background applies
-                document.body.style.backgroundColor = '';
-            }
-        } catch { /* no-op */ }
-    }
-
 
     //#region Menu Functions
     /**
-     * Sync menu/game UI from current URL state (back/forward navigation handler).
+     * Wrapper for applyStateFromUrl that provides local context.
      * @returns {void}
      */
-    function applyStateFromUrl() {
-        const params = new URLSearchParams(window.location.search);
-        const typed = getMenuParam();
-        const hasPS = params.has('players') || params.has('size');
-        if (typed || !hasPS) {
-            // Show the requested or default menu
-            showMenuFor(typed || 'first');
-            try { updateRandomTip(); } catch { /* ignore */ }
-            // Reflect AI strength to UI if present
-            const ad = parseInt(params.get('ai_depth') || '', 10);
-            if (!Number.isNaN(ad) && ad >= 1) {
-                try {
-                    const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
-                    aiStrengthTile && aiStrengthTile.setStrength(Math.max(1, Math.min(5, ad)));
-                    aiStrengthTile && aiStrengthTile.onStartingColorChanged && aiStrengthTile.onStartingColorChanged();
-                } catch { /* ignore */ }
-            }
-            try { (playerBoxSlider || menuColorCycle || startBtn)?.focus(); } catch { /* ignore */ }
-            exitFullscreenIfPossible();
-            return;
-        }
-
-    const p = clampPlayers(parseInt(params.get('players') || '', 10) || 2, playerColors.length);
-        let s = parseInt(params.get('size') || '', 10);
-        if (!Number.isInteger(s)) s = Math.max(3, 3 + p);
-        setHidden(firstMenu, true);
-        setHidden(mainMenu, true);
-        const onlineMenu = document.getElementById('onlineMenu');
-        if (onlineMenu) setHidden(onlineMenu, true);
-        // Enable practice mode if any AI-related parameter exists in the URL
-        practiceMode = params.has('ai_depth') || params.has('ai_k');
-        const ad = parseInt(params.get('ai_depth') || '', 10);
-        if (!Number.isNaN(ad) && ad >= 1) {
-            try { aiDepth = Math.max(1, ad); } catch { /* ignore */ }
-        }
-        gameColors = computeSelectedColors(p);
-        recreateGrid(Math.max(3, s), p);
-        createEdgeCircles();
+    function handleStateFromUrl() {
+        applyStateFromUrl({
+            showMenuFor,
+            updateRandomTip,
+            clampPlayers,
+            computeSelectedColors,
+            recreateGrid,
+            createEdgeCircles: () => createEdgeCircles(playerCount),
+            exitFullscreenIfPossible,
+            setHidden,
+            pageRegistry,
+            playerColors,
+            playerBoxSlider,
+            menuColorCycle,
+            startBtn,
+            setPracticeMode: (val) => { practiceMode = val; },
+            setAiDepth: (val) => { aiDepth = val; },
+            setGameColors: (val) => { gameColors = val; }
+        });
     }
 
     /**
@@ -1552,6 +1296,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Practice mode globals
     let practiceMode = isPracticeMode;
     const humanPlayer = 0; // first selected color is player index 0
+
+    // Set gameColors based on initial playerCount (needed for edge circles to display correct count)
+    if (hasPlayersOrSize) {
+        gameColors = computeSelectedColors(playerCount);
+    }
 
     // create initial grid
     recreateGrid(gridSize, playerCount);
@@ -1734,7 +1483,7 @@ document.addEventListener('DOMContentLoaded', () => {
         highlightInvalidInitialPositions();
         document.body.className = activeColors()[currentPlayer];
         // Sync active circle emphasis after grid rebuild
-        try { updateEdgeCirclesActive(); } catch { /* ignore */ }
+        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer); } catch { /* ignore */ }
 
         // Reflect actual grid size in display value while menu is present
         menuGridSizeVal = Math.max(3, newSize);
@@ -2165,7 +1914,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.body.className = activeColors()[currentPlayer];
         // Update edge circle emphasis for new active player
-        try { updateEdgeCirclesActive(); } catch { /* ignore */ }
+        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer); } catch { /* ignore */ }
         clearCellFocus();
         updateGrid();
         // Restore focus to last focused cell for this player, if any

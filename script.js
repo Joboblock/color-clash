@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (gridEl && gridEl.offsetParent !== null && !anyMenuVisible) {
             // Get player count from URL to ensure correct number of edge circles on reload
             const urlPlayerCount = parseInt(getQueryParam('players')) || 2;
-            try { createEdgeCircles(urlPlayerCount); } catch { /* ignore */ }
+            try { createEdgeCircles(urlPlayerCount, getEdgeCircleState()); } catch { /* ignore */ }
         }
     }, 0);
     // sanitizeName & reflectValidity now provided by nameUtils module (imported above)
@@ -199,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentPlayer = 0;
             document.body.className = activeColors()[currentPlayer];
             updateGrid();
-            try { createEdgeCircles(p); } catch { /* ignore */ }
+            try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
         } catch (err) { console.error('[Online] Failed to start online game', err); }
     });
     onlineConnection.on('request_preferred_colors', () => {
@@ -999,7 +999,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (mainMenu) mainMenu.classList.add('hidden');
             practiceMode = false;
             recreateGrid(s, p);
-            createEdgeCircles(p);
+            createEdgeCircles(p, getEdgeCircleState());
         } else if (mode === 'host') {
             // Host the room when clicking the start button in host mode
             hostRoom();
@@ -1028,7 +1028,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
             } catch { /* ignore */ }
             recreateGrid(s, p);
-            createEdgeCircles(p);
+            createEdgeCircles(p, getEdgeCircleState());
         }
     });
 
@@ -1088,7 +1088,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (oldRestrict !== newRestrict) {
                 // Rebuild layout when switching between side/top to update positional classes
                 try { container.remove(); } catch { /* ignore */ }
-                createEdgeCircles(playerCount);
+                createEdgeCircles(playerCount, getEdgeCircleState());
                 return; // createEdgeCircles sets size var as well
             } else {
                 container.setAttribute('data-restrict', newRestrict);
@@ -1099,7 +1099,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 .some(m => m && !m.classList.contains('hidden'));
             const gridEl = document.querySelector('.grid');
             if (gridEl && gridEl.offsetParent !== null && !anyMenuVisible) {
-                createEdgeCircles(playerCount);
+                createEdgeCircles(playerCount, getEdgeCircleState());
                 return;
             }
         }
@@ -1120,7 +1120,7 @@ document.addEventListener('DOMContentLoaded', () => {
             clampPlayers,
             computeSelectedColors,
             recreateGrid,
-            createEdgeCircles: () => createEdgeCircles(playerCount),
+            createEdgeCircles: () => createEdgeCircles(playerCount, getEdgeCircleState()),
             exitFullscreenIfPossible,
             setHidden,
             pageRegistry,
@@ -1299,6 +1299,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Practice mode globals
     let practiceMode = isPracticeMode;
     const humanPlayer = 0; // first selected color is player index 0
+
+    function getEdgeCircleState() {
+        return {
+            currentPlayer,
+            onlineGameActive,
+            myOnlineIndex,
+            practiceMode,
+            humanPlayer
+        };
+    }
 
     // Set gameColors based on initial playerCount (needed for edge circles to display correct count)
     if (hasPlayersOrSize) {

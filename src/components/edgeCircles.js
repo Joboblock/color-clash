@@ -123,9 +123,22 @@ export function computeEdgePositions(count, restrict) {
 /**
  * Create and render edge circles for all players. Removes any existing container first.
  * @param {number} [playerCount] - Optional player count; falls back to active colors length.
+ * @param {object} [state] - Optional runtime state for initial active/inactive highlighting.
+ * @param {number} [state.currentPlayer=0] - Zero-based index of the active player.
+ * @param {boolean} [state.onlineGameActive=false] - Whether an online game is active.
+ * @param {number} [state.myOnlineIndex] - Local player index during online play.
+ * @param {boolean} [state.practiceMode=false] - Whether practice mode is active.
+ * @param {number} [state.humanPlayer] - Human player index in practice mode.
  * @returns {void}
  */
-export function createEdgeCircles(playerCount) {
+export function createEdgeCircles(playerCount, state = {}) {
+    const {
+        currentPlayer = 0,
+        onlineGameActive = false,
+        myOnlineIndex,
+        practiceMode = false,
+        humanPlayer
+    } = state || {};
     // Remove old container
     const old = document.getElementById('edgeCirclesContainer');
     if (old && old.parentNode) old.parentNode.removeChild(old);
@@ -165,7 +178,11 @@ export function createEdgeCircles(playerCount) {
     // Set circle size variable using viewport and grid dimensions
     document.documentElement.style.setProperty('--edge-circle-size', computeEdgeCircleSize() + 'px');
     // Initialize active/inactive states on the next frame so CSS transitions run from opacity:0
-    requestAnimationFrame(() => { try { updateEdgeCirclesActive(); } catch { /* ignore */ } });
+    requestAnimationFrame(() => {
+        try {
+            updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer);
+        } catch { /* ignore */ }
+    });
 }
 
 /**

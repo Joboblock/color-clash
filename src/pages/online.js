@@ -33,8 +33,19 @@ export const onlinePage = {
 		} catch {/* ignore */}
 	},
 	hide(ctx) {
-		const { hideConnBanner } = ctx || {};
+		const { hideConnBanner, leaveRoom, getMyJoinedRoom, removeUrlRoomKey } = ctx || {};
 		try { hideConnBanner && hideConnBanner(); } catch {/* ignore */}
+		// Leave the room when exiting the online menu
+		try {
+			const currentRoom = getMyJoinedRoom && getMyJoinedRoom();
+			if (currentRoom && leaveRoom) {
+				leaveRoom(currentRoom);
+			}
+			// Remove the key from URL
+			if (removeUrlRoomKey) {
+				removeUrlRoomKey();
+			}
+		} catch {/* ignore */}
 	}
 };
 

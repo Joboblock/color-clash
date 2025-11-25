@@ -676,7 +676,10 @@ document.addEventListener('DOMContentLoaded', () => {
             setMainMenuMode,
             // aiStrengthTile provided via mainPage components
             playerColors,
-            startingColorIndex: getStartingColorIndex()
+            startingColorIndex: getStartingColorIndex(),
+            leaveRoom: (roomName) => window.leaveRoom(roomName),
+            getMyJoinedRoom: () => myJoinedRoom,
+            removeUrlRoomKey
         });
     }
 

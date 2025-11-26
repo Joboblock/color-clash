@@ -15,6 +15,8 @@
     height: 100vh;
     pointer-events: none;
     z-index: 1;
+    user-select: none;
+    -webkit-user-select: none;
 }
 /* Circle diameter: just under 1/3 of the shorter viewport side, minus margin */
 .edge-circle {
@@ -29,6 +31,8 @@
     --circle-color-dim: #333; /* fallback dim */
     transform: translate(-50%, -50%) scale(0.5);
     transition: transform 220ms ease, background-color 180ms ease;
+    user-select: none;
+    -webkit-user-select: none;
 }
 /* remove keyframes: use transitions instead */
 

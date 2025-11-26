@@ -204,7 +204,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) { console.error('[Online] Failed to start online game', err); }
     });
     onlineConnection.on('request_preferred_colors', () => {
-    try { const color = playerColors[getStartingColorIndex()] || 'green'; onlineConnection.sendPreferredColor(color); } catch (e) { console.warn('[Online] Failed preferred_color', e); }
+        try { const color = playerColors[getStartingColorIndex()] || 'green'; onlineConnection.sendPreferredColor(color); } catch (e) { console.warn('[Online] Failed preferred_color', e); }
     });
     onlineConnection.on('joined', (msg) => {
         myJoinedRoom = msg.room;
@@ -1095,10 +1095,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     //#endregion
 
-    // Edge circles overlay: 4 corner dots plus 2+2 on the non-restricting sides
-
-    // Edge circles functions now imported from src/components/edgeCircles.js
-
     // Only need to update the restriction type on resize
     window.addEventListener('resize', () => {
         const container = document.getElementById('edgeCirclesContainer');
@@ -1237,8 +1233,8 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     // onMenuPlayerCountChanged used by mainPage slider via ctx; keep for backward compatibility.
     function onMenuPlayerCountChanged(newCount) {
-    const minForPlayers = recommendedGridSize(newCount);
-    const desired = defaultGridSizeForPlayers(newCount);
+        const minForPlayers = recommendedGridSize(newCount);
+        const desired = defaultGridSizeForPlayers(newCount);
         const newGridSize = Math.max(minForPlayers, desired);
         if (newGridSize !== menuGridSizeVal) {
             menuPlayerCount = newCount;

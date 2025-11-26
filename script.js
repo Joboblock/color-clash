@@ -134,6 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
     onlineConnection.on('open', () => { hideConnBanner(); });
     onlineConnection.on('hosted', (msg) => {
         myJoinedRoom = msg.room;
+        myRoomKey = msg.roomKey || null;
         myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
         myRoomCurrentPlayers = 1;
         if (typeof msg.player === 'string' && msg.player) myPlayerName = msg.player;
@@ -207,6 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     onlineConnection.on('joined', (msg) => {
         myJoinedRoom = msg.room;
+        myRoomKey = msg.roomKey || null;
         if (msg.roomKey) updateUrlRoomKey(msg.roomKey);
         if (typeof msg.player === 'string' && msg.player) myPlayerName = msg.player;
         myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
@@ -225,7 +227,10 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStartButtonState();
     });
     onlineConnection.on('left', (msg) => {
-        if (!msg.room || msg.room === myJoinedRoom) myJoinedRoom = null;
+        if (!msg.room || msg.room === myJoinedRoom) {
+            myJoinedRoom = null;
+            myRoomKey = null;
+        }
         myRoomMaxPlayers = null; myRoomCurrentPlayers = 0; myRoomPlayers = [];
         removeUrlRoomKey();
         updateStartButtonState();
@@ -260,6 +265,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     onlineConnection.on('rejoined', (msg) => {
         myJoinedRoom = msg.room || myJoinedRoom;
+        myRoomKey = msg.roomKey || myRoomKey;
         if (msg.roomKey) updateUrlRoomKey(msg.roomKey);
         if (Array.isArray(msg.players)) { myRoomPlayers = msg.players; myRoomCurrentPlayers = msg.players.length; }
         myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
@@ -289,6 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     let myJoinedRoom = null; // track the room this tab is in
+    let myRoomKey = null; // track the room key for the joined room
     let myRoomMaxPlayers = null; // capacity of the room I'm in
     let myRoomCurrentPlayers = 0; // current players in my room
     let myRoomPlayers = []; // last known players (first is host)
@@ -764,6 +771,7 @@ document.addEventListener('DOMContentLoaded', () => {
             joinRoom: (roomName) => window.joinRoom(roomName),
             leaveRoom: (roomName) => window.leaveRoom(roomName),
             getMyJoinedRoom: () => myJoinedRoom,
+            getRoomKeyForRoom: (roomName) => (roomName === myJoinedRoom) ? myRoomKey : null,
             getPlayerName: () => myPlayerName,
             menuHistoryStack
         });
@@ -1143,7 +1151,9 @@ document.addEventListener('DOMContentLoaded', () => {
             startBtn,
             setPracticeMode: (val) => { practiceMode = val; },
             setAiDepth: (val) => { aiDepth = val; },
-            setGameColors: (val) => { gameColors = val; }
+            setGameColors: (val) => { gameColors = val; },
+            getMyJoinedRoom: () => myJoinedRoom,
+            getRoomKeyForRoom: (roomName) => (roomName === myJoinedRoom) ? myRoomKey : null
         });
     }
 

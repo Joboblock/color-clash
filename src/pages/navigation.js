@@ -104,9 +104,29 @@ export function ensureHistoryStateInitialized() {
  * @param {Function} ctx.setHidden - Function to hide/show elements.
  * @param {object} ctx.pageRegistry - Registry of page components.
  * @param {string[]} ctx.playerColors - Array of player color keys.
+ * @param {Function} [ctx.getMyJoinedRoom] - Function to get the currently joined room.
+ * @param {Function} [ctx.getRoomKeyForRoom] - Function to get the room key for a given room.
  * @returns {void}
  */
 export function applyStateFromUrl(ctx) {
+    // Sync room key in URL with current joined room state
+    try {
+        const currentRoom = ctx.getMyJoinedRoom && ctx.getMyJoinedRoom();
+        const params = new URLSearchParams(window.location.search);
+        const urlKey = params.get('key');
+        
+        if (currentRoom && ctx.getRoomKeyForRoom) {
+            // User is in a room: ensure key is in URL
+            const roomKey = ctx.getRoomKeyForRoom(currentRoom);
+            if (roomKey && urlKey !== roomKey) {
+                updateUrlRoomKey(roomKey);
+            }
+        } else if (!currentRoom && urlKey) {
+            // User is not in a room: remove key from URL
+            removeUrlRoomKey();
+        }
+    } catch { /* ignore */ }
+
     const params = new URLSearchParams(window.location.search);
     const typed = getMenuParam();
     const hasPS = params.has('players') || params.has('size');

@@ -1171,45 +1171,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // computeStartPlayerIndex moved to palette.js (use dynamic gameColors)
     const computeStartPlayerIndexProxy = () => computeStartPlayerIndex(gameColors);
 
-
-    /**
-     * Update the AI preview tile to show the next color after the current starting color.
-     * Includes inner-circle coloring and a single centered value dot.
-     * @returns {void}
-     */
-    // Legacy AI preview logic removed; handled by AIStrengthTile component.
-
-    /**
-     * Compute the active game palette starting from cycler color, for given player count.
-     * @param {number} count - number of players/colors to include.
-     * @returns {string[]} ordered color keys.
-     */
-    // computeSelectedColors moved to palette.js
-
-    /**
-     * Generic mix of a hex color toward a grayscale target value.
-     * Replaces mixWithWhite and mixWithBlack.
-     * @param {string} hex - source color (#rgb or #rrggbb).
-     * @param {number} [gray=128] - grayscale target channel 0..255 (0=black, 255=white).
-     * @param {number} [factor=0.5] - blend factor 0..1 (0 = original, 1 = fully gray).
-     * @returns {string} css rgb(r,g,b) color string.
-     */
-    // mixTowardGray moved to utilities.js
-
-    /**
-     * Parse a CSS color string (#hex or rgb/rgba) into RGB channels.
-     * @param {string} color - CSS color string.
-     * @returns {{r:number,g:number,b:number}}
-     */
-    // cssColorToRgb moved to utilities.js
-
-    /**
-     * Convert hex color string (#rgb or #rrggbb) to RGB components.
-     * @param {string} hex - color in hex form.
-     * @returns {{r:number,g:number,b:number}} RGB channels 0..255.
-     */
-    // hexToRgb moved to utilities.js
-
     /**
      * Update grid-size input to match the recommended size for a player count.
      * @param {number} pCount - selected player count.

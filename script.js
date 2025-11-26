@@ -1008,7 +1008,6 @@ document.addEventListener('DOMContentLoaded', () => {
         let s = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : 3;
 
         if (mode === 'start') {
-            await requestFullscreenIfMobile();
             const params = new URLSearchParams(window.location.search);
             params.delete('menu');
             params.delete('practice');
@@ -1021,6 +1020,7 @@ document.addEventListener('DOMContentLoaded', () => {
             practiceMode = false;
             recreateGrid(s, p);
             createEdgeCircles(p, getEdgeCircleState());
+            requestFullscreenIfMobile();
         } else if (mode === 'host') {
             // Host the room when clicking the start button in host mode
             hostRoom();
@@ -1030,7 +1030,6 @@ document.addEventListener('DOMContentLoaded', () => {
             window.history.back();
         }
         else if (mode === 'practice') {
-            await requestFullscreenIfMobile();
             const params = new URLSearchParams(window.location.search);
             params.delete('menu');
             params.set('players', String(p));
@@ -1050,6 +1049,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch { /* ignore */ }
             recreateGrid(s, p);
             createEdgeCircles(p, getEdgeCircleState());
+            requestFullscreenIfMobile();
         }
     });
 
@@ -1062,9 +1062,6 @@ document.addEventListener('DOMContentLoaded', () => {
         practiceBtn.addEventListener('click', async () => {
             const p = clampPlayers(menuPlayerCount, playerColors.length);
             let s = Number.isInteger(menuGridSizeVal) ? menuGridSizeVal : 3;
-
-            // Enter fullscreen on mobile from the same user gesture
-            await requestFullscreenIfMobile();
 
             // Update URL without reloading (reflect AI settings)
             const params = new URLSearchParams(window.location.search);
@@ -1092,6 +1089,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
             } catch { /* ignore */ }
             recreateGrid(s, p);
+            // Enter fullscreen on mobile after hiding menu and setting up game
+            requestFullscreenIfMobile();
         });
     }
     //#endregion

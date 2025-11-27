@@ -122,6 +122,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bar) bar.style.display = 'none';
     }
 
+    // Register page modules BEFORE setting up connection handlers
+    // This ensures pageRegistry.get() calls in event handlers don't fail
+    pageRegistry.register([firstPage, onlinePage, mainPage]);
+
     // Instantiate extracted connection
     const onlineConnection = new OnlineConnection({
         initialBackoffMs: WS_INITIAL_BACKOFF_MS,
@@ -739,8 +743,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const aiStrengthTile = document.getElementById('aiStrengthTile');
         if (aiStrengthTile) aiStrengthTile.style.display = (mode === 'practice') ? '' : 'none';
     }
-    // Register and init page modules (after setMainMenuMode is defined so context functions exist)
-    pageRegistry.register([firstPage, onlinePage, mainPage]);
+    // Initialize page modules (registration already done earlier before connection handlers)
     try {
         pageRegistry.initAll({
             onlineConnection,

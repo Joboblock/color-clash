@@ -47,7 +47,7 @@ export const OnlineParams = Object.freeze({
     WS_INITIAL_BACKOFF_MS: 500,      // initial reconnect backoff
     WS_MAX_BACKOFF_MS: 5000,         // cap for exponential backoff
     SHOW_CONN_BANNER_ONLY_IN_ONLINE: true, // gating flag for connection banner visibility
-    WS_PROD_BASE_URL: 'wss://color-clash-192172087961.europe-west4.run.app/ws' // production service endpoint
+    WS_PROD_BASE_URL: 'wss://color-clash-192172087961.europe-west1.run.app/ws' // production service endpoint
 });
 
 export const { WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS, SHOW_CONN_BANNER_ONLY_IN_ONLINE, WS_PROD_BASE_URL } = OnlineParams;

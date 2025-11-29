@@ -168,9 +168,9 @@ document.addEventListener('DOMContentLoaded', () => {
         Object.entries(rooms || {}).forEach(([roomName, info]) => {
             if (info && Array.isArray(info.players)) {
                 const names = info.players.map(p => p.name).join(', ');
-                console.debug(`[RoomList] Room: ${roomName} | Players: ${names} (${info.currentPlayers}/${info.maxPlayers})`);
+                console.info(`[RoomList] Room: ${roomName} | Players: ${names} (${info.currentPlayers}/${info.maxPlayers})`);
             } else {
-                console.debug(`[RoomList] Room: ${roomName} | Players: ? (${info.currentPlayers}/${info.maxPlayers})`);
+                console.info(`[RoomList] Room: ${roomName} | Players: ? (${info.currentPlayers}/${info.maxPlayers})`);
             }
         });
         const rlView = pageRegistry.get('online')?.components?.roomListView;
@@ -290,7 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStartButtonState();
     });
     onlineConnection.on('error', (msg) => {
-        console.debug('[Error]', msg.error);
+        console.info('[Error]', msg.error);
         alert(msg.error);
         try {
             const err = String(msg.error || '');
@@ -377,7 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Expose to onlinePage via context (used there)
     window.joinRoom = function joinRoom(roomName) {
-        console.debug('[Join] Joining room:', roomName);
+        console.info('[Join] Joining room:', roomName);
         // For debug: send player name, but do not use for logic
         let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player'));
         // Check for duplicate names in the room list
@@ -408,7 +408,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Expose to onlinePage via context (used there)
     window.leaveRoom = function leaveRoom(roomName) {
-        console.debug('[Leave] Leaving room:', roomName);
+        console.info('[Leave] Leaving room:', roomName);
         const doLeave = () => { onlineConnection.leave(roomName); };
         onlineConnection.ensureConnected();
         if (onlineConnection.isConnected()) doLeave(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doLeave); }
@@ -444,7 +444,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 onlineConnection.leave(myJoinedRoom);
             } catch (e) {
-                console.debug('[Cleanup] Failed to leave room on unload:', e);
+                console.info('[Cleanup] Failed to leave room on unload:', e);
             }
         }
     });
@@ -824,7 +824,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Build visual player box slider
     const playerBoxSlider = document.getElementById('playerBoxSlider');
-    console.debug('[PlayerBoxSlider] element lookup:', playerBoxSlider ? '#playerBoxSlider found' : 'not found');
+    console.info('[PlayerBoxSlider] element lookup:', playerBoxSlider ? '#playerBoxSlider found' : 'not found');
 
     // Ensure CSS variables for colors are set on :root BEFORE building boxes
     applyPaletteCssVariables();
@@ -892,7 +892,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         // Prevent left/right navigation from moving focus when slider is focused
         if ((mappedKey === 'ArrowLeft' || mappedKey === 'ArrowRight') && focused === playerBoxSlider) {
-            console.debug('[PlayerBoxSlider] focus guard: intercept left/right while slider focused');
+            console.info('[PlayerBoxSlider] focus guard: intercept left/right while slider focused');
             return false;
         }
         const curRect = focused.getBoundingClientRect();
@@ -1516,7 +1516,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isProcessing || gameWon) return;
 
         // Debug log for every move
-        console.debug('[Move]', {
+        console.info('[Move]', {
             player: activeColors()[currentPlayer],
             playerIndex: currentPlayer,
             row,

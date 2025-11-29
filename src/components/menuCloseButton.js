@@ -21,7 +21,7 @@ export class MenuCloseButton {
         this.menuHistoryStack = Array.isArray(opts.menuHistoryStack) ? opts.menuHistoryStack : [];
         this._onClick = this._onClick.bind(this);
         this._wire();
-        console.debug('[MenuCloseButton][ESM] ctor', { btnCount: this.buttons.length });
+        console.info('[MenuCloseButton][ESM] ctor', { btnCount: this.buttons.length });
     }
 
     _wire() {
@@ -53,7 +53,7 @@ export class MenuCloseButton {
         // replace state, then navigate
         try { this.setMenuParam(expectedMenu, false); } catch { /* ignore */ }
         try { this.navigateToMenu(expectedMenu); } catch { /* ignore */ }
-        console.debug('[MenuCloseButton] navigated ->', expectedMenu);
+        console.info('[MenuCloseButton] navigated ->', expectedMenu);
     }
 
     destroy() {

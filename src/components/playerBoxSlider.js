@@ -28,7 +28,7 @@ function noop() { }
 
         // Debug: constructor called and key options
         try {
-            console.debug('[PlayerBoxSlider] ctor', {
+            console.info('[PlayerBoxSlider] ctor', {
                 hasRootEl: !!this.rootEl,
                 maxPlayers: this.maxPlayers,
                 minPlayers: this.minPlayers,

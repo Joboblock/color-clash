@@ -70,7 +70,7 @@ const server = http.createServer(async (req, res) => {
         res.statusCode = 200;
         res.setHeader('content-type', ct);
         createReadStream(absPath).pipe(res);
-    } catch {
+    } catch { //TODO: No fallbacks
         // Fallback to index.html for SPA routes
         try {
             const absIndex = path.join(__dirname, 'index.html');
@@ -124,7 +124,11 @@ wss.on('connection', (ws) => {
         try {
             msg = JSON.parse(raw);
         } catch {
-            try { ws.send(JSON.stringify({ type: 'error', error: 'Invalid message format' })); } catch { /* ignore */ }
+            if (Math.random() < 0.5) {
+                console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', { type: 'error', error: 'Invalid message format' });
+            } else {
+                try { ws.send(JSON.stringify({ type: 'error', error: 'Invalid message format' })); } catch { /* ignore */ }
+            }
             return;
         }
 
@@ -143,7 +147,11 @@ wss.on('connection', (ws) => {
                     prevRoom.participants.forEach(p => {
                         if (p.ws.readyState === 1) {
                             try {
-                                p.ws.send(JSON.stringify({ type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }));
+                                if (Math.random() < 0.5) {
+                                    console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', { type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
+                                } else {
+                                    p.ws.send(JSON.stringify({ type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }));
+                                }
                             } catch { /* ignore */ }
                         }
                     });
@@ -156,7 +164,11 @@ wss.on('connection', (ws) => {
                 : 'Player';
             const uniqueRoomName = pickUniqueRoomName(roomBaseRaw);
             if (!uniqueRoomName) {
-                try { ws.send(JSON.stringify({ type: 'error', error: 'Room name already taken (all variants 2–9 used). Please choose a different name.' })); } catch { /* ignore */ }
+                if (Math.random() < 0.5) {
+                    console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', { type: 'error', error: 'Room name already taken (all variants 2–9 used). Please choose a different name.' });
+                } else {
+                    try { ws.send(JSON.stringify({ type: 'error', error: 'Room name already taken (all variants 2–9 used). Please choose a different name.' })); } catch { /* ignore */ }
+                }
                 return;
             }
             // Default to 2 unless provided by host (optional)
@@ -535,7 +547,7 @@ wss.on('connection', (ws) => {
             }
             if (fromIndex !== currentTurn) {
                 const expectedPlayer = players[currentTurn];
-                console.debug(`[Turn] Rejected move from ${senderName} (idx ${fromIndex}) - expected ${expectedPlayer} (idx ${currentTurn})`);
+                console.info(`[Turn] Rejected move from ${senderName} (idx ${fromIndex}) - expected ${expectedPlayer} (idx ${currentTurn})`);
                 try { ws.send(JSON.stringify({ type: 'error', error: 'Not your turn', expectedIndex: currentTurn, expectedPlayer })); } catch { /* ignore */ }
                 return;
             }
@@ -568,7 +580,7 @@ wss.on('connection', (ws) => {
                 }
             } catch { /* ignore buffering errors */ }
 
-            console.debug(`[Turn] Accepted move from ${senderName} (idx ${fromIndex}) -> (${r},${c}). Next: ${players[nextIndex]} (idx ${nextIndex})`);
+            console.info(`[Turn] Accepted move from ${senderName} (idx ${fromIndex}) -> (${r},${c}). Next: ${players[nextIndex]} (idx ${nextIndex})`);
             room.participants.forEach(p => {
                 if (p.ws.readyState === 1) {
                     try { p.ws.send(JSON.stringify({ ...payload, seq: room.game?.moveSeq })); } catch { /* ignore */ }

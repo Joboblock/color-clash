@@ -77,6 +77,8 @@ export class OnlineConnection {
 		this._events = new Map();
 		this._debug = debug;
 		this._getWebSocketUrl = typeof getWebSocketUrl === 'function' ? getWebSocketUrl : () => this._defaultUrl();
+		// Generic packet retry tracking: Map of packetKey -> {packet, retryTimer, backoffMs, retryCount, responseType}
+		this._pendingPackets = new Map();
 	}
 
 	/** @private */
@@ -151,17 +153,36 @@ export class OnlineConnection {
 			let msg; try { msg = JSON.parse(evt.data); } catch { return; }
 			const type = msg.type;
 			switch (type) {
-				case 'hosted': this._emit('hosted', msg); break;
-				case 'roomlist': this._emit('roomlist', msg.rooms || {}); break;
-				case 'started': this._emit('started', msg); break;
-				case 'request_preferred_colors': this._emit('request_preferred_colors'); break;
-				case 'joined': this._emit('joined', msg); break;
-				case 'left': this._emit('left', msg); break;
-				case 'roomupdate': this._emit('roomupdate', msg); break;
-				case 'move': this._emit('move', msg); break;
-				case 'rejoined': this._emit('rejoined', msg); break;
-				case 'error': this._emit('error', msg); break;
-				default: this._log('unhandled message type', type);
+			case 'hosted': 
+				this._cancelPendingPacket('host');
+				this._emit('hosted', msg); 
+				break;
+			case 'roomlist': 
+				this._cancelPendingPacket('list');
+				this._emit('roomlist', msg.rooms || {}); 
+				break;
+			case 'started': 
+				this._cancelPendingPacket('start');
+				this._emit('started', msg); 
+				break;
+			case 'request_preferred_colors': this._emit('request_preferred_colors'); break;
+			case 'joined': 
+				this._cancelPendingPacket(`join:${msg.room}`);
+				this._emit('joined', msg); 
+				break;
+			case 'left': this._emit('left', msg); break;
+			case 'roomupdate': this._emit('roomupdate', msg); break;
+			case 'move': 
+				// Cancel retry timer for this move if it matches a pending packet
+				this._cancelPendingPacket(`move:${msg.fromIndex}:${msg.row}:${msg.col}`);
+				this._emit('move', msg); 
+				break;
+			case 'rejoined': 
+				this._cancelPendingPacket(`reconnect:${msg.room}`);
+				this._emit('rejoined', msg); 
+				break;
+			case 'error': this._emit('error', msg); break;
+			default: this._log('unhandled message type', type);
 			}
 		};
 		ws.onerror = () => { this._log('socket error'); };
@@ -184,6 +205,18 @@ export class OnlineConnection {
 			try { this._ws.close(); } catch { /* ignore */ }
 		}
 		if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+		this._clearPendingPackets();
+	}
+
+	/**
+	 * Clear all pending packet retry timers.
+	 * @private
+	 */
+	_clearPendingPackets() {
+		for (const pending of this._pendingPackets.values()) {
+			if (pending.retryTimer) clearTimeout(pending.retryTimer);
+		}
+		this._pendingPackets.clear();
 	}
 
 	/**
@@ -198,7 +231,7 @@ export class OnlineConnection {
 		this._reconnectTimer = setTimeout(() => {
 			this._reconnectTimer = null;
 			this.connect();
-			this._backoffMs = Math.min(this._backoffMs * 2, this._maxBackoffMs);
+			this._backoffMs = Math.min(this._backoffMs * 1.5, this._maxBackoffMs);
 		}, delay);
 	}
 
@@ -209,6 +242,11 @@ export class OnlineConnection {
 	 * @param {object} obj Serializable object payload.
 	 */
 	_send(obj) {
+		// Debug: 50% chance to drop any outgoing packet
+		if (Math.random() < 0.5) {
+			console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', obj);
+			return;
+		}
 		try {
 			this.ensureConnected();
 			if (this._ws && this._ws.readyState === WebSocket.OPEN) {
@@ -218,7 +256,10 @@ export class OnlineConnection {
 	}
 
 	/** Request latest room list. */
-	requestRoomList() { this._send({ type: 'list' }); }
+	requestRoomList() { 
+		const packet = { type: 'list' };
+		this._sendWithRetry('list', packet, 'roomlist');
+	}
 	
 	/** Host a new room.
 	 * @param {{roomName:string, maxPlayers:number, gridSize?:number, debugName?:string}} p
@@ -255,7 +296,81 @@ export class OnlineConnection {
 	/** Broadcast a move.
 	 * @param {{row:number, col:number, fromIndex:number, nextIndex:number, color:string}} move
 	 */
-	sendMove({ row, col, fromIndex, nextIndex, color }) { this._send({ type: 'move', row, col, fromIndex, nextIndex, color }); }
+	sendMove({ row, col, fromIndex, nextIndex, color }) {
+		const moveKey = `move:${fromIndex}:${row}:${col}`;
+		const packet = { type: 'move', row, col, fromIndex, nextIndex, color };
+		this._sendWithRetry(moveKey, packet, 'move');
+	}
+
+	/**
+	 * Send a packet with automatic retry on no response.
+	 * @private
+	 * @param {string} packetKey - Unique key for this packet
+	 * @param {object} packet - The packet to send
+	 * @param {string} expectedResponseType - The message type expected as confirmation
+	 */
+	_sendWithRetry(packetKey, packet, expectedResponseType) {
+		// Cancel any existing retry for this packet
+		if (this._pendingPackets.has(packetKey)) {
+			const existing = this._pendingPackets.get(packetKey);
+			if (existing.retryTimer) clearTimeout(existing.retryTimer);
+		}
+
+		// Send the packet
+		this._send(packet);
+
+		const backoffMs = this._initialBackoffMs;
+		const retryTimer = setTimeout(() => {
+			this._retryPacket(packetKey);
+		}, backoffMs);
+
+		this._pendingPackets.set(packetKey, {
+			packet,
+			retryTimer,
+			backoffMs,
+			retryCount: 0,
+			expectedResponseType
+		});
+	}
+
+	/**
+	 * Retry sending a packet with exponential backoff.
+	 * @private
+	 * @param {string} packetKey
+	 */
+	_retryPacket(packetKey) {
+		const pending = this._pendingPackets.get(packetKey);
+		if (!pending) return;
+
+		pending.retryCount++;
+		const nextBackoff = Math.min(pending.backoffMs * 2, this._maxBackoffMs);
+		pending.backoffMs = nextBackoff;
+
+		this._log(`Retrying packet ${packetKey} (attempt ${pending.retryCount})`);
+		
+		this._send(pending.packet);
+
+		// Schedule next retry
+		pending.retryTimer = setTimeout(() => {
+			this._retryPacket(packetKey);
+		}, nextBackoff);
+	}
+
+	/**
+	 * Cancel retry timer for a specific packet.
+	 * @private
+	 * @param {string} packetKey
+	 */
+	_cancelPendingPacket(packetKey) {
+		const pending = this._pendingPackets.get(packetKey);
+		if (pending) {
+			if (pending.retryTimer) clearTimeout(pending.retryTimer);
+			this._pendingPackets.delete(packetKey);
+			if (pending.retryCount > 0) {
+				this._log(`Packet ${packetKey} confirmed after ${pending.retryCount} retries`);
+			}
+		}
+	}
 
 	/**
 	 * Resolve default WebSocket base URL using simplified fallback chain:

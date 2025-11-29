@@ -412,8 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const doLeave = () => { onlineConnection.leave(roomName); };
         onlineConnection.ensureConnected();
         if (onlineConnection.isConnected()) doLeave(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doLeave); }
-        // Remove key from URL when leaving
-        removeUrlRoomKey();
+        // Defer URL key removal until server confirms with a 'left' message.
     }
 
     // Wire Host Custom / Start Game button behavior in the online menu

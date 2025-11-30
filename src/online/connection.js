@@ -79,6 +79,8 @@ export class OnlineConnection {
 		this._getWebSocketUrl = typeof getWebSocketUrl === 'function' ? getWebSocketUrl : () => this._defaultUrl();
 		// Generic packet retry tracking: Map of packetKey -> {packet, retryTimer, backoffMs, retryCount, responseType}
 		this._pendingPackets = new Map();
+		// Track if this client initiated a start request (is host)
+		this._initiatedStart = false;
 	}
 
 	/** @private */
@@ -163,11 +165,20 @@ export class OnlineConnection {
 				break;
 			case 'started': 
 				this._cancelPendingPacket('start');
+				this._cancelPendingPacket('start_timeout');
+				this._cancelPendingPacket('preferred_color');
 				this._emit('started', msg); 
 				break;
-			case 'request_preferred_colors': this._emit('request_preferred_colors'); break;
+			case 'request_preferred_colors': 
+				// For host: this confirms server received start request
+				this._cancelPendingPacket('start');
+				// Now wait for 'started' - if it doesn't come, a color packet was lost
+				this._scheduleStartTimeout();
+				this._emit('request_preferred_colors'); 
+				break;
 			case 'joined': 
 				this._cancelPendingPacket(`join:${msg.room}`);
+				if (msg.roomKey) this._cancelPendingPacket(`join_by_key:${msg.roomKey}`);
 				this._emit('joined', msg); 
 				break;
 			case 'left': this._emit('left', msg); break;
@@ -276,7 +287,10 @@ export class OnlineConnection {
 	 * @param {string} roomKey
 	 * @param {string} debugName Client name
 	 */
-	joinByKey(roomKey, debugName) { this._send({ type: 'join_by_key', roomKey, debugName }); }
+	joinByKey(roomKey, debugName) { 
+		const packet = { type: 'join_by_key', roomKey, debugName };
+		this._sendWithRetry(`join_by_key:${roomKey}`, packet, 'joined');
+	}
 	
 	/** Leave a room (roomName optional if server infers current room).
 	 * @param {string} [roomName]
@@ -286,12 +300,21 @@ export class OnlineConnection {
 	/** Start the game (host only). Optionally override gridSize.
 	 * @param {number} [gridSize]
 	 */
-	start(gridSize) { const payload = { type: 'start' }; if (Number.isInteger(gridSize)) payload.gridSize = gridSize; this._send(payload); }
+	start(gridSize) { 
+		const payload = { type: 'start' }; 
+		if (Number.isInteger(gridSize)) payload.gridSize = gridSize;
+		// Store gridSize for retry and mark this client as host
+		this._lastStartGridSize = gridSize;
+		this._initiatedStart = true;
+		this._sendWithRetry('start', payload, 'request_preferred_colors');
+	}
 	
 	/** Send preferred color selection.
 	 * @param {string} color
 	 */
-	sendPreferredColor(color) { this._send({ type: 'preferred_color', color }); }
+	sendPreferredColor(color) { 
+		this._sendWithRetry('preferred_color', { type: 'preferred_color', color }, 'started');
+	}
 
 	/** Broadcast a move.
 	 * @param {{row:number, col:number, fromIndex:number, nextIndex:number, color:string}} move
@@ -370,6 +393,38 @@ export class OnlineConnection {
 				this._log(`Packet ${packetKey} confirmed after ${pending.retryCount} retries`);
 			}
 		}
+	}
+
+	/**
+	 * Schedule a timeout to detect lost color packets after receiving request_preferred_colors.
+	 * If 'started' doesn't arrive within 1s, resend start (host only).
+	 * @private
+	 */
+	_scheduleStartTimeout() {
+		// Cancel any existing timeout
+		this._cancelPendingPacket('start_timeout');
+
+		const timeoutMs = 1000;
+		const retryTimer = setTimeout(() => {
+			// Only resend if this client is the host who initiated the start
+			if (!this._initiatedStart) {
+				this._log('Start timeout: not host, skipping resend');
+				return;
+			}
+			this._log('Start timeout: no "started" after color request, resending start');
+			// Resend start packet
+			const payload = { type: 'start' };
+			if (Number.isInteger(this._lastStartGridSize)) payload.gridSize = this._lastStartGridSize;
+			this._sendWithRetry('start', payload, 'request_preferred_colors');
+		}, timeoutMs);
+
+		this._pendingPackets.set('start_timeout', {
+			packet: null,
+			retryTimer,
+			backoffMs: timeoutMs,
+			retryCount: 0,
+			expectedResponseType: 'started'
+		});
 	}
 
 	/**

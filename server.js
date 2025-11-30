@@ -476,7 +476,13 @@ wss.on('connection', (ws) => {
                     clearTimeout(r._colorCollect.timeout);
                     r._colorCollect.timeout = null;
                 }
-                // Build preferred list in participant order (default to 'green' if missing)
+                // Check if we have all responses - if not, abort start
+                if (r._colorCollect.responses.size < r._colorCollect.expected) {
+                    console.warn(`[Start] Aborting start for ${meta.roomName}: missing color responses (${r._colorCollect.responses.size}/${r._colorCollect.expected})`);
+                    delete r._colorCollect;
+                    return;
+                }
+                // Build preferred list in participant order
                 const prefs = players.map(name => {
                     const raw = r._colorCollect.responses.get(name);
                     const c = typeof raw === 'string' ? String(raw) : 'green';

@@ -16,6 +16,8 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  *  - 'open' (): Socket successfully opened.
  *  - 'close' ({ wasEverOpened:boolean }): Socket closed (may trigger reconnect scheduling afterward).
  *  - 'reconnect_scheduled' ({ delay:number }): A reconnect attempt will occur after `delay` ms.
+ *  - 'packet_retry_started' ({ packetKey:string }): First retry of a packet started.
+ *  - 'packet_confirmed' ({ packetKey:string, retryCount:number }): Packet confirmed by server.
  *  - 'hosted' (HostedMessage): Host confirmation for newly created room.
  *  - 'roomlist' (Record<string, RoomListEntry>): Updated list of rooms.
  *  - 'started' (StartedMessage): Game start information (players, grid size, colors).
@@ -85,6 +87,17 @@ export class OnlineConnection {
 
 	/** @private */
 	_log(...args) { if (this._debug) console.debug('[OnlineConnection]', ...args); }
+
+	/**
+	 * Check if any packets are currently being retried.
+	 * @returns {boolean}
+	 */
+	hasRetryingPackets() {
+		for (const pending of this._pendingPackets.values()) {
+			if (pending.retryCount > 0) return true;
+		}
+		return false;
+	}
 
 	/**
 	 * Emit an event to all registered handlers.
@@ -192,7 +205,20 @@ export class OnlineConnection {
 					this._cancelPendingPacket(`reconnect:${msg.room}`);
 					this._emit('rejoined', msg);
 					break;
-				case 'error': this._emit('error', msg); break;
+				case 'error': {
+					// Cancel join_by_key retries if room not found or full
+					const errStr = String(msg.error || '');
+					if (errStr.includes('Room not found') || errStr.includes('full') || errStr.includes('already started')) {
+						// Cancel all pending join_by_key packets
+						for (const key of this._pendingPackets.keys()) {
+							if (key.startsWith('join_by_key:')) {
+								this._cancelPendingPacket(key);
+							}
+						}
+					}
+					this._emit('error', msg);
+					break;
+				}
 				default: this._log('unhandled message type', type);
 			}
 		};
@@ -369,6 +395,11 @@ export class OnlineConnection {
 		const nextBackoff = Math.min(pending.backoffMs * 2, this._maxBackoffMs);
 		pending.backoffMs = nextBackoff;
 
+		// Emit event on first retry to trigger UI feedback
+		if (pending.retryCount === 1) {
+			this._emit('packet_retry_started', { packetKey });
+		}
+
 		// Special logic for 'start' packet: only resend if starting conditions are still met
 		if (packetKey === 'start') {
 			// These variables are defined in the main script.js scope
@@ -387,6 +418,17 @@ export class OnlineConnection {
 				this._cancelPendingPacket('start');
 				return;
 			}
+		}
+		
+		// Special logic for 'join_by_key' packet: only resend if we haven't already joined a room
+		if (packetKey.startsWith('join_by_key:')) {
+			// If we successfully joined, myJoinedRoom will be set and we should stop retrying
+			if (window.myJoinedRoom) {
+				this._log('Cancelling join_by_key retry: already joined a room');
+				this._cancelPendingPacket(packetKey);
+				return;
+			}
+			// Continue retrying - the server will send an error if room doesn't exist or is full
 		}
 		this._log(`Retrying packet ${packetKey} (attempt ${pending.retryCount})`);
 		this._send(pending.packet);
@@ -408,6 +450,8 @@ export class OnlineConnection {
 			this._pendingPackets.delete(packetKey);
 			if (pending.retryCount > 0) {
 				this._log(`Packet ${packetKey} confirmed after ${pending.retryCount} retries`);
+				// Emit event when packet is confirmed after retries
+				this._emit('packet_confirmed', { packetKey, retryCount: pending.retryCount });
 			}
 		}
 	}

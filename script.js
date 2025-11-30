@@ -136,12 +136,26 @@ document.addEventListener('DOMContentLoaded', () => {
         showConnBanner('Reconnecting…', 'info');
     });
     onlineConnection.on('open', () => { hideConnBanner(); });
+    onlineConnection.on('packet_retry_started', () => {
+        showConnBanner('Retrying connection…', 'info');
+    });
+    onlineConnection.on('packet_confirmed', () => {
+        // Only hide banner if no other packets are being retried
+        if (!onlineConnection.hasRetryingPackets()) {
+            hideConnBanner();
+        }
+    });
     onlineConnection.on('hosted', (msg) => {
         myJoinedRoom = msg.room;
         myRoomKey = msg.roomKey || null;
         myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
         myRoomCurrentPlayers = 1;
         if (typeof msg.player === 'string' && msg.player) myPlayerName = msg.player;
+        // Update window references
+        window.myJoinedRoom = myJoinedRoom;
+        window.myRoomMaxPlayers = myRoomMaxPlayers;
+        window.myRoomCurrentPlayers = myRoomCurrentPlayers;
+        window.myPlayerName = myPlayerName;
         // Menu transition logic (same as before)
         const onlineMenu = document.getElementById('onlineMenu');
         const mainMenu = document.getElementById('mainMenu');
@@ -165,6 +179,8 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStartButtonState();
     });
     onlineConnection.on('roomlist', (rooms) => {
+        // Store for access by connection retry logic
+        window.lastRoomList = rooms;
         Object.entries(rooms || {}).forEach(([roomName, info]) => {
             if (info && Array.isArray(info.players)) {
                 const names = info.players.map(p => p.name).join(', ');
@@ -217,6 +233,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof msg.player === 'string' && msg.player) myPlayerName = msg.player;
         myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
         if (Array.isArray(msg.players)) { myRoomCurrentPlayers = msg.players.length; myRoomPlayers = msg.players; }
+        // Update window references
+        window.myJoinedRoom = myJoinedRoom;
+        window.myRoomMaxPlayers = myRoomMaxPlayers;
+        window.myRoomCurrentPlayers = myRoomCurrentPlayers;
+        window.myRoomPlayers = myRoomPlayers;
+        window.myPlayerName = myPlayerName;
         try {
             if (Number.isInteger(msg.gridSize)) {
                 const s = Math.max(3, Math.min(16, parseInt(msg.gridSize, 10)));
@@ -236,12 +258,21 @@ document.addEventListener('DOMContentLoaded', () => {
             myRoomKey = null;
         }
         myRoomMaxPlayers = null; myRoomCurrentPlayers = 0; myRoomPlayers = [];
+        // Update window references
+        window.myJoinedRoom = myJoinedRoom;
+        window.myRoomMaxPlayers = myRoomMaxPlayers;
+        window.myRoomCurrentPlayers = myRoomCurrentPlayers;
+        window.myRoomPlayers = myRoomPlayers;
         removeUrlRoomKey();
         updateStartButtonState();
     });
     onlineConnection.on('roomupdate', (msg) => {
         if (msg.room && msg.room === myJoinedRoom && Array.isArray(msg.players)) {
-            myRoomCurrentPlayers = msg.players.length; myRoomPlayers = msg.players; updateStartButtonState();
+            myRoomCurrentPlayers = msg.players.length; myRoomPlayers = msg.players;
+            // Update window references
+            window.myRoomCurrentPlayers = myRoomCurrentPlayers;
+            window.myRoomPlayers = myRoomPlayers;
+            updateStartButtonState();
         }
     });
     onlineConnection.on('move', (msg) => {
@@ -304,6 +335,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let myRoomCurrentPlayers = 0; // current players in my room
     let myRoomPlayers = []; // last known players (first is host)
     let myPlayerName = null; // this client's player name used to join/host
+    
+    // Expose to window for connection retry logic
+    window.myJoinedRoom = myJoinedRoom;
+    window.myRoomMaxPlayers = myRoomMaxPlayers;
+    window.myRoomCurrentPlayers = myRoomCurrentPlayers;
+    window.myRoomPlayers = myRoomPlayers;
+    window.myPlayerName = myPlayerName;
 
     /**
      * Toggle the online bottom button between "Host Custom" and "Start Game" depending on room state.

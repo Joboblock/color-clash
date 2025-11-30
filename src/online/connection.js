@@ -155,45 +155,45 @@ export class OnlineConnection {
 			let msg; try { msg = JSON.parse(evt.data); } catch { return; }
 			const type = msg.type;
 			switch (type) {
-			case 'hosted': 
-				this._cancelPendingPacket('host');
-				this._emit('hosted', msg); 
-				break;
-			case 'roomlist': 
-				this._cancelPendingPacket('list');
-				this._emit('roomlist', msg.rooms || {}); 
-				break;
-			case 'started': 
-				this._cancelPendingPacket('start');
-				this._cancelPendingPacket('start_timeout');
-				this._cancelPendingPacket('preferred_color');
-				this._emit('started', msg); 
-				break;
-			case 'request_preferred_colors': 
-				// For host: this confirms server received start request
-				this._cancelPendingPacket('start');
-				// Now wait for 'started' - if it doesn't come, a color packet was lost
-				this._scheduleStartTimeout();
-				this._emit('request_preferred_colors'); 
-				break;
-			case 'joined': 
-				this._cancelPendingPacket(`join:${msg.room}`);
-				if (msg.roomKey) this._cancelPendingPacket(`join_by_key:${msg.roomKey}`);
-				this._emit('joined', msg); 
-				break;
-			case 'left': this._emit('left', msg); break;
-			case 'roomupdate': this._emit('roomupdate', msg); break;
-			case 'move': 
-				// Cancel retry timer for this move if it matches a pending packet
-				this._cancelPendingPacket(`move:${msg.fromIndex}:${msg.row}:${msg.col}`);
-				this._emit('move', msg); 
-				break;
-			case 'rejoined': 
-				this._cancelPendingPacket(`reconnect:${msg.room}`);
-				this._emit('rejoined', msg); 
-				break;
-			case 'error': this._emit('error', msg); break;
-			default: this._log('unhandled message type', type);
+				case 'hosted':
+					this._cancelPendingPacket('host');
+					this._emit('hosted', msg);
+					break;
+				case 'roomlist':
+					this._cancelPendingPacket('list');
+					this._emit('roomlist', msg.rooms || {});
+					break;
+				case 'started':
+					this._cancelPendingPacket('start');
+					this._cancelPendingPacket('start_timeout');
+					this._cancelPendingPacket('preferred_color');
+					this._emit('started', msg);
+					break;
+				case 'request_preferred_colors':
+					// For host: this confirms server received start request
+					this._cancelPendingPacket('start');
+					// Now wait for 'started' - if it doesn't come, a color packet was lost
+					this._scheduleStartTimeout();
+					this._emit('request_preferred_colors');
+					break;
+				case 'joined':
+					this._cancelPendingPacket(`join:${msg.room}`);
+					if (msg.roomKey) this._cancelPendingPacket(`join_by_key:${msg.roomKey}`);
+					this._emit('joined', msg);
+					break;
+				case 'left': this._emit('left', msg); break;
+				case 'roomupdate': this._emit('roomupdate', msg); break;
+				case 'move':
+					// Cancel retry timer for this move if it matches a pending packet
+					this._cancelPendingPacket(`move:${msg.fromIndex}:${msg.row}:${msg.col}`);
+					this._emit('move', msg);
+					break;
+				case 'rejoined':
+					this._cancelPendingPacket(`reconnect:${msg.room}`);
+					this._emit('rejoined', msg);
+					break;
+				case 'error': this._emit('error', msg); break;
+				default: this._log('unhandled message type', type);
 			}
 		};
 		ws.onerror = () => { this._log('socket error'); };
@@ -267,52 +267,52 @@ export class OnlineConnection {
 	}
 
 	/** Request latest room list. */
-	requestRoomList() { 
+	requestRoomList() {
 		const packet = { type: 'list' };
 		this._sendWithRetry('list', packet, 'roomlist');
 	}
-	
+
 	/** Host a new room.
 	 * @param {{roomName:string, maxPlayers:number, gridSize?:number, debugName?:string}} p
 	 */
 	host({ roomName, maxPlayers, gridSize, debugName }) { this._send({ type: 'host', roomName, maxPlayers, gridSize, debugName }); }
-	
+
 	/** Join an existing room by name.
 	 * @param {string} roomName
 	 * @param {string} debugName Client name (display/debug only)
 	 */
 	join(roomName, debugName) { this._send({ type: 'join', roomName, debugName }); }
-	
+
 	/** Join a room using its key.
 	 * @param {string} roomKey
 	 * @param {string} debugName Client name
 	 */
-	joinByKey(roomKey, debugName) { 
+	joinByKey(roomKey, debugName) {
 		const packet = { type: 'join_by_key', roomKey, debugName };
 		this._sendWithRetry(`join_by_key:${roomKey}`, packet, 'joined');
 	}
-	
+
 	/** Leave a room (roomName optional if server infers current room).
 	 * @param {string} [roomName]
 	 */
 	leave(roomName) { this._send({ type: 'leave', roomName }); }
-	
+
 	/** Start the game (host only). Optionally override gridSize.
 	 * @param {number} [gridSize]
 	 */
-	start(gridSize) { 
-		const payload = { type: 'start' }; 
+	start(gridSize) {
+		const payload = { type: 'start' };
 		if (Number.isInteger(gridSize)) payload.gridSize = gridSize;
 		// Store gridSize for retry and mark this client as host
 		this._lastStartGridSize = gridSize;
 		this._initiatedStart = true;
 		this._sendWithRetry('start', payload, 'request_preferred_colors');
 	}
-	
+
 	/** Send preferred color selection.
 	 * @param {string} color
 	 */
-	sendPreferredColor(color) { 
+	sendPreferredColor(color) {
 		this._sendWithRetry('preferred_color', { type: 'preferred_color', color }, 'started');
 	}
 
@@ -369,10 +369,27 @@ export class OnlineConnection {
 		const nextBackoff = Math.min(pending.backoffMs * 2, this._maxBackoffMs);
 		pending.backoffMs = nextBackoff;
 
+		// Special logic for 'start' packet: only resend if starting conditions are still met
+		if (packetKey === 'start') {
+			// These variables are defined in the main script.js scope
+			// We'll use window-scoped variables to check conditions
+			const inRoom = !!window.myJoinedRoom;
+			const isFull = inRoom && Number.isFinite(window.myRoomMaxPlayers) && window.myRoomCurrentPlayers >= window.myRoomMaxPlayers;
+			let hostName = null;
+			if (window.lastRoomList && window.myJoinedRoom && window.lastRoomList[window.myJoinedRoom] && window.lastRoomList[window.myJoinedRoom].hostName) {
+				hostName = window.lastRoomList[window.myJoinedRoom].hostName;
+			} else if (Array.isArray(window.myRoomPlayers) && window.myRoomPlayers[0] && window.myRoomPlayers[0].name) {
+				hostName = window.myRoomPlayers[0].name;
+			}
+			const isHost = inRoom && window.myPlayerName && hostName && (window.myPlayerName === hostName);
+			if (!(inRoom && isFull && isHost)) {
+				this._log('Cancelling start retry: starting conditions not met');
+				this._cancelPendingPacket('start');
+				return;
+			}
+		}
 		this._log(`Retrying packet ${packetKey} (attempt ${pending.retryCount})`);
-		
 		this._send(pending.packet);
-
 		// Schedule next retry
 		pending.retryTimer = setTimeout(() => {
 			this._retryPacket(packetKey);

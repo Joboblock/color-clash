@@ -1150,7 +1150,8 @@ document.addEventListener('DOMContentLoaded', () => {
             setAiDepth: (val) => { aiDepth = val; },
             setGameColors: (val) => { gameColors = val; },
             getMyJoinedRoom: () => myJoinedRoom,
-            getRoomKeyForRoom: (roomName) => (roomName === myJoinedRoom) ? myRoomKey : null
+            getRoomKeyForRoom: (roomName) => (roomName === myJoinedRoom) ? myRoomKey : null,
+            getGameColors: () => gameColors
         });
     }
 
@@ -1287,7 +1288,8 @@ document.addEventListener('DOMContentLoaded', () => {
             onlineGameActive,
             myOnlineIndex,
             practiceMode,
-            humanPlayer
+            humanPlayer,
+            gameColors
         };
     }
 
@@ -1477,7 +1479,7 @@ document.addEventListener('DOMContentLoaded', () => {
         highlightInvalidInitialPositions();
         document.body.className = activeColors()[currentPlayer];
         // Sync active circle emphasis after grid rebuild
-        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer); } catch { /* ignore */ }
+        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
 
         // Reflect actual grid size in display value while menu is present
         menuGridSizeVal = Math.max(3, newSize);
@@ -1908,7 +1910,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.body.className = activeColors()[currentPlayer];
         // Update edge circle emphasis for new active player
-        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer); } catch { /* ignore */ }
+        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
         clearCellFocus();
         updateGrid();
         // Restore focus to last focused cell for this player, if any

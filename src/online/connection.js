@@ -278,7 +278,7 @@ export class OnlineConnection {
 	 * @private
 	 * @param {object} obj Serializable object payload.
 	 */
-	_send(obj) {
+	_sendPayload(obj) {
 		// Debug: 50% chance to drop any outgoing packet
 		if (Math.random() < 0.5) {
 			console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', obj);
@@ -301,13 +301,13 @@ export class OnlineConnection {
 	/** Host a new room.
 	 * @param {{roomName:string, maxPlayers:number, gridSize?:number, debugName?:string}} p
 	 */
-	host({ roomName, maxPlayers, gridSize, debugName }) { this._send({ type: 'host', roomName, maxPlayers, gridSize, debugName }); }
+	host({ roomName, maxPlayers, gridSize, debugName }) { this._sendPayload({ type: 'host', roomName, maxPlayers, gridSize, debugName }); }
 
 	/** Join an existing room by name.
 	 * @param {string} roomName
 	 * @param {string} debugName Client name (display/debug only)
 	 */
-	join(roomName, debugName) { this._send({ type: 'join', roomName, debugName }); }
+	join(roomName, debugName) { this._sendPayload({ type: 'join', roomName, debugName }); }
 
 	/** Join a room using its key.
 	 * @param {string} roomKey
@@ -321,7 +321,7 @@ export class OnlineConnection {
 	/** Leave a room (roomName optional if server infers current room).
 	 * @param {string} [roomName]
 	 */
-	leave(roomName) { this._send({ type: 'leave', roomName }); }
+	leave(roomName) { this._sendPayload({ type: 'leave', roomName }); }
 
 	/** Start the game (host only). Optionally override gridSize.
 	 * @param {number} [gridSize]
@@ -366,7 +366,7 @@ export class OnlineConnection {
 		}
 
 		// Send the packet
-		this._send(packet);
+		this._sendPayload(packet);
 
 		const backoffMs = this._initialBackoffMs;
 		const retryTimer = setTimeout(() => {
@@ -431,7 +431,7 @@ export class OnlineConnection {
 			// Continue retrying - the server will send an error if room doesn't exist or is full
 		}
 		this._log(`Retrying packet ${packetKey} (attempt ${pending.retryCount})`);
-		this._send(pending.packet);
+		this._sendPayload(pending.packet);
 		// Schedule next retry
 		pending.retryTimer = setTimeout(() => {
 			this._retryPacket(packetKey);

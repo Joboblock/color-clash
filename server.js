@@ -118,6 +118,21 @@ const connectionMeta = new Map(); // ws -> { roomName: string, name: string }
 // Allow brief disconnects to reattach by name before freeing the seat
 const GRACE_MS = 300000; // 5 min grace window
 
+/**
+ * Sends a JSON payload to a WebSocket client.
+ *
+ * @param {WebSocket} ws - The WebSocket connection to send to.
+ * @param {object} payload - The payload object to send (will be JSON-stringified).
+ */
+function sendPayload(ws, payload) {
+    // Simulate 50% packet loss for debugging network reliability
+    if (Math.random() < 0.5) {
+        console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', payload);
+        return;
+    }
+    ws.send(JSON.stringify(payload));
+}
+
 wss.on('connection', (ws) => {
     ws.on('message', (raw) => {
         let msg;
@@ -127,7 +142,7 @@ wss.on('connection', (ws) => {
             if (Math.random() < 0.5) {
                 console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', { type: 'error', error: 'Invalid message format' });
             } else {
-                try { ws.send(JSON.stringify({ type: 'error', error: 'Invalid message format' })); } catch { /* ignore */ }
+                try { sendPayload(ws, { type: 'error', error: 'Invalid message format' }); } catch { /* ignore */ }
             }
             return;
         }
@@ -150,7 +165,7 @@ wss.on('connection', (ws) => {
                                 if (Math.random() < 0.5) {
                                     console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', { type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
                                 } else {
-                                    p.ws.send(JSON.stringify({ type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }));
+                                    sendPayload(p.ws, { type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
                                 }
                             } catch { /* ignore */ }
                         }
@@ -167,7 +182,7 @@ wss.on('connection', (ws) => {
                 if (Math.random() < 0.5) {
                     console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', { type: 'error', error: 'Room name already taken (all variants 2–9 used). Please choose a different name.' });
                 } else {
-                    try { ws.send(JSON.stringify({ type: 'error', error: 'Room name already taken (all variants 2–9 used). Please choose a different name.' })); } catch { /* ignore */ }
+                    try { sendPayload(ws, { type: 'error', error: 'Room name already taken (all variants 2–9 used). Please choose a different name.' }); } catch { /* ignore */ }
                 }
                 return;
             }
@@ -220,17 +235,17 @@ wss.on('connection', (ws) => {
                 const plannedGridSize = requestedGrid !== null
                     ? Math.max(scheduleMin, Math.min(16, Math.max(3, requestedGrid)))
                     : defaultGrid;
-                ws.send(JSON.stringify({ type: 'hosted', room: uniqueRoomName, roomKey, maxPlayers: clamped, player: playerName, gridSize: plannedGridSize }));
+                sendPayload(ws, { type: 'hosted', room: uniqueRoomName, roomKey, maxPlayers: clamped, player: playerName, gridSize: plannedGridSize });
             }
             broadcastRoomList();
         } else if (msg.type === 'join' && msg.roomName) {
             const room = rooms[msg.roomName];
             if (!room) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
+                sendPayload(ws, { type: 'error', error: 'Room not found' });
                 return;
             }
             if (room.game && room.game.started) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Room already started' }));
+                sendPayload(ws, { type: 'error', error: 'Room already started' });
                 return;
             }
             // If this connection is already in a room, remove it from that room first
@@ -247,7 +262,7 @@ wss.on('connection', (ws) => {
                     prevRoom.participants.forEach(p => {
                         if (p.ws.readyState === 1) {
                             try {
-                                p.ws.send(JSON.stringify({ type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }));
+                                sendPayload(p.ws, { type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
                             } catch { /* ignore */ }
                         }
                     });
@@ -256,14 +271,14 @@ wss.on('connection', (ws) => {
             }
             const count = room.participants?.length || 0;
             if (count >= room.maxPlayers) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Room is full' }));
+                sendPayload(ws, { type: 'error', error: 'Room is full' });
                 return;
             }
             // Use debugName if present, otherwise default to 'Player'. Enforce 12-char base; reserve 13th for numeric suffix and ensure uniqueness in room.
             const baseRaw = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
             const playerName = pickUniqueName(room, baseRaw);
             if (!playerName) {
-                try { ws.send(JSON.stringify({ type: 'error', error: 'All name variants are taken in this room. Please choose a different name.' })); } catch { /* ignore */ }
+                try { sendPayload(ws, { type: 'error', error: 'All name variants are taken in this room. Please choose a different name.' }); } catch { /* ignore */ }
                 return;
             }
             room.participants.push({ ws, name: playerName, isHost: false, connected: true });
@@ -285,7 +300,7 @@ wss.on('connection', (ws) => {
                 ? Math.max(scheduleMin, Math.min(16, Math.max(3, desired)))
                 : defaultGrid;
 
-            ws.send(JSON.stringify({
+            sendPayload(ws, {
                 type: 'joined',
                 room: msg.roomName,
                 roomKey: room.roomKey,
@@ -293,12 +308,12 @@ wss.on('connection', (ws) => {
                 player: playerName,
                 players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
                 gridSize: plannedGridSize
-            }));
+            });
             // Notify existing participants about the new joiner (optional)
             room.participants.forEach(p => {
                 if (p.ws !== ws && p.ws.readyState === 1) {
                     try {
-                        p.ws.send(JSON.stringify({ type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }));
+                        sendPayload(ws, { type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
                     } catch { /* ignore */ }
                 }
             });
@@ -307,16 +322,16 @@ wss.on('connection', (ws) => {
             const key = String(msg.roomKey);
             const roomName = roomKeys.get(key);
             if (!roomName) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
+                sendPayload(ws, { type: 'error', error: 'Room not found' });
                 return;
             }
             const room = rooms[roomName];
             if (!room) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
+                sendPayload(ws, { type: 'error', error: 'Room not found' });
                 return;
             }
             if (room.game && room.game.started) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Room already started' }));
+                sendPayload(ws, { type: 'error', error: 'Room already started' });
                 return;
             }
             // Remove from existing room if any
@@ -331,7 +346,7 @@ wss.on('connection', (ws) => {
                 } else {
                     prevRoom.participants.forEach(p => {
                         if (p.ws.readyState === 1) {
-                            try { p.ws.send(JSON.stringify({ type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) })); } catch { /* ignore */ }
+                            try { sendPayload(ws, { type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }); } catch { /* ignore */ }
                         }
                     });
                 }
@@ -339,13 +354,13 @@ wss.on('connection', (ws) => {
             }
             const count = room.participants?.length || 0;
             if (count >= room.maxPlayers) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Room is full' }));
+                sendPayload(ws, { type: 'error', error: 'Room is full' });
                 return;
             }
             const baseRaw = typeof msg.debugName === 'string' && msg.debugName ? String(msg.debugName) : 'Player';
             const playerName = pickUniqueName(room, baseRaw);
             if (!playerName) {
-                try { ws.send(JSON.stringify({ type: 'error', error: 'All name variants are taken in this room. Please choose a different name.' })); } catch { /* ignore */ }
+                try { sendPayload(ws, { type: 'error', error: 'All name variants are taken in this room. Please choose a different name.' }); } catch { /* ignore */ }
                 return;
             }
             room.participants.push({ ws, name: playerName, isHost: false, connected: true });
@@ -363,23 +378,23 @@ wss.on('connection', (ws) => {
             const plannedGridSize = desired !== null
                 ? Math.max(scheduleMin, Math.min(16, Math.max(3, desired)))
                 : defaultGrid;
-            ws.send(JSON.stringify({ type: 'joined', room: roomName, roomKey: room.roomKey, maxPlayers: room.maxPlayers, player: playerName, players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })), gridSize: plannedGridSize }));
+            sendPayload(ws, { type: 'joined', room: roomName, roomKey: room.roomKey, maxPlayers: room.maxPlayers, player: playerName, players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })), gridSize: plannedGridSize });
             room.participants.forEach(p => {
                 if (p.ws !== ws && p.ws.readyState === 1) {
-                    try { p.ws.send(JSON.stringify({ type: 'roomupdate', room: roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) })); } catch { /* ignore */ }
+                    try { sendPayload(ws, { type: 'roomupdate', room: roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }); } catch { /* ignore */ }
                 }
             });
             broadcastRoomList();
         } else if (msg.type === 'reconnect' && msg.roomName && typeof msg.debugName === 'string') {
             const room = rooms[msg.roomName];
             if (!room) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
+                sendPayload(ws, { type: 'error', error: 'Room not found' });
                 return;
             }
             const name = sanitizeBaseName(msg.debugName);
             const participant = room.participants.find(p => p.name === name);
             if (!participant) {
-                ws.send(JSON.stringify({ type: 'error', error: 'No disconnected session to reattach' }));
+                sendPayload(ws, { type: 'error', error: 'No disconnected session to reattach' });
                 return;
             }
             // Clear any pending purge timer for this name
@@ -410,39 +425,39 @@ wss.on('connection', (ws) => {
                 colors: room.game && Array.isArray(room.game.colors) ? room.game.colors : undefined,
                 recentMoves
             };
-            try { ws.send(JSON.stringify(rejoinPayload)); } catch { /* ignore */ }
+            try { sendPayload(ws, rejoinPayload); } catch { /* ignore */ }
             // Notify others of updated connected roster
             room.participants.forEach(p => {
                 if (p.ws !== ws && p.ws.readyState === 1) {
-                    try { p.ws.send(JSON.stringify({ type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) })); } catch { /* ignore */ }
+                    try { sendPayload(ws, { type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }); } catch { /* ignore */ }
                 }
             });
             broadcastRoomList();
         } else if (msg.type === 'list') {
-            ws.send(JSON.stringify({ type: 'roomlist', rooms: getRoomList() }));
+            sendPayload(ws, { type: 'roomlist', rooms: getRoomList() });
         } else if (msg.type === 'start') {
             // Only the host can start; use their current room from connectionMeta
             const meta = connectionMeta.get(ws);
             if (!meta || !meta.roomName) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Not in a room' }));
+                sendPayload(ws, { type: 'error', error: 'Not in a room' });
                 return;
             }
             const room = rooms[meta.roomName];
             if (!room) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Room not found' }));
+                sendPayload(ws, { type: 'error', error: 'Room not found' });
                 return;
             }
             // Verify host
             const isHost = room.participants.length && room.participants[0].ws === ws;
             if (!isHost) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Only the host can start the game' }));
+                sendPayload(ws, { type: 'error', error: 'Only the host can start the game' });
                 return;
             }
             // Optionally enforce full room
             const playerCount = room.participants.length;
             const mustBeFull = true;
             if (mustBeFull && playerCount < room.maxPlayers) {
-                ws.send(JSON.stringify({ type: 'error', error: 'Room is not full yet' }));
+                sendPayload(ws, { type: 'error', error: 'Room is not full yet' });
                 return;
             }
             // Initiate preferred color collection before starting
@@ -532,7 +547,7 @@ wss.on('connection', (ws) => {
 
             // Enforce that a game has started and track turn order
             if (!room.game || !room.game.started) {
-                try { ws.send(JSON.stringify({ type: 'error', error: 'Game not started' })); } catch { /* ignore */ }
+                try { sendPayload(ws, { type: 'error', error: 'Game not started' }); } catch { /* ignore */ }
                 return;
             }
 
@@ -544,17 +559,17 @@ wss.on('connection', (ws) => {
             const fromIndex = players.indexOf(senderName);
 
             if (!Number.isInteger(r) || !Number.isInteger(c)) {
-                try { ws.send(JSON.stringify({ type: 'error', error: 'Invalid move coordinates' })); } catch { /* ignore */ }
+                try { sendPayload(ws, { type: 'error', error: 'Invalid move coordinates' }); } catch { /* ignore */ }
                 return;
             }
             if (fromIndex < 0) {
-                try { ws.send(JSON.stringify({ type: 'error', error: 'Unknown player' })); } catch { /* ignore */ }
+                try { sendPayload(ws, { type: 'error', error: 'Unknown player' }); } catch { /* ignore */ }
                 return;
             }
             if (fromIndex !== currentTurn) {
                 const expectedPlayer = players[currentTurn];
                 console.info(`[Turn] Rejected move from ${senderName} (idx ${fromIndex}) - expected ${expectedPlayer} (idx ${currentTurn})`);
-                try { ws.send(JSON.stringify({ type: 'error', error: 'Not your turn', expectedIndex: currentTurn, expectedPlayer })); } catch { /* ignore */ }
+                try { sendPayload(ws, { type: 'error', error: 'Not your turn', expectedIndex: currentTurn, expectedPlayer }); } catch { /* ignore */ }
                 return;
             }
 
@@ -589,7 +604,7 @@ wss.on('connection', (ws) => {
             console.info(`[Turn] Accepted move from ${senderName} (idx ${fromIndex}) -> (${r},${c}). Next: ${players[nextIndex]} (idx ${nextIndex})`);
             room.participants.forEach(p => {
                 if (p.ws.readyState === 1) {
-                    try { p.ws.send(JSON.stringify({ ...payload, seq: room.game?.moveSeq })); } catch { /* ignore */ }
+                    try { sendPayload(ws, { ...payload, seq: room.game?.moveSeq }); } catch { /* ignore */ }
                 }
             });
             room.game.turnIndex = nextIndex;
@@ -647,20 +662,20 @@ wss.on('connection', (ws) => {
         } else if (msg.type === 'leave') {
             const meta = connectionMeta.get(ws);
             if (!meta) {
-                ws.send(JSON.stringify({ type: 'left' }));
+                sendPayload(ws, { type: 'left' });
                 return;
             }
             const { roomName } = meta;
             const room = rooms[roomName];
             if (!room) {
                 connectionMeta.delete(ws);
-                ws.send(JSON.stringify({ type: 'left' }));
+                sendPayload(ws, { type: 'left' });
                 broadcastRoomList();
                 return;
             }
             room.participants = room.participants.filter(p => p.ws !== ws);
             connectionMeta.delete(ws);
-            ws.send(JSON.stringify({ type: 'left', room: roomName }));
+            sendPayload(ws, { type: 'left', room: roomName });
             if (room.participants.length === 0) {
                 const oldKey = room.roomKey;
                 delete rooms[roomName];
@@ -668,7 +683,7 @@ wss.on('connection', (ws) => {
             } else {
                 room.participants.forEach(p => {
                     if (p.ws.readyState === 1) {
-                        try { p.ws.send(JSON.stringify({ type: 'roomupdate', room: roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) })); } catch { /* ignore */ }
+                        try { sendPayload(ws, { type: 'roomupdate', room: roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }); } catch { /* ignore */ }
                     }
                 });
             }
@@ -677,7 +692,7 @@ wss.on('connection', (ws) => {
     });
 
     // Greet new connections
-    try { ws.send(JSON.stringify({ type: 'info', message: 'Connected to server!' })); } catch { /* ignore */ }
+    try { sendPayload(ws, { type: 'info', message: 'Connected to server!' }); } catch { /* ignore */ }
 
     ws.on('close', () => {
         const meta = connectionMeta.get(ws);
@@ -715,7 +730,7 @@ wss.on('connection', (ws) => {
                     } else {
                         rr.participants.forEach(p => {
                             if (p.ws.readyState === 1) {
-                                try { p.ws.send(JSON.stringify({ type: 'roomupdate', room: roomName, players: rr.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) })); } catch { /* ignore */ }
+                                try { sendPayload(ws, { type: 'roomupdate', room: roomName, players: rr.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }); } catch { /* ignore */ }
                             }
                         });
                     }
@@ -730,7 +745,7 @@ wss.on('connection', (ws) => {
         if (rooms[roomName]) {
             rooms[roomName].participants.forEach(p => {
                 if (p.ws.readyState === 1) {
-                    try { p.ws.send(JSON.stringify({ type: 'roomupdate', room: roomName, players: rooms[roomName].participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) })); } catch { /* ignore */ }
+                    try { sendPayload(ws, { type: 'roomupdate', room: roomName, players: rooms[roomName].participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }); } catch { /* ignore */ }
                 }
             });
         }

@@ -298,7 +298,7 @@ wss.on('connection', (ws) => {
             // Notify existing participants about the new joiner (optional)
             room.participants.forEach(p => {
                 if (p.ws !== ws && p.ws.readyState === 1) {
-                    sendPayload(ws, { type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
+                    sendPayload(p.ws, { type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
                 }
             });
             broadcastRoomList();
@@ -330,7 +330,7 @@ wss.on('connection', (ws) => {
                 } else {
                     prevRoom.participants.forEach(p => {
                         if (p.ws.readyState === 1) {
-                            sendPayload(ws, { type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
+                            sendPayload(p.ws, { type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
                         }
                     });
                 }
@@ -365,7 +365,7 @@ wss.on('connection', (ws) => {
             sendPayload(ws, { type: 'joined', room: roomName, roomKey: room.roomKey, maxPlayers: room.maxPlayers, player: playerName, players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })), gridSize: plannedGridSize });
             room.participants.forEach(p => {
                 if (p.ws !== ws && p.ws.readyState === 1) {
-                    sendPayload(ws, { type: 'roomupdate', room: roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
+                    sendPayload(p.ws, { type: 'roomupdate', room: roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
                 }
             });
             broadcastRoomList();
@@ -413,7 +413,7 @@ wss.on('connection', (ws) => {
             // Notify others of updated connected roster
             room.participants.forEach(p => {
                 if (p.ws !== ws && p.ws.readyState === 1) {
-                    sendPayload(ws, { type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
+                    sendPayload(p.ws, { type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
                 }
             });
             broadcastRoomList();
@@ -585,7 +585,7 @@ wss.on('connection', (ws) => {
 
             room.participants.forEach(p => {
                 if (p.ws.readyState === 1) {
-                    sendPayload(ws, { ...payload, seq: room.game?.moveSeq });
+                    sendPayload(p.ws, { ...payload, seq: room.game?.moveSeq });
                 }
             });
             room.game.turnIndex = nextIndex;

@@ -67,7 +67,7 @@ export class OnlineRoomList {
             btn.className = 'room-btn';
             btn.textContent = 'Host';
             btn.addEventListener('click', () => {
-                try { this.onHost(); } catch (e) { console.error('[OnlineRoomList] host callback failed', e); }
+                try { this.onHost(); } catch { /* host callback failed */ }
             });
             const nameSpan = document.createElement('span');
             nameSpan.className = 'room-name';
@@ -94,14 +94,14 @@ export class OnlineRoomList {
             if (isMine) {
                 btn.classList.add('leave');
                 btn.textContent = 'Leave';
-                btn.addEventListener('click', () => { try { this.onLeave(roomName); } catch (e) { console.error('[OnlineRoomList] leave failed', e); } });
+                btn.addEventListener('click', () => { try { this.onLeave(roomName); } catch { /* leave failed */ } });
             } else if (isFull) {
                 btn.classList.add('full');
                 btn.textContent = 'Full';
                 btn.disabled = true;
             } else {
                 btn.textContent = 'Join';
-                btn.addEventListener('click', () => { try { this.onJoin(roomName); } catch (e) { console.error('[OnlineRoomList] join failed', e); } });
+                btn.addEventListener('click', () => { try { this.onJoin(roomName); } catch { /* join failed */ } });
             }
             const nameSpan = document.createElement('span');
             nameSpan.className = 'room-name';

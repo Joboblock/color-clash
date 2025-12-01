@@ -86,7 +86,7 @@ export class OnlineConnection {
 	}
 
 	/** @private */
-	_log(...args) { if (this._debug) console.debug('[OnlineConnection]', ...args); }
+	_log() { /* logging removed */ }
 
 	/**
 	 * Check if any packets are currently being retried.
@@ -109,7 +109,7 @@ export class OnlineConnection {
 		const handlers = this._events.get(name);
 		if (handlers) {
 			for (const fn of [...handlers]) {
-				try { fn(payload); } catch (e) { console.error('[OnlineConnection] handler error', e); }
+				try { fn(payload); } catch { /* handler error suppressed */ }
 			}
 		}
 	}
@@ -279,17 +279,18 @@ export class OnlineConnection {
 	 * @param {object} obj Serializable object payload.
 	 */
 	_sendPayload(obj) {
-		// Debug: 50% chance to drop any outgoing packet
+		/*/ Debug: 50% chance to drop any outgoing packet
 		if (Math.random() < 0.5) {
-			console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', obj);
 			return;
-		}
+		}*/
 		try {
 			this.ensureConnected();
 			if (this._ws && this._ws.readyState === WebSocket.OPEN) {
 				this._ws.send(JSON.stringify(obj));
 			}
-		} catch (e) { this._log('send failed', e); }
+		} catch (e) { 
+			console.error('[OnlineConnection] Failed to send packet:', e.message, 'Type:', obj?.type);
+		}
 	}
 
 	/** Request latest room list. */

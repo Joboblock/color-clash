@@ -35,7 +35,7 @@ export class GridSizeTile {
         this._applyAccessibility();
         this.reflect();
         this._attachEvents();
-        console.info('[GridSizeTile][ESM] ctor', { size: this.size, playerCount: this.getPlayerCount(), minSize: this.minSize, maxSize: this.maxSize });
+        
     }
 
     _applyAccessibility() {
@@ -83,7 +83,7 @@ export class GridSizeTile {
         const clamped = this._clamp(v);
         const changed = clamped !== this.size;
         if (changed) {
-            console.info('[GridSizeTile] size ->', clamped, `(reason=${reason})`);
+            
             this.size = clamped;
             this.reflect();
             if (bump) this._bump();
@@ -99,10 +99,9 @@ export class GridSizeTile {
 
     /** Apply new player count bounds (call after player count changes) */
     applyPlayerCountBounds({ reason = 'playerCount', silent = false } = {}) {
-        const minForPlayers = this.getRecommendedSize(this.getPlayerCount());
         const clamped = this._clamp(this.size);
         if (clamped !== this.size) {
-            console.info('[GridSizeTile] clamp after playerCount', { before: this.size, after: clamped, minForPlayers });
+            
             this.size = clamped;
             this.reflect();
             this._bump();

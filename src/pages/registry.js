@@ -20,7 +20,6 @@ class PageRegistry {
     open(id, ctx = {}) {
         const target = this.get(id);
         if (!target) {
-            console.warn('[PageRegistry] Unknown page id:', id);
             return;
         }
         this.pages.forEach(p => {

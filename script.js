@@ -181,14 +181,6 @@ document.addEventListener('DOMContentLoaded', () => {
     onlineConnection.on('roomlist', (rooms) => {
         // Store for access by connection retry logic
         window.lastRoomList = rooms;
-        Object.entries(rooms || {}).forEach(([roomName, info]) => {
-            if (info && Array.isArray(info.players)) {
-                const names = info.players.map(p => p.name).join(', ');
-                console.info(`[RoomList] Room: ${roomName} | Players: ${names} (${info.currentPlayers}/${info.maxPlayers})`);
-            } else {
-                console.info(`[RoomList] Room: ${roomName} | Players: ? (${info.currentPlayers}/${info.maxPlayers})`);
-            }
-        });
         const rlView = pageRegistry.get('online')?.components?.roomListView;
         try { rlView && rlView.render(rooms); } catch { /* ignore */ }
         updateStartButtonState(rooms);
@@ -221,10 +213,10 @@ document.addEventListener('DOMContentLoaded', () => {
             document.body.className = activeColors()[currentPlayer];
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
-        } catch (err) { console.error('[Online] Failed to start online game', err); }
+        } catch { /* start online game failed */ }
     });
     onlineConnection.on('request_preferred_colors', () => {
-        try { const color = playerColors[getStartingColorIndex()] || 'green'; onlineConnection.sendPreferredColor(color); } catch (e) { console.warn('[Online] Failed preferred_color', e); }
+        try { const color = playerColors[getStartingColorIndex()] || 'green'; onlineConnection.sendPreferredColor(color); } catch { /* preferred_color failed */ }
     });
     onlineConnection.on('joined', (msg) => {
         myJoinedRoom = msg.room;
@@ -291,12 +283,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tryApply = () => {
                     if (!onlineGameActive) return;
                     if (!isProcessing) { applyNow(); return; }
-                    if (Date.now() - startTs > 4000) { console.warn('[Online] Dropping deferred move after timeout'); return; }
+                    if (Date.now() - startTs > 4000) { return; }
                     setTimeout(tryApply, 100);
                 };
                 tryApply();
             } else { applyNow(); }
-        } catch (err) { console.error('[Online] Error applying remote move', err); }
+        } catch { /* error applying remote move */ }
     });
     onlineConnection.on('rejoined', (msg) => {
         myJoinedRoom = msg.room || myJoinedRoom;
@@ -317,11 +309,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (isProcessing) { setTimeout(applyNext, 100); } else { doApply(); }
                 }; applyNext();
             }
-        } catch (e) { console.warn('[Online] Failed to apply catch-up moves', e); }
+        } catch { /* failed to apply catch-up moves */ }
         updateStartButtonState();
     });
     onlineConnection.on('error', (msg) => {
-        console.info('[Error]', msg.error);
         alert(msg.error);
         try {
             const err = String(msg.error || '');
@@ -404,9 +395,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const desiredGrid = Number.isInteger(menuGridSizeVal) ? Math.max(3, Math.min(16, menuGridSizeVal)) : Math.max(3, selectedPlayers + 3);
                 hostedDesiredGridSize = desiredGrid;
                 onlineConnection.host({ roomName: name, maxPlayers: selectedPlayers, gridSize: desiredGrid, debugName: debugPlayerName });
-            } catch (err) {
-                console.error('[Host] Error hosting room:', err);
-                if (err && err.stack) console.error(err.stack);
+            } catch {
+                /* hostRoom sendHost failed */
             }
         }
         onlineConnection.ensureConnected();
@@ -415,7 +405,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Expose to onlinePage via context (used there)
     window.joinRoom = function joinRoom(roomName) {
-        console.info('[Join] Joining room:', roomName);
+
         // For debug: send player name, but do not use for logic
         let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player'));
         // Check for duplicate names in the room list
@@ -446,7 +436,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Expose to onlinePage via context (used there)
     window.leaveRoom = function leaveRoom(roomName) {
-        console.info('[Leave] Leaving room:', roomName);
+
         const doLeave = () => { onlineConnection.leave(roomName); };
         onlineConnection.ensureConnected();
         if (onlineConnection.isConnected()) doLeave(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doLeave); }
@@ -480,8 +470,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Use sendBeacon for reliable cleanup during unload
             try {
                 onlineConnection.leave(myJoinedRoom);
-            } catch (e) {
-                console.info('[Cleanup] Failed to leave room on unload:', e);
+            } catch {
+                /* beforeunload leave failed */
             }
         }
     });
@@ -861,7 +851,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Build visual player box slider
     const playerBoxSlider = document.getElementById('playerBoxSlider');
-    console.info('[PlayerBoxSlider] element lookup:', playerBoxSlider ? '#playerBoxSlider found' : 'not found');
 
     // Ensure CSS variables for colors are set on :root BEFORE building boxes
     applyPaletteCssVariables();
@@ -929,7 +918,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         // Prevent left/right navigation from moving focus when slider is focused
         if ((mappedKey === 'ArrowLeft' || mappedKey === 'ArrowRight') && focused === playerBoxSlider) {
-            console.info('[PlayerBoxSlider] focus guard: intercept left/right while slider focused');
             return false;
         }
         const curRect = focused.getBoundingClientRect();
@@ -1554,14 +1542,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function handleClick(row, col) {
         if (isProcessing || gameWon) return;
 
-        // Debug log for every move
-        console.info('[Move]', {
-            player: activeColors()[currentPlayer],
-            playerIndex: currentPlayer,
-            row,
-            col,
-            online: onlineGameActive
-        });
+
 
         const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
         // Save last focused cell for current player

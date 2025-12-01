@@ -90,6 +90,12 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 
 // Start HTTP server
 server.listen(PORT, '0.0.0.0', () => {
+    // Emit a single readiness line only when running under VS Code debugger
+    // so serverReadyAction can auto-open the browser.
+    if (process.env.VSCODE_INSPECTOR_OPTIONS) {
+        // Must match .vscode/launch.json pattern: "Server running at (https?://[^\s]+)"
+        console.log(`Server running at http://localhost:${PORT}`);
+    }
 });
 
 // Room management structure:

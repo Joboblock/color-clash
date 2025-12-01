@@ -133,17 +133,14 @@ function sendPayload(ws, payload) {
     ws.send(JSON.stringify(payload));
 }
 
+
 wss.on('connection', (ws) => {
     ws.on('message', (raw) => {
         let msg;
         try {
             msg = JSON.parse(raw);
         } catch {
-            if (Math.random() < 0.5) {
-                console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', { type: 'error', error: 'Invalid message format' });
-            } else {
-                try { sendPayload(ws, { type: 'error', error: 'Invalid message format' }); } catch { /* ignore */ }
-            }
+            try { sendPayload(ws, { type: 'error', error: 'Invalid message format' }); } catch { /* ignore */ }
             return;
         }
 
@@ -158,18 +155,7 @@ wss.on('connection', (ws) => {
                     delete rooms[metaExisting.roomName];
                     if (oldKey) roomKeys.delete(oldKey);
                 } else {
-                    // notify previous room
-                    prevRoom.participants.forEach(p => {
-                        if (p.ws.readyState === 1) {
-                            try {
-                                if (Math.random() < 0.5) {
-                                    console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', { type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
-                                } else {
-                                    sendPayload(p.ws, { type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
-                                }
-                            } catch { /* ignore */ }
-                        }
-                    });
+                    // notify previous room (no roomupdate, just rely on roomlist)
                 }
                 connectionMeta.delete(ws);
             }
@@ -179,11 +165,7 @@ wss.on('connection', (ws) => {
                 : 'Player';
             const uniqueRoomName = pickUniqueRoomName(roomBaseRaw);
             if (!uniqueRoomName) {
-                if (Math.random() < 0.5) {
-                    console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', { type: 'error', error: 'Room name already taken (all variants 2–9 used). Please choose a different name.' });
-                } else {
-                    try { sendPayload(ws, { type: 'error', error: 'Room name already taken (all variants 2–9 used). Please choose a different name.' }); } catch { /* ignore */ }
-                }
+                try { sendPayload(ws, { type: 'error', error: 'Room name already taken (all variants 2–9 used). Please choose a different name.' }); } catch { /* ignore */ }
                 return;
             }
             // Default to 2 unless provided by host (optional)
@@ -221,23 +203,19 @@ wss.on('connection', (ws) => {
             connectionMeta.set(ws, { roomName: uniqueRoomName, name: playerName });
             // Compute a planned grid size for the lobby background for the host as well.
             // Use host's desiredGridSize if provided; otherwise default to (playerTarget + 3)
-            // while respecting the per-player minimum schedule and the max cap of 16.
-            {
-                function recommendedGridSize(p) {
-                    if (p <= 2) return 3;
-                    if (p <= 4) return 4; // 3-4 players
-                    if (p === 5) return 5;
-                    return 6; // 6-8 players
-                }
-                const scheduleMin = recommendedGridSize(clamped);
-                const playerTarget = clamped; // room will enforce full before start
-                const defaultGrid = Math.max(scheduleMin, Math.min(16, Math.max(3, playerTarget + 3)));
-                const plannedGridSize = requestedGrid !== null
-                    ? Math.max(scheduleMin, Math.min(16, Math.max(3, requestedGrid)))
-                    : defaultGrid;
-                sendPayload(ws, { type: 'hosted', room: uniqueRoomName, roomKey, maxPlayers: clamped, player: playerName, gridSize: plannedGridSize });
-            }
-            broadcastRoomList();
+            // No direct roomupdate confirmation; rely on enriched roomlist
+            // Enrich roomlist for the host so their room entry includes player/roomKey confirmation
+            const perClientExtras = new Map();
+            perClientExtras.set(ws, {
+                room: uniqueRoomName,
+                roomKey,
+                maxPlayers: clamped,
+                player: playerName,
+                players: [{ name: playerName }],
+                gridSize: requestedGrid !== null ? requestedGrid : undefined,
+                started: false
+            });
+            broadcastRoomList(perClientExtras);
         } else if (msg.type === 'join' && msg.roomName) {
             const room = rooms[msg.roomName];
             if (!room) {
@@ -258,14 +236,7 @@ wss.on('connection', (ws) => {
                     delete rooms[metaExisting.roomName];
                     if (oldKey) roomKeys.delete(oldKey);
                 } else {
-                    // notify previous room
-                    prevRoom.participants.forEach(p => {
-                        if (p.ws.readyState === 1) {
-                            try {
-                                sendPayload(p.ws, { type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
-                            } catch { /* ignore */ }
-                        }
-                    });
+                    // notify previous room (no roomupdate, just rely on roomlist)
                 }
                 connectionMeta.delete(ws);
             }
@@ -284,40 +255,21 @@ wss.on('connection', (ws) => {
             room.participants.push({ ws, name: playerName, isHost: false, connected: true });
             connectionMeta.set(ws, { roomName: msg.roomName, name: playerName });
 
-            // Provide the client with the room's planned grid size so the background grid can match immediately on join.
-            // Planned grid size is based on host's desiredGridSize (if any), but not below the schedule minimum for maxPlayers.
-            function minGridSize(p) {
-                if (p <= 2) return 3;
-                if (p <= 4) return 4; // 3-4 players
-                if (p === 5) return 5;
-                return 6; // 6-8 players
+            // No direct roomupdate confirmation; rely on enriched roomlist
+            // Enrich roomlist for the joiner so their room entry includes player/roomKey confirmation
+            {
+                const perClientExtras = new Map();
+                perClientExtras.set(ws, {
+                    room: msg.roomName,
+                    roomKey: room.roomKey,
+                    maxPlayers: room.maxPlayers,
+                    player: playerName,
+                    players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
+                    gridSize: Number.isFinite(room.desiredGridSize) ? room.desiredGridSize : undefined,
+                    started: !!(room.game && room.game.started)
+                });
+                broadcastRoomList(perClientExtras);
             }
-            const scheduleMin = minGridSize(room.maxPlayers || 2);
-            const desired = Number.isFinite(room.desiredGridSize) ? Math.floor(room.desiredGridSize) : null;
-            const playerTarget = Number.isFinite(room.maxPlayers) ? room.maxPlayers : (room.participants?.length || 2);
-            const defaultGrid = Math.max(scheduleMin, Math.min(16, Math.max(3, playerTarget + 3)));
-            const plannedGridSize = desired !== null
-                ? Math.max(scheduleMin, Math.min(16, Math.max(3, desired)))
-                : defaultGrid;
-
-            sendPayload(ws, {
-                type: 'joined',
-                room: msg.roomName,
-                roomKey: room.roomKey,
-                maxPlayers: room.maxPlayers,
-                player: playerName,
-                players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
-                gridSize: plannedGridSize
-            });
-            // Notify existing participants about the new joiner (optional)
-            room.participants.forEach(p => {
-                if (p.ws !== ws && p.ws.readyState === 1) {
-                    try {
-                        sendPayload(ws, { type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
-                    } catch { /* ignore */ }
-                }
-            });
-            broadcastRoomList();
         } else if (msg.type === 'join_by_key' && typeof msg.roomKey === 'string') {
             const key = String(msg.roomKey);
             const roomName = roomKeys.get(key);
@@ -344,11 +296,7 @@ wss.on('connection', (ws) => {
                     delete rooms[metaExisting.roomName];
                     if (oldKey) roomKeys.delete(oldKey);
                 } else {
-                    prevRoom.participants.forEach(p => {
-                        if (p.ws.readyState === 1) {
-                            try { sendPayload(ws, { type: 'roomupdate', room: metaExisting.roomName, players: prevRoom.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }); } catch { /* ignore */ }
-                        }
-                    });
+                    // notify previous room (no roomupdate, just rely on roomlist)
                 }
                 connectionMeta.delete(ws);
             }
@@ -365,26 +313,21 @@ wss.on('connection', (ws) => {
             }
             room.participants.push({ ws, name: playerName, isHost: false, connected: true });
             connectionMeta.set(ws, { roomName, name: playerName });
-            function minGridSize(p) {
-                if (p <= 2) return 3;
-                if (p <= 4) return 4; // 3-4 players
-                if (p === 5) return 5;
-                return 6; // 6-8 players
+            // No direct roomupdate confirmation; rely on enriched roomlist
+            // Enrich roomlist for the joiner so their room entry includes player/roomKey confirmation
+            {
+                const perClientExtras = new Map();
+                perClientExtras.set(ws, {
+                    room: roomName,
+                    roomKey: room.roomKey,
+                    maxPlayers: room.maxPlayers,
+                    player: playerName,
+                    players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
+                    gridSize: Number.isFinite(room.desiredGridSize) ? room.desiredGridSize : undefined,
+                    started: !!(room.game && room.game.started)
+                });
+                broadcastRoomList(perClientExtras);
             }
-            const scheduleMin = minGridSize(room.maxPlayers || 2);
-            const desired = Number.isFinite(room.desiredGridSize) ? Math.floor(room.desiredGridSize) : null;
-            const playerTarget = Number.isFinite(room.maxPlayers) ? room.maxPlayers : (room.participants?.length || 2);
-            const defaultGrid = Math.max(scheduleMin, Math.min(16, Math.max(3, playerTarget + 3)));
-            const plannedGridSize = desired !== null
-                ? Math.max(scheduleMin, Math.min(16, Math.max(3, desired)))
-                : defaultGrid;
-            sendPayload(ws, { type: 'joined', room: roomName, roomKey: room.roomKey, maxPlayers: room.maxPlayers, player: playerName, players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })), gridSize: plannedGridSize });
-            room.participants.forEach(p => {
-                if (p.ws !== ws && p.ws.readyState === 1) {
-                    try { sendPayload(ws, { type: 'roomupdate', room: roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }); } catch { /* ignore */ }
-                }
-            });
-            broadcastRoomList();
         } else if (msg.type === 'reconnect' && msg.roomName && typeof msg.debugName === 'string') {
             const room = rooms[msg.roomName];
             if (!room) {
@@ -427,11 +370,7 @@ wss.on('connection', (ws) => {
             };
             try { sendPayload(ws, rejoinPayload); } catch { /* ignore */ }
             // Notify others of updated connected roster
-            room.participants.forEach(p => {
-                if (p.ws !== ws && p.ws.readyState === 1) {
-                    try { sendPayload(ws, { type: 'roomupdate', room: msg.roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }); } catch { /* ignore */ }
-                }
-            });
+            // No direct roomupdate confirmation; rely on enriched roomlist
             broadcastRoomList();
         } else if (msg.type === 'list') {
             sendPayload(ws, { type: 'roomlist', rooms: getRoomList() });
@@ -815,10 +754,25 @@ function pickUniqueRoomName(raw) {
     return pickUniqueFromTaken(raw, taken);
 }
 
-function broadcastRoomList() {
-    const list = JSON.stringify({ type: 'roomlist', rooms: getRoomList() });
+/**
+ * Broadcasts the room list to all clients, with optional per-client enrichment.
+ * @param {Map<WebSocket,object>} [perClientExtras] - Map of ws -> extra fields to merge into their room entry
+ */
+function broadcastRoomList(perClientExtras) {
+    const baseRooms = getRoomList();
     wss.clients.forEach(client => {
-        if (client.readyState === 1) client.send(list);
+        if (client.readyState !== 1) return;
+        let rooms = baseRooms;
+        // If this client has extra info (e.g. host/join confirmation), merge it into their room entry
+        if (perClientExtras && perClientExtras.has(client)) {
+            const extras = perClientExtras.get(client);
+            if (extras && extras.room && baseRooms[extras.room]) {
+                rooms = { ...baseRooms };
+                rooms[extras.room] = { ...baseRooms[extras.room], ...extras };
+            }
+        }
+        const list = JSON.stringify({ type: 'roomlist', rooms });
+        client.send(list);
     });
 }
 

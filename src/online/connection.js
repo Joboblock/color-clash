@@ -18,13 +18,12 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  *  - 'reconnect_scheduled' ({ delay:number }): A reconnect attempt will occur after `delay` ms.
  *  - 'packet_retry_started' ({ packetKey:string }): First retry of a packet started.
  *  - 'packet_confirmed' ({ packetKey:string, retryCount:number }): Packet confirmed by server.
- *  - 'hosted' (HostedMessage): Host confirmation for newly created room.
+ *  - (deprecated) 'hosted' (HostedMessage): replaced by enriched 'roomlist'.
  *  - 'roomlist' (Record<string, RoomListEntry>): Updated list of rooms.
  *  - 'started' (StartedMessage): Game start information (players, grid size, colors).
  *  - 'request_preferred_colors' (): Server asks client to provide a preferred color.
- *  - 'joined' (JoinedMessage): Confirmation that this client joined a room.
+ *  - (deprecated) 'joined' (JoinedMessage): replaced by enriched 'roomlist'.
  *  - 'left' (LeftMessage): Notification that a player (possibly us) left the room.
- *  - 'roomupdate' (RoomUpdateMessage): Player list / occupancy changes.
  *  - 'move' (MoveMessage): A game move broadcast.
  *  - 'rejoined' (RejoinedMessage): State catch-up after reconnect.
  *  - 'error' (ErrorMessage): Server-side validation or protocol error.
@@ -49,12 +48,12 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  *
  * @typedef {{name:string}} PlayerEntry
  * @typedef {{currentPlayers:number, maxPlayers:number, players?:PlayerEntry[], hostName?:string}} RoomListEntry
- * @typedef {{type:'hosted', room:string, roomKey?:string, maxPlayers?:number, player?:string}} HostedMessage
+ * // Deprecated: HostedMessage is no longer used; server emits enriched roomlist
  * @typedef {{type:'roomlist', rooms:Record<string, RoomListEntry>}} RawRoomListMessage
  * @typedef {{type:'started', players:string[], gridSize?:number, colors?:string[]}} StartedMessage
- * @typedef {{type:'joined', room:string, roomKey?:string, players?:PlayerEntry[], maxPlayers?:number, gridSize?:number, player?:string}} JoinedMessage
+ * // Deprecated: JoinedMessage is no longer used; server emits enriched roomlist
  * @typedef {{type:'left', room?:string, player?:string}} LeftMessage
- * @typedef {{type:'roomupdate', room:string, players:PlayerEntry[]}} RoomUpdateMessage
+// RoomUpdateMessage is obsolete; use enriched roomlist entries instead
  * @typedef {{type:'move', room?:string, row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} MoveMessage
  * @typedef {{type:'rejoined', room?:string, roomKey?:string, players?:PlayerEntry[], recentMoves?:MoveMessage[], maxPlayers?:number}} RejoinedMessage
  * @typedef {{type:'error', error:string}} ErrorMessage
@@ -168,10 +167,10 @@ export class OnlineConnection {
 			let msg; try { msg = JSON.parse(evt.data); } catch { return; }
 			const type = msg.type;
 			switch (type) {
-				case 'hosted':
-					this._cancelPendingPacket('host');
-					this._emit('hosted', msg);
-					break;
+				// 'hosted' no longer used; ignore if received
+				   case 'hosted':
+					   this._cancelPendingPacket('host');
+					   break;
 				case 'roomlist':
 					this._cancelPendingPacket('list');
 					this._emit('roomlist', msg.rooms || {});
@@ -189,13 +188,11 @@ export class OnlineConnection {
 					this._scheduleStartTimeout();
 					this._emit('request_preferred_colors');
 					break;
-				case 'joined':
-					this._cancelPendingPacket(`join:${msg.room}`);
-					if (msg.roomKey) this._cancelPendingPacket(`join_by_key:${msg.roomKey}`);
-					this._emit('joined', msg);
-					break;
-				case 'left': this._emit('left', msg); break;
-				case 'roomupdate': this._emit('roomupdate', msg); break;
+				   case 'joined':
+					   this._cancelPendingPacket(`join:${msg.room}`);
+					   if (msg.roomKey) this._cancelPendingPacket(`join_by_key:${msg.roomKey}`);
+					   break;
+				   case 'left': this._emit('left', msg); break;
 				case 'move':
 					// Cancel retry timer for this move if it matches a pending packet
 					this._cancelPendingPacket(`move:${msg.fromIndex}:${msg.row}:${msg.col}`);
@@ -315,7 +312,7 @@ export class OnlineConnection {
 	 */
 	joinByKey(roomKey, debugName) {
 		const packet = { type: 'join_by_key', roomKey, debugName };
-		this._sendWithRetry(`join_by_key:${roomKey}`, packet, 'joined');
+		this._sendWithRetry(`join_by_key:${roomKey}`, packet, 'roomlist');
 	}
 
 	/** Leave a room (roomName optional if server infers current room).

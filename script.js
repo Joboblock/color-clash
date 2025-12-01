@@ -145,43 +145,38 @@ document.addEventListener('DOMContentLoaded', () => {
             hideConnBanner();
         }
     });
-    onlineConnection.on('hosted', (msg) => {
-        myJoinedRoom = msg.room;
-        myRoomKey = msg.roomKey || null;
-        myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
-        myRoomCurrentPlayers = 1;
-        if (typeof msg.player === 'string' && msg.player) myPlayerName = msg.player;
-        // Update window references
-        window.myJoinedRoom = myJoinedRoom;
-        window.myRoomMaxPlayers = myRoomMaxPlayers;
-        window.myRoomCurrentPlayers = myRoomCurrentPlayers;
-        window.myPlayerName = myPlayerName;
-        // Menu transition logic (same as before)
-        const onlineMenu = document.getElementById('onlineMenu');
-        const mainMenu = document.getElementById('mainMenu');
-        let deferredRoomKey = null;
-        if (onlineMenu && mainMenu) {
-            mainMenu.classList.add('hidden');
-            mainMenu.setAttribute('aria-hidden', 'true');
-            onlineMenu.classList.remove('hidden');
-            onlineMenu.setAttribute('aria-hidden', 'false');
-            try { mainMenu.dataset.openedBy = ''; } catch { /* ignore */ }
-        }
-        if (msg.roomKey) {
-            const params = new URLSearchParams(window.location.search);
-            const currentMenu = params.get('menu');
-            if (currentMenu === 'host') {
-                deferredRoomKey = msg.roomKey;
-                const popHandler = () => { updateUrlRoomKey(deferredRoomKey); window.removeEventListener('popstate', popHandler, true); };
-                window.addEventListener('popstate', popHandler, true);
-            } else { updateUrlRoomKey(msg.roomKey); }
-        }
-        updateStartButtonState();
-    });
     onlineConnection.on('roomlist', (rooms) => {
         // Store for access by connection retry logic
         window.lastRoomList = rooms;
+        // If any room entry contains player info matching us, treat as confirmation of join/host
+        let foundSelf = false;
         Object.entries(rooms || {}).forEach(([roomName, info]) => {
+            if (info && typeof info.player === 'string' && info.player === myPlayerName) {
+                myJoinedRoom = roomName;
+                myRoomKey = info.roomKey || null;
+                myRoomMaxPlayers = Number.isFinite(info.maxPlayers) ? info.maxPlayers : myRoomMaxPlayers;
+                if (Array.isArray(info.players)) { myRoomPlayers = info.players.slice(); myRoomCurrentPlayers = info.players.length; }
+                // Update window references
+                window.myJoinedRoom = myJoinedRoom;
+                window.myRoomMaxPlayers = myRoomMaxPlayers;
+                window.myRoomCurrentPlayers = myRoomCurrentPlayers;
+                window.myRoomPlayers = myRoomPlayers;
+                window.myPlayerName = myPlayerName;
+                if (info.roomKey) updateUrlRoomKey(info.roomKey);
+                // If grid size provided (lobby background), sync the UI tile and grid
+                try {
+                    if (Number.isInteger(info.gridSize)) {
+                        const s = Math.max(3, Math.min(16, parseInt(info.gridSize, 10)));
+                        menuGridSizeVal = s;
+                        try {
+                            const gridSizeTile = pageRegistry.get('main')?.components?.gridSizeTile;
+                            gridSizeTile && gridSizeTile.setSize(s, 'network', { silent: true, bump: false });
+                        } catch { /* ignore */ }
+                        if (s !== gridSize) recreateGrid(s, playerCount);
+                    }
+                } catch { /* ignore */ }
+                foundSelf = true;
+            }
             if (info && Array.isArray(info.players)) {
                 const names = info.players.map(p => p.name).join(', ');
                 console.info(`[RoomList] Room: ${roomName} | Players: ${names} (${info.currentPlayers}/${info.maxPlayers})`);
@@ -189,6 +184,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.info(`[RoomList] Room: ${roomName} | Players: ? (${info.currentPlayers}/${info.maxPlayers})`);
             }
         });
+        if (foundSelf) {
+            // Navigate to online menu when transitioning into a room (from none)
+            if (!window._wasInRoom && myJoinedRoom) navigateToMenu('online');
+            window._wasInRoom = true;
+        } else {
+            window._wasInRoom = false;
+        }
         const rlView = pageRegistry.get('online')?.components?.roomListView;
         try { rlView && rlView.render(rooms); } catch { /* ignore */ }
         updateStartButtonState(rooms);
@@ -226,32 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
     onlineConnection.on('request_preferred_colors', () => {
         try { const color = playerColors[getStartingColorIndex()] || 'green'; onlineConnection.sendPreferredColor(color); } catch (e) { console.warn('[Online] Failed preferred_color', e); }
     });
-    onlineConnection.on('joined', (msg) => {
-        myJoinedRoom = msg.room;
-        myRoomKey = msg.roomKey || null;
-        if (msg.roomKey) updateUrlRoomKey(msg.roomKey);
-        if (typeof msg.player === 'string' && msg.player) myPlayerName = msg.player;
-        myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
-        if (Array.isArray(msg.players)) { myRoomCurrentPlayers = msg.players.length; myRoomPlayers = msg.players; }
-        // Update window references
-        window.myJoinedRoom = myJoinedRoom;
-        window.myRoomMaxPlayers = myRoomMaxPlayers;
-        window.myRoomCurrentPlayers = myRoomCurrentPlayers;
-        window.myRoomPlayers = myRoomPlayers;
-        window.myPlayerName = myPlayerName;
-        try {
-            if (Number.isInteger(msg.gridSize)) {
-                const s = Math.max(3, Math.min(16, parseInt(msg.gridSize, 10)));
-                menuGridSizeVal = s;
-                try {
-                    const gridSizeTile = pageRegistry.get('main')?.components?.gridSizeTile;
-                    gridSizeTile && gridSizeTile.setSize(s, 'network', { silent: true, bump: false });
-                } catch { /* ignore */ }
-                if (s !== gridSize) recreateGrid(s, playerCount);
-            }
-        } catch { /* ignore */ }
-        updateStartButtonState();
-    });
+    // hosted/joined are deprecated and replaced by enriched 'roomlist'
     onlineConnection.on('left', (msg) => {
         if (!msg.room || msg.room === myJoinedRoom) {
             myJoinedRoom = null;
@@ -265,15 +242,6 @@ document.addEventListener('DOMContentLoaded', () => {
         window.myRoomPlayers = myRoomPlayers;
         removeUrlRoomKey();
         updateStartButtonState();
-    });
-    onlineConnection.on('roomupdate', (msg) => {
-        if (msg.room && msg.room === myJoinedRoom && Array.isArray(msg.players)) {
-            myRoomCurrentPlayers = msg.players.length; myRoomPlayers = msg.players;
-            // Update window references
-            window.myRoomCurrentPlayers = myRoomCurrentPlayers;
-            window.myRoomPlayers = myRoomPlayers;
-            updateStartButtonState();
-        }
     });
     onlineConnection.on('move', (msg) => {
         try {

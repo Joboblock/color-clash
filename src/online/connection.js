@@ -83,7 +83,7 @@ export class OnlineConnection {
 	}
 
 	/** @private */
-	_log(...args) { if (this._debug) console.debug('[OnlineConnection]', ...args); }
+	_log() { }
 
 	/**
 	 * Check if any packets are currently being retried.
@@ -106,7 +106,7 @@ export class OnlineConnection {
 		const handlers = this._events.get(name);
 		if (handlers) {
 			for (const fn of [...handlers]) {
-				try { fn(payload); } catch (e) { console.error('[OnlineConnection] handler error', e); }
+				try { fn(payload); } catch { /* ignore */ }
 			}
 		}
 	}
@@ -274,16 +274,24 @@ export class OnlineConnection {
 	 */
 	_sendPayload(obj) {
 		// Debug: 50% chance to drop any outgoing packet
-		if (Math.random() < 0.5) {
-			console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', obj);
+		/*if (Math.random() < 0.5) {
 			return;
-		}
+		}*/
 		try {
 			this.ensureConnected();
 			if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-				this._ws.send(JSON.stringify(obj));
+				try {
+					this._ws.send(JSON.stringify(obj));
+				} catch (err) {
+					const t = obj && typeof obj === 'object' ? obj.type : undefined;
+					const state = typeof this._ws?.readyState === 'number' ? this._ws.readyState : undefined;
+					console.error('[Client] Failed to send packet', { type: t, readyState: state }, err);
+				}
 			}
-		} catch (e) { this._log('send failed', e); }
+		} catch (err) {
+			const t = obj && typeof obj === 'object' ? obj.type : undefined;
+			console.error('[Client] Ensure/send failed', { type: t }, err);
+		}
 	}
 
 	/** Request latest room list. */

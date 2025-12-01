@@ -90,8 +90,6 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 
 // Start HTTP server
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`HTTP server listening on http://0.0.0.0:${PORT}`);
-    console.log(`WebSocket endpoint available at ws://<host>:${PORT}/ws`);
 });
 
 // Room management structure:
@@ -126,11 +124,18 @@ const GRACE_MS = 300000; // 5 min grace window
  */
 function sendPayload(ws, payload) {
     // Simulate 50% packet loss for debugging network reliability
-    if (Math.random() < 0.5) {
-        console.warn('[Debug] Dropping outgoing packet (simulated packet loss)', payload);
+    /*if (Math.random() < 0.5) {
         return;
+    }*/
+    try {
+        ws.send(JSON.stringify(payload));
+    } catch (err) {
+        try {
+            const t = payload && typeof payload === 'object' ? payload.type : undefined;
+            const state = typeof ws?.readyState === 'number' ? ws.readyState : undefined;
+            console.error('[Server] Failed to send payload', { type: t, readyState: state }, err);
+        } catch { /* ignore meta logging errors */ }
     }
-    ws.send(JSON.stringify(payload));
 }
 
 
@@ -416,7 +421,7 @@ wss.on('connection', (ws) => {
             const requestPayload = JSON.stringify({ type: 'request_preferred_colors', room: meta.roomName, players });
             room.participants.forEach(p => {
                 if (p.ws.readyState === 1) {
-                    try { p.ws.send(requestPayload); } catch { /* ignore */ }
+                    try { p.ws.send(requestPayload); } catch (err) { console.error('[Server] Failed to send request_preferred_colors to participant', err); }
                 }
             });
             // Helper to finalize assignment (on all responses or timeout)
@@ -432,7 +437,6 @@ wss.on('connection', (ws) => {
                 }
                 // Check if we have all responses - if not, abort start
                 if (r._colorCollect.responses.size < r._colorCollect.expected) {
-                    console.warn(`[Start] Aborting start for ${meta.roomName}: missing color responses (${r._colorCollect.responses.size}/${r._colorCollect.expected})`);
                     delete r._colorCollect;
                     return;
                 }
@@ -469,7 +473,7 @@ wss.on('connection', (ws) => {
                 const startPayload = JSON.stringify({ type: 'started', room: meta.roomName, players, gridSize, colors: assigned });
                 r.participants.forEach(p => {
                     if (p.ws.readyState === 1) {
-                        try { p.ws.send(startPayload); } catch { /* ignore */ }
+                        try { p.ws.send(startPayload); } catch (err) { console.error('[Server] Failed to send started to participant', err); }
                     }
                 });
                 // Cleanup
@@ -507,7 +511,6 @@ wss.on('connection', (ws) => {
             }
             if (fromIndex !== currentTurn) {
                 const expectedPlayer = players[currentTurn];
-                console.info(`[Turn] Rejected move from ${senderName} (idx ${fromIndex}) - expected ${expectedPlayer} (idx ${currentTurn})`);
                 try { sendPayload(ws, { type: 'error', error: 'Not your turn', expectedIndex: currentTurn, expectedPlayer }); } catch { /* ignore */ }
                 return;
             }
@@ -540,7 +543,6 @@ wss.on('connection', (ws) => {
                 }
             } catch { /* ignore buffering errors */ }
 
-            console.info(`[Turn] Accepted move from ${senderName} (idx ${fromIndex}) -> (${r},${c}). Next: ${players[nextIndex]} (idx ${nextIndex})`);
             room.participants.forEach(p => {
                 if (p.ws.readyState === 1) {
                     try { sendPayload(ws, { ...payload, seq: room.game?.moveSeq }); } catch { /* ignore */ }
@@ -593,7 +595,7 @@ wss.on('connection', (ws) => {
                 const startPayload = JSON.stringify({ type: 'started', room: meta.roomName, players, gridSize, colors: assigned });
                 room.participants.forEach(p => {
                     if (p.ws.readyState === 1) {
-                        try { p.ws.send(startPayload); } catch { /* ignore */ }
+                        try { p.ws.send(startPayload); } catch (err) { console.error('[Server] Failed to send started to participant', err); }
                     }
                 });
                 delete room._colorCollect;
@@ -763,7 +765,7 @@ function broadcastRoomList(perClientExtras) {
             }
         }
         const list = JSON.stringify({ type: 'roomlist', rooms });
-        client.send(list);
+        try { client.send(list); } catch (err) { console.error('[Server] Failed to broadcast roomlist to client', err); }
     });
 }
 
@@ -830,5 +832,3 @@ function generateRoomKey() {
     } while (roomKeys.has(key));
     return key;
 }
-
-console.log(`Server running at http://localhost:${PORT}`);

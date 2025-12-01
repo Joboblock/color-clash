@@ -601,30 +601,21 @@ wss.on('connection', (ws) => {
         } else if (msg.type === 'leave') {
             const meta = connectionMeta.get(ws);
             if (!meta) {
-                sendPayload(ws, { type: 'left' });
                 return;
             }
             const { roomName } = meta;
             const room = rooms[roomName];
             if (!room) {
                 connectionMeta.delete(ws);
-                sendPayload(ws, { type: 'left' });
                 broadcastRoomList();
                 return;
             }
             room.participants = room.participants.filter(p => p.ws !== ws);
             connectionMeta.delete(ws);
-            sendPayload(ws, { type: 'left', room: roomName });
             if (room.participants.length === 0) {
                 const oldKey = room.roomKey;
                 delete rooms[roomName];
                 if (oldKey) roomKeys.delete(oldKey);
-            } else {
-                room.participants.forEach(p => {
-                    if (p.ws.readyState === 1) {
-                        try { sendPayload(ws, { type: 'roomupdate', room: roomName, players: room.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }); } catch { /* ignore */ }
-                    }
-                });
             }
             broadcastRoomList();
         }

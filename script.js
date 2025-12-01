@@ -189,6 +189,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!window._wasInRoom && myJoinedRoom) navigateToMenu('online');
             window._wasInRoom = true;
         } else {
+            // Client is no longer in any room - clear all membership state
+            if (myJoinedRoom || myRoomKey) {
+                myJoinedRoom = null;
+                myRoomKey = null;
+                myRoomMaxPlayers = null;
+                myRoomCurrentPlayers = 0;
+                myRoomPlayers = [];
+                window.myJoinedRoom = myJoinedRoom;
+                window.myRoomMaxPlayers = myRoomMaxPlayers;
+                window.myRoomCurrentPlayers = myRoomCurrentPlayers;
+                window.myRoomPlayers = myRoomPlayers;
+                removeUrlRoomKey();
+            }
             window._wasInRoom = false;
         }
         const rlView = pageRegistry.get('online')?.components?.roomListView;
@@ -227,21 +240,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     onlineConnection.on('request_preferred_colors', () => {
         try { const color = playerColors[getStartingColorIndex()] || 'green'; onlineConnection.sendPreferredColor(color); } catch (e) { console.warn('[Online] Failed preferred_color', e); }
-    });
-    // hosted/joined are deprecated and replaced by enriched 'roomlist'
-    onlineConnection.on('left', (msg) => {
-        if (!msg.room || msg.room === myJoinedRoom) {
-            myJoinedRoom = null;
-            myRoomKey = null;
-        }
-        myRoomMaxPlayers = null; myRoomCurrentPlayers = 0; myRoomPlayers = [];
-        // Update window references
-        window.myJoinedRoom = myJoinedRoom;
-        window.myRoomMaxPlayers = myRoomMaxPlayers;
-        window.myRoomCurrentPlayers = myRoomCurrentPlayers;
-        window.myRoomPlayers = myRoomPlayers;
-        removeUrlRoomKey();
-        updateStartButtonState();
     });
     onlineConnection.on('move', (msg) => {
         try {
@@ -418,7 +416,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const doLeave = () => { onlineConnection.leave(roomName); };
         onlineConnection.ensureConnected();
         if (onlineConnection.isConnected()) doLeave(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doLeave); }
-        // Defer URL key removal until server confirms with a 'left' message.
+    // Defer URL key removal until server confirms via roomlist update.
     }
 
     // Wire Host Custom / Start Game button behavior in the online menu

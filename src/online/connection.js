@@ -23,7 +23,6 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  *  - 'started' (StartedMessage): Game start information (players, grid size, colors).
  *  - 'request_preferred_colors' (): Server asks client to provide a preferred color.
  *  - (deprecated) 'joined' (JoinedMessage): replaced by enriched 'roomlist'.
- *  - 'left' (LeftMessage): Notification that a player (possibly us) left the room.
  *  - 'move' (MoveMessage): A game move broadcast.
  *  - 'rejoined' (RejoinedMessage): State catch-up after reconnect.
  *  - 'error' (ErrorMessage): Server-side validation or protocol error.
@@ -52,7 +51,6 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  * @typedef {{type:'roomlist', rooms:Record<string, RoomListEntry>}} RawRoomListMessage
  * @typedef {{type:'started', players:string[], gridSize?:number, colors?:string[]}} StartedMessage
  * // Deprecated: JoinedMessage is no longer used; server emits enriched roomlist
- * @typedef {{type:'left', room?:string, player?:string}} LeftMessage
 // RoomUpdateMessage is obsolete; use enriched roomlist entries instead
  * @typedef {{type:'move', room?:string, row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} MoveMessage
  * @typedef {{type:'rejoined', room?:string, roomKey?:string, players?:PlayerEntry[], recentMoves?:MoveMessage[], maxPlayers?:number}} RejoinedMessage
@@ -192,7 +190,6 @@ export class OnlineConnection {
 					   this._cancelPendingPacket(`join:${msg.room}`);
 					   if (msg.roomKey) this._cancelPendingPacket(`join_by_key:${msg.roomKey}`);
 					   break;
-				   case 'left': this._emit('left', msg); break;
 				case 'move':
 					// Cancel retry timer for this move if it matches a pending packet
 					this._cancelPendingPacket(`move:${msg.fromIndex}:${msg.row}:${msg.col}`);

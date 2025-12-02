@@ -151,7 +151,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // If any room entry contains player info matching us, treat as confirmation of join/host
         let foundSelf = false;
         Object.entries(rooms || {}).forEach(([roomName, info]) => {
-            if (info && typeof info.player === 'string' && info.player === myPlayerName) {
+            // Check if this room contains our player info (matches current name or we don't have a name yet)
+            if (info && typeof info.player === 'string' && (info.player === myPlayerName || myPlayerName === null)) {
+                // Update our player name from the server (important for join_by_key where we don't know our final name)
+                myPlayerName = info.player;
                 myJoinedRoom = roomName;
                 myRoomKey = info.roomKey || null;
                 myRoomMaxPlayers = Number.isFinite(info.maxPlayers) ? info.maxPlayers : myRoomMaxPlayers;
@@ -234,6 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch { /* ignore */ }
     });
     onlineConnection.on('request_preferred_colors', () => {
+        if (!clientFullyInitialized) return;
         try { const color = playerColors[getStartingColorIndex()] || 'green'; onlineConnection.sendPreferredColor(color); } catch { /* ignore */ }
     });
     onlineConnection.on('move', (msg) => {
@@ -355,6 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // updateRoomList removed: replaced by OnlineRoomList component (roomListView.render)
 
     function hostRoom() {
+        if (!clientFullyInitialized) return;
         const name = onlinePlayerNameInput.value.trim() || 'Player';
         function sendHost() {
             try {
@@ -372,6 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Expose to onlinePage via context (used there)
     window.joinRoom = function joinRoom(roomName) {
+        if (!clientFullyInitialized) return;
         // For debug: send player name, but do not use for logic
         let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player'));
         // Check for duplicate names in the room list
@@ -402,6 +408,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Expose to onlinePage via context (used there)
     window.leaveRoom = function leaveRoom(roomName) {
+        if (!clientFullyInitialized) return;
         const doLeave = () => { onlineConnection.leave(roomName); };
         onlineConnection.ensureConnected();
         if (onlineConnection.isConnected()) doLeave(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doLeave); }
@@ -414,6 +421,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const btn = e.currentTarget;
             // If we're in Start Game mode and enabled, trigger online start (stub)
             if (btn.classList && btn.classList.contains('start-mode') && !btn.disabled) {
+                if (!clientFullyInitialized) return;
                 // Host starts the online game
                 const startPayload = { type: 'start' };
                 if (Number.isInteger(hostedDesiredGridSize)) startPayload.gridSize = hostedDesiredGridSize;
@@ -426,6 +434,9 @@ document.addEventListener('DOMContentLoaded', () => {
             navigateToMenu('host');
         });
     }
+
+    // Track client initialization state
+    let clientFullyInitialized = false;
 
     onlineConnection.connect();
 
@@ -440,16 +451,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Auto-join flow: if ?key= present and not already in a room, attempt join_by_key
-    (function attemptAutoJoinByKey() {
+    // Deferred until after page initialization
+    let pendingAutoJoinKey = null;
+    (function detectAutoJoinByKey() {
         try {
             const params = new URLSearchParams(window.location.search);
             const key = params.get('key');
             if (key && !myJoinedRoom) {
-                // Ensure WS is open then send
-                const sendJoinKey = () => { onlineConnection.joinByKey(key, (localStorage.getItem('playerName') || 'Player')); };
-                if (onlineConnection.isConnected()) sendJoinKey(); else onlineConnection.on('open', sendJoinKey);
-                // Navigate to online menu for visibility
-                navigateToMenu('online');
+                pendingAutoJoinKey = key;
             }
         } catch { /* ignore */ }
     })();
@@ -478,6 +487,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (Number.isInteger(row) && Number.isInteger(col)) {
             // In online mode, only the active player may act and only valid moves can be sent
             if (onlineGameActive) {
+                if (!clientFullyInitialized) return;
                 if (isProcessing) return; // Prevent sending moves while processing
                 if (currentPlayer !== myOnlineIndex) return;
                 if (!isValidLocalMove(row, col, myOnlineIndex)) return;
@@ -769,6 +779,19 @@ document.addEventListener('DOMContentLoaded', () => {
             menuHistoryStack
         });
     } catch { /* ignore */ }
+    
+    // Mark client as fully initialized
+    clientFullyInitialized = true;
+    
+    // Process pending auto-join if any
+    if (pendingAutoJoinKey) {
+        const key = pendingAutoJoinKey;
+        pendingAutoJoinKey = null;
+        const sendJoinKey = () => { onlineConnection.joinByKey(key, (localStorage.getItem('playerName') || 'Player')); };
+        if (onlineConnection.isConnected()) sendJoinKey(); else onlineConnection.on('open', sendJoinKey);
+        // Navigate to online menu for visibility
+        navigateToMenu('online');
+    }
     // Initial routing based on typed menu param
     const typedMenu = getMenuParam();
     if (!typedMenu && hasPlayersOrSize) {
@@ -1395,6 +1418,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Prevent keyboard activation if AI is processing or it's not the human player's turn
         if (typeof isProcessing !== 'undefined' && isProcessing) return;
         if (onlineGameActive) {
+            if (!clientFullyInitialized) return;
             if (currentPlayer !== myOnlineIndex) return;
             if (!isValidLocalMove(row, col, myOnlineIndex)) return;
             // Only act when connected; avoid local desync while offline

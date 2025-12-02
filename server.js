@@ -551,7 +551,7 @@ wss.on('connection', (ws) => {
 
             room.participants.forEach(p => {
                 if (p.ws.readyState === 1) {
-                    try { sendPayload(ws, { ...payload, seq: room.game?.moveSeq }); } catch { /* ignore */ }
+                    try { sendPayload(p.ws, { ...payload, seq: room.game?.moveSeq }); } catch { /* ignore */ }
                 }
             });
             room.game.turnIndex = nextIndex;
@@ -668,7 +668,7 @@ wss.on('connection', (ws) => {
                     } else {
                         rr.participants.forEach(p => {
                             if (p.ws.readyState === 1) {
-                                try { sendPayload(ws, { type: 'roomupdate', room: roomName, players: rr.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }); } catch { /* ignore */ }
+                                sendPayload(p.ws, { type: 'roomupdate', room: roomName, players: rr.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
                             }
                         });
                     }
@@ -683,7 +683,7 @@ wss.on('connection', (ws) => {
         if (rooms[roomName]) {
             rooms[roomName].participants.forEach(p => {
                 if (p.ws.readyState === 1) {
-                    try { sendPayload(ws, { type: 'roomupdate', room: roomName, players: rooms[roomName].participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) }); } catch { /* ignore */ }
+                    sendPayload(p.ws, { type: 'roomupdate', room: roomName, players: rooms[roomName].participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
                 }
             });
         }
@@ -762,12 +762,19 @@ function broadcastRoomList(perClientExtras) {
     wss.clients.forEach(client => {
         if (client.readyState !== 1) return;
         let rooms = baseRooms;
+        // Check if this client is in any room via connectionMeta
+        const meta = connectionMeta.get(client);
+        if (meta && meta.roomName && baseRooms[meta.roomName]) {
+            // Clone rooms and enrich with client's player info
+            rooms = { ...baseRooms };
+            rooms[meta.roomName] = { ...baseRooms[meta.roomName], player: meta.name };
+        }
         // If this client has extra info (e.g. host/join confirmation), merge it into their room entry
         if (perClientExtras && perClientExtras.has(client)) {
             const extras = perClientExtras.get(client);
             if (extras && extras.room && baseRooms[extras.room]) {
-                rooms = { ...baseRooms };
-                rooms[extras.room] = { ...baseRooms[extras.room], ...extras };
+                if (rooms === baseRooms) rooms = { ...baseRooms };
+                rooms[extras.room] = { ...rooms[extras.room], ...extras };
             }
         }
         const list = JSON.stringify({ type: 'roomlist', rooms });

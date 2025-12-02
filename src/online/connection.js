@@ -80,6 +80,8 @@ export class OnlineConnection {
 		this._pendingPackets = new Map();
 		// Track if this client initiated a start request (is host)
 		this._initiatedStart = false;
+		// Track if we're waiting for a join_by_key response to avoid redundant roomlist requests
+		this._pendingJoinByKey = false;
 	}
 
 	/** @private */
@@ -159,44 +161,55 @@ export class OnlineConnection {
 			this._backoffMs = this._initialBackoffMs;
 			if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
 			this._emit('open');
-			this.requestRoomList();
+			// Only request room list if we're not waiting for a join_by_key response
+			if (!this._pendingJoinByKey) {
+				this.requestRoomList();
+			}
 		};
 		ws.onmessage = (evt) => {
 			let msg; try { msg = JSON.parse(evt.data); } catch { return; }
 			const type = msg.type;
+			
+			// Log received packet with additional info for roomlist
+			if (type === 'roomlist') {
+				const rooms = msg.rooms || {};
+				let inRoom = null;
+				for (const [roomName, info] of Object.entries(rooms)) {
+					if (info && info.player) {
+						inRoom = roomName;
+						break;
+					}
+				}
+				console.log('[Client] ⬇️ Received:', type, inRoom ? `(in room: ${inRoom})` : '(not in any room)', msg);
+			} else {
+				console.log('[Client] ⬇️ Received:', type, msg);
+			}
+			
+			// Automatically cancel pending packets based on expectedResponseType
+			this._autoCancelPendingPackets(type, msg);
+			
 			switch (type) {
 				// 'hosted' no longer used; ignore if received
-				   case 'hosted':
-					   this._cancelPendingPacket('host');
-					   break;
+				case 'hosted':
+					break;
 				case 'roomlist':
-					this._cancelPendingPacket('list');
 					this._emit('roomlist', msg.rooms || {});
 					break;
 				case 'started':
-					this._cancelPendingPacket('start');
 					this._cancelPendingPacket('start_timeout');
-					this._cancelPendingPacket('preferred_color');
 					this._emit('started', msg);
 					break;
 				case 'request_preferred_colors':
-					// For host: this confirms server received start request
-					this._cancelPendingPacket('start');
 					// Now wait for 'started' - if it doesn't come, a color packet was lost
 					this._scheduleStartTimeout();
 					this._emit('request_preferred_colors');
 					break;
-				   case 'joined':
-					   this._cancelPendingPacket(`join:${msg.room}`);
-					   if (msg.roomKey) this._cancelPendingPacket(`join_by_key:${msg.roomKey}`);
-					   break;
+				case 'joined':
+					break;
 				case 'move':
-					// Cancel retry timer for this move if it matches a pending packet
-					this._cancelPendingPacket(`move:${msg.fromIndex}:${msg.row}:${msg.col}`);
 					this._emit('move', msg);
 					break;
 				case 'rejoined':
-					this._cancelPendingPacket(`reconnect:${msg.room}`);
 					this._emit('rejoined', msg);
 					break;
 				case 'error': {
@@ -209,6 +222,8 @@ export class OnlineConnection {
 								this._cancelPendingPacket(key);
 							}
 						}
+						// Clear the pending join_by_key flag since the attempt failed
+						this._pendingJoinByKey = false;
 					}
 					this._emit('error', msg);
 					break;
@@ -281,6 +296,9 @@ export class OnlineConnection {
 			this.ensureConnected();
 			if (this._ws && this._ws.readyState === WebSocket.OPEN) {
 				try {
+					// Log sent packet
+					const type = obj && typeof obj === 'object' ? obj.type : undefined;
+					console.log('[Client] ⬆️ Sending:', type, obj);
 					this._ws.send(JSON.stringify(obj));
 				} catch (err) {
 					const t = obj && typeof obj === 'object' ? obj.type : undefined;
@@ -316,6 +334,8 @@ export class OnlineConnection {
 	 * @param {string} debugName Client name
 	 */
 	joinByKey(roomKey, debugName) {
+		// Mark that we're waiting for a join_by_key response to avoid redundant roomlist request
+		this._pendingJoinByKey = true;
 		const packet = { type: 'join_by_key', roomKey, debugName };
 		this._sendWithRetry(`join_by_key:${roomKey}`, packet, 'roomlist');
 	}
@@ -438,6 +458,84 @@ export class OnlineConnection {
 		pending.retryTimer = setTimeout(() => {
 			this._retryPacket(packetKey);
 		}, nextBackoff);
+	}
+
+	/**
+	 * Automatically cancel pending packets based on received message type and content.
+	 * @private
+	 * @param {string} msgType - The type of message received
+	 * @param {object} msg - The full message object
+	 */
+	_autoCancelPendingPackets(msgType, msg) {
+		for (const [packetKey, pending] of this._pendingPackets.entries()) {
+			// Skip packets without expected response type
+			if (!pending.expectedResponseType) continue;
+			
+			// Check if message type matches expected response
+			if (pending.expectedResponseType !== msgType) continue;
+			
+			// Type matches - now check if content conditions are met
+			let shouldCancel = false;
+			
+			switch (pending.expectedResponseType) {
+				case 'roomlist': {
+					// For join_by_key packets, verify we actually joined a room
+					if (packetKey.startsWith('join_by_key:')) {
+						const rooms = msg.rooms || {};
+						// Check if any room contains our player info
+						for (const info of Object.values(rooms)) {
+							if (info && info.player) {
+								shouldCancel = true;
+								// Clear the pending join_by_key flag
+								this._pendingJoinByKey = false;
+								break;
+							}
+						}
+					} else {
+						// For other roomlist requests (like 'list'), always cancel
+						shouldCancel = true;
+					}
+					break;
+				}
+				case 'move': {
+					// For move packets, verify it's the same move
+					if (packetKey.startsWith('move:')) {
+						const parts = packetKey.split(':');
+						if (parts.length === 4) {
+							const [, fromIndex, row, col] = parts;
+							if (String(msg.fromIndex) === fromIndex && 
+								String(msg.row) === row && 
+								String(msg.col) === col) {
+								shouldCancel = true;
+							}
+						}
+					}
+					break;
+				}
+				case 'rejoined': {
+					// For reconnect packets, verify it's the same room
+					if (packetKey.startsWith('reconnect:')) {
+						const roomName = packetKey.substring('reconnect:'.length);
+						if (msg.room === roomName) {
+							shouldCancel = true;
+						}
+					}
+					break;
+				}
+				case 'request_preferred_colors':
+				case 'started':
+					// These responses always confirm their corresponding requests
+					shouldCancel = true;
+					break;
+				default:
+					// Unknown response type - cancel to be safe
+					shouldCancel = true;
+			}
+			
+			if (shouldCancel) {
+				this._cancelPendingPacket(packetKey);
+			}
+		}
 	}
 
 	/**

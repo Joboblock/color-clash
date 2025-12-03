@@ -584,16 +584,6 @@ wss.on('connection', (ws) => {
                     } catch { /* ignore */ }
                     return;
                 } else if (msg.seq > expectedSeq) {
-                    // Client is ahead - should not happen
-                    try { 
-                        sendPayload(ws, { 
-                            type: 'error', 
-                            error: 'Sequence mismatch', 
-                            expectedSeq, 
-                            receivedSeq: msg.seq,
-                            currentSeq
-                        }); 
-                    } catch { /* ignore */ }
                     return;
                 }
                 // msg.seq === expectedSeq - proceed to check for pending moves or new move
@@ -621,9 +611,8 @@ wss.on('connection', (ws) => {
 
             // Now validate turn (only for NEW moves, not retries)
             if (fromIndex !== currentTurn) {
-                const expectedPlayer = players[currentTurn];
-                try { sendPayload(ws, { type: 'error', error: 'Not your turn', expectedIndex: currentTurn, expectedPlayer }); } catch { /* ignore */ }
-                return;
+                // Silenced - handled correctly by client retry logic
+               return;
             }
 
             // Accept move: compute next turn and prepare for broadcast

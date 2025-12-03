@@ -77,6 +77,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const hostCustomGameBtnRef = document.getElementById('hostCustomGameBtn');
     // Track last applied server move sequence to avoid duplicates
     let lastAppliedSeq = 0;
+    // Track if we're waiting for an echo after sending our own move
+    let pendingEchoSeq = null;
+console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
 
     // Connection banner helpers stay in UI layer; OnlineConnection just emits events.
 
@@ -207,11 +210,14 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStartButtonState(rooms);
     });
     onlineConnection.on('started', (msg) => {
+    console.log('[Started] Reset lastAppliedSeq and pendingEchoSeq to 0/null');
         try {
             lastAppliedSeq = 0;
+            pendingEchoSeq = null;
             onlineGameActive = true;
             onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
             myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
+            console.log(`[Started] myPlayerName="${myPlayerName}", onlinePlayers=`, onlinePlayers, `myOnlineIndex=${myOnlineIndex}`);
             const p = Math.max(2, Math.min(playerColors.length, onlinePlayers.length || 2));
             const s = Number.isInteger(msg.gridSize) ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10))) : recommendedGridSize(p);
             if (msg.colors && Array.isArray(msg.colors) && msg.colors.length >= p) {
@@ -240,28 +246,131 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!clientFullyInitialized) return;
         try { const color = playerColors[getStartingColorIndex()] || 'green'; onlineConnection.sendPreferredColor(color); } catch { /* ignore */ }
     });
+    // Ordered move buffer: store out-of-order or deferred moves by sequence
+    const pendingMoves = new Map(); // seq -> { r, c, fromIdx }
+    function tryApplyBufferedMoves() {
+        // Apply any contiguous moves starting from lastAppliedSeq + 1
+        let appliedCount = 0;
+        while (onlineGameActive) {
+            const nextSeq = (Number(lastAppliedSeq) || 0) + 1;
+            const m = pendingMoves.get(nextSeq);
+            if (!m) break;
+            // Apply this buffered move
+            const { r, c, fromIdx } = m;
+            console.log(`[Buffer] Draining seq ${nextSeq} from player ${fromIdx} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
+            currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
+            const applied = handleClick(r, c);
+            console.log(`[Buffer] handleClick returned ${applied} for seq=${nextSeq}`);
+            if (applied) {
+                lastAppliedSeq = nextSeq;
+                console.log(`[Buffer] Updated lastAppliedSeq to ${lastAppliedSeq}`);
+                pendingMoves.delete(nextSeq);
+                appliedCount++;
+            } else {
+                console.warn(`[Buffer] Failed to apply seq ${nextSeq}, stopping drain (myOnlineIndex=${myOnlineIndex})`);
+                break;
+            }
+        }
+        if (appliedCount > 0) {
+            console.log(`[Buffer] Drained ${appliedCount} buffered move(s). Remaining: ${pendingMoves.size} (myOnlineIndex=${myOnlineIndex})`);
+        }
+    }
+
     onlineConnection.on('move', (msg) => {
         try {
-            if (!onlineGameActive) return;
-            if (msg.room && msg.room !== myJoinedRoom) return;
+            console.log(`[Move Handler] Received move:`, msg, `onlineGameActive=${onlineGameActive}, myJoinedRoom=${myJoinedRoom}, lastAppliedSeq=${lastAppliedSeq}, myOnlineIndex=${myOnlineIndex}`);
+            if (!onlineGameActive) {
+                console.warn(`[Move Handler] Game not active, ignoring move (myOnlineIndex=${myOnlineIndex})`);
+                return;
+            }
+            if (msg.room && msg.room !== myJoinedRoom) {
+                console.warn(`[Move Handler] Wrong room: received ${msg.room}, in ${myJoinedRoom} (myOnlineIndex=${myOnlineIndex})`);
+                return;
+            }
             const seq = Number(msg.seq);
-            if (Number.isInteger(seq) && seq <= lastAppliedSeq) return;
             const r = Number(msg.row), c = Number(msg.col); const fromIdx = Number(msg.fromIndex);
-            if (!Number.isInteger(r) || !Number.isInteger(c)) return;
-            if (fromIdx === myOnlineIndex) { if (Number.isInteger(seq)) lastAppliedSeq = Math.max(lastAppliedSeq, seq); return; }
-            if (Number.isInteger(seq)) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
-            const applyNow = () => { currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx)); handleClick(r, c); };
-            if (isProcessing) {
-                const startTs = Date.now();
-                const tryApply = () => {
-                    if (!onlineGameActive) return;
-                    if (!isProcessing) { applyNow(); return; }
-                    if (Date.now() - startTs > 4000) { return; }
-                    setTimeout(tryApply, 100);
+            if (!Number.isInteger(r) || !Number.isInteger(c)) {
+                console.warn(`[Move Handler] Invalid coordinates (myOnlineIndex=${myOnlineIndex})`);
+                return;
+            }
+
+            // Send acknowledgment to server (for both own moves echo and other players' moves)
+            if (Number.isInteger(seq)) {
+                onlineConnection.sendMoveAck(seq);
+            }
+
+            // If this is my own echo, verify sequence matches what we sent
+            if (fromIdx === myOnlineIndex) {
+                if (Number.isInteger(seq)) {
+                    console.log(`[Move Echo] Received echo for seq=${seq}, current lastAppliedSeq=${lastAppliedSeq}, pendingEchoSeq=${pendingEchoSeq}, myOnlineIndex=${myOnlineIndex}`);
+                    if (seq === lastAppliedSeq) {
+                        console.log(`[Move Echo] Seq ${seq} confirmed (own move, myOnlineIndex=${myOnlineIndex})`);
+                        pendingEchoSeq = null; // Clear pending echo
+                        // Echo confirms our local apply; try drain any buffered moves
+                        tryApplyBufferedMoves();
+                    } else if (seq < lastAppliedSeq) {
+                        console.warn(`[Move Echo] Old echo seq ${seq}, already at ${lastAppliedSeq}. Ignoring. (myOnlineIndex=${myOnlineIndex})`);
+                    } else {
+                        // seq > lastAppliedSeq - should not happen in normal flow
+                        console.warn(`[Move Echo] Future echo seq ${seq}, currently at ${lastAppliedSeq}. Server ahead? (myOnlineIndex=${myOnlineIndex})`);
+                    }
+                }
+                return;
+            }
+
+            // For other players' moves: only apply when in-order; otherwise store
+            if (!Number.isInteger(seq)) {
+                console.warn(`[Move] Received move without sequence number. Ignoring. (myOnlineIndex=${myOnlineIndex})`);
+                return;
+            }
+            
+            // Handle implicit echo confirmation: if we sent a move but haven't received our echo,
+            // and we receive the opponent's next move, treat it as if our echo arrived
+            if (pendingEchoSeq !== null && seq === pendingEchoSeq + 1) {
+                console.log(`[Implicit Echo] Received opponent move seq=${seq} while waiting for echo seq=${pendingEchoSeq}. Confirming our move implicitly. (myOnlineIndex=${myOnlineIndex})`);
+                // Our move was accepted by the server (otherwise opponent couldn't have moved next)
+                // No need to apply locally again - we already did that when we sent it
+                pendingEchoSeq = null;
+                // Now proceed to apply the opponent's move normally
+            }
+            
+            const expectedNext = (Number(lastAppliedSeq) || 0) + 1;
+            if (seq === expectedNext) {
+                // Apply immediately, or buffer if UI is currently processing
+                const doApply = () => {
+                    console.log(`[Move] Applying seq ${seq} from player ${fromIdx} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
+                    currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
+                    const applied = handleClick(r, c);
+                    console.log(`[Move] handleClick returned ${applied} for seq=${seq}`);
+                    if (applied) {
+                        lastAppliedSeq = seq;
+                        console.log(`[Move] Updated lastAppliedSeq to ${lastAppliedSeq}`);
+                        // After applying, try to drain any subsequent buffered moves in order
+                        tryApplyBufferedMoves();
+                    } else {
+                        console.warn(`[Move] Failed to apply seq ${seq}, buffering to retry after processing (myOnlineIndex=${myOnlineIndex})`);
+                        // Buffer the move to retry after current processing completes
+                        pendingMoves.set(seq, { r, c, fromIdx });
+                    }
                 };
-                tryApply();
-            } else { applyNow(); }
-        } catch { /* ignore */ }
+                if (isProcessing) {
+                    console.log(`[Move] Seq ${seq} is next but UI processing. Buffering. (myOnlineIndex=${myOnlineIndex})`);
+                    // Buffer this exact-next move and it will be applied when processing finishes
+                    pendingMoves.set(seq, { r, c, fromIdx });
+                    // No timeout: deterministic ordered application
+                } else {
+                    doApply();
+                }
+            } else if (seq > expectedNext) {
+                console.warn(`[Move] Future move seq ${seq}, expected ${expectedNext}. Buffering. (pending: ${Array.from(pendingMoves.keys()).sort((a,b)=>a-b).join(', ')}) (myOnlineIndex=${myOnlineIndex})`);
+                // Future move: store and wait for earlier moves
+                pendingMoves.set(seq, { r, c, fromIdx });
+            } else {
+                console.warn(`[Move] Old move seq ${seq}, expected ${expectedNext}, lastApplied ${lastAppliedSeq}. Ignoring. (myOnlineIndex=${myOnlineIndex})`);
+            } // seq <= lastAppliedSeq already handled implicitly by expectedNext logic
+        } catch (err) { 
+            console.error('[Move] Error handling move:', err);
+        }
     });
     onlineConnection.on('rejoined', (msg) => {
         myJoinedRoom = msg.room || myJoinedRoom;
@@ -269,6 +378,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (msg.roomKey) updateUrlRoomKey(msg.roomKey);
         if (Array.isArray(msg.players)) { myRoomPlayers = msg.players; myRoomCurrentPlayers = msg.players.length; }
         myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
+        // Clear pending echo on rejoin - we'll get the full state from server
+        pendingEchoSeq = null;
         try {
             const missed = Array.isArray(msg.recentMoves) ? msg.recentMoves.slice() : [];
             if (missed.length) {
@@ -278,7 +389,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     const m = missed[idx]; const r = Number(m.row), c = Number(m.col), fromIdx = Number(m.fromIndex); const seq = Number(m.seq);
                     if (Number.isInteger(seq) && seq <= lastAppliedSeq) { idx++; applyNext(); return; }
                     if (!Number.isInteger(r) || !Number.isInteger(c) || !Number.isInteger(fromIdx)) { idx++; applyNext(); return; }
-                    const doApply = () => { if (!onlineGameActive) { idx++; applyNext(); return; } currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx)); handleClick(r, c); if (Number.isInteger(seq)) lastAppliedSeq = Math.max(lastAppliedSeq, seq); idx++; setTimeout(applyNext, 0); };
+                    const doApply = () => { 
+                        if (!onlineGameActive) { idx++; applyNext(); return; } 
+                        currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx)); 
+                        const applied = handleClick(r, c); 
+                        console.log(`[Rejoined] handleClick returned ${applied} for seq=${seq}, lastAppliedSeq before=${lastAppliedSeq}`);
+                        if (applied && Number.isInteger(seq)) {
+                            lastAppliedSeq = Math.max(lastAppliedSeq, seq);
+                            console.log(`[Rejoined] Updated lastAppliedSeq to ${lastAppliedSeq}`);
+                        }
+                        idx++; 
+                        setTimeout(applyNext, 0); 
+                    };
                     if (isProcessing) { setTimeout(applyNext, 100); } else { doApply(); }
                 }; applyNext();
             }
@@ -497,9 +619,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     onlineConnection.ensureConnected();
                     return;
                 }
-                // Send move to server and rely on echo for other clients; apply locally for responsiveness
-                onlineConnection.sendMove({ row, col, fromIndex: myOnlineIndex, nextIndex: (myOnlineIndex + 1) % playerCount, color: activeColors()[myOnlineIndex] });
-                handleClick(row, col);
+                // Apply move locally first
+                const moveApplied = handleClick(row, col);
+                console.log(`[Local Move] handleClick returned ${moveApplied}, lastAppliedSeq before increment: ${lastAppliedSeq}`);
+                if (moveApplied) {
+                    lastAppliedSeq++;
+                    pendingEchoSeq = lastAppliedSeq;
+                    console.log(`[Local Move] Applied and incremented seq to ${lastAppliedSeq}, waiting for echo (myOnlineIndex=${myOnlineIndex})`);
+                    onlineConnection.sendMove({ row, col, fromIndex: myOnlineIndex, nextIndex: (myOnlineIndex + 1) % playerCount, color: activeColors()[myOnlineIndex], seq: lastAppliedSeq });
+                }
                 return;
             }
             // Local / Practice mode: proceed as usual
@@ -1527,7 +1655,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void}
      */
     function handleClick(row, col) {
-        if (isProcessing || gameWon) return;
+        if (isProcessing || gameWon) return false;
 
         const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
         // Save last focused cell for current player
@@ -1535,7 +1663,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const cellColor = getPlayerColor(row, col);
 
         if (!initialPlacements[currentPlayer]) {
-            if (isInitialPlacementInvalid(row, col)) return;
+            if (isInitialPlacementInvalid(row, col)) return false;
 
             if (grid[row][col].value === 0) {
                 grid[row][col].value = initialPlacementValue;
@@ -1551,7 +1679,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     processExplosions();
                     initialPlacements[currentPlayer] = true;
                 }, delayExplosion);
-                return;
+                return true;
             }
 
         } else {
@@ -1565,8 +1693,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     switchPlayer();
                 }
+                return true;
             }
         }
+        return false;
     }
 
     /**

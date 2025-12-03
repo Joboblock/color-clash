@@ -129,10 +129,11 @@ const GRACE_MS = 300000; // 5 min grace window
  * @param {object} payload - The payload object to send (will be JSON-stringified).
  */
 function sendPayload(ws, payload) {
-    // Simulate 50% packet loss for debugging network reliability
-    /*if (Math.random() < 0.5) {
+    // Debug: Simulate 25% packet loss
+    if (Math.random() < 0.25) {
+        console.warn('[Server] 🔥 SIMULATED PACKET LOSS:', ws, payload);
         return;
-    }*/
+    }
     try {
         ws.send(JSON.stringify(payload));
     } catch (err) {
@@ -515,18 +516,123 @@ wss.on('connection', (ws) => {
                 try { sendPayload(ws, { type: 'error', error: 'Unknown player' }); } catch { /* ignore */ }
                 return;
             }
+
+            // IMPLICIT ACKNOWLEDGMENT: If this client is sending a move with seq N,
+            // they must have received all moves up to seq N-1.
+            // This MUST run BEFORE sequence validation to commit pending moves first.
+            if (room.game._moveAcks && Number.isInteger(msg.seq)) {
+                const clientSeq = msg.seq;
+                // Acknowledge all pending moves with seq < clientSeq
+                for (const [ackKey, ackData] of room.game._moveAcks.entries()) {
+                    const pendingSeq = parseInt(ackKey.replace('move_', ''));
+                    // Only implicitly ack if:
+                    // 1. This client is expected to ack (they're a receiver, not the sender)
+                    // 2. The pending move seq is less than the current move seq
+                    if (pendingSeq < clientSeq && ackData.expectedAcks.has(ws) && ackData.senderWs !== ws) {
+                        // This client should have received this move, implicitly acknowledge it
+                        ackData.receivedAcks.add(ws);
+                        
+                        // Check if all clients have now acknowledged
+                        const allAcked = [...ackData.expectedAcks].every(expectedWs => ackData.receivedAcks.has(expectedWs));
+                        if (allAcked) {
+                            // All clients acknowledged - commit the move, send echo to sender
+                            clearTimeout(ackData.timeout);
+                            ackData.commitMove();
+                            try { sendPayload(ackData.senderWs, ackData.payload); } catch { /* ignore */ }
+                            room.game._moveAcks.delete(ackKey);
+                        }
+                    }
+                }
+            }
+
+            // Validate sequence number BEFORE turn validation (to handle retries of already-committed/pending moves)
+            if (Number.isInteger(msg.seq)) {
+                const currentSeq = room.game.moveSeq || 0;
+                const expectedSeq = currentSeq + 1;
+                
+                if (msg.seq < expectedSeq) {
+                    // Client is retrying an already-committed move (echo was lost)
+                    // Check if we have this move in recent moves buffer
+                    const recentMove = (room.game.recentMoves || []).find(m => 
+                        m.seq === msg.seq && m.row === r && m.col === c && m.fromIndex === fromIndex
+                    );
+                    
+                    if (recentMove) {
+                        // Resend the echo to this client
+                        const echoPayload = {
+                            type: 'move',
+                            room: meta.roomName,
+                            row: recentMove.row,
+                            col: recentMove.col,
+                            fromIndex: recentMove.fromIndex,
+                            nextIndex: recentMove.nextIndex,
+                            color: recentMove.color,
+                            seq: recentMove.seq
+                        };
+                        try { sendPayload(ws, echoPayload); } catch { /* ignore */ }
+                        return;
+                    }
+                    // Move not in buffer - likely too old, send error
+                    try { 
+                        sendPayload(ws, { 
+                            type: 'error', 
+                            error: 'Sequence too old', 
+                            expectedSeq, 
+                            receivedSeq: msg.seq,
+                            currentSeq
+                        }); 
+                    } catch { /* ignore */ }
+                    return;
+                } else if (msg.seq > expectedSeq) {
+                    // Client is ahead - should not happen
+                    try { 
+                        sendPayload(ws, { 
+                            type: 'error', 
+                            error: 'Sequence mismatch', 
+                            expectedSeq, 
+                            receivedSeq: msg.seq,
+                            currentSeq
+                        }); 
+                    } catch { /* ignore */ }
+                    return;
+                }
+                // msg.seq === expectedSeq - proceed to check for pending moves or new move
+            }
+
+            // Check if this move is already pending acknowledgment (client is retrying)
+            const newMoveSeq = (room.game.moveSeq || 0) + 1;
+            const pendingAckKey = `move_${newMoveSeq}`;
+            if (room.game._moveAcks && room.game._moveAcks.has(pendingAckKey)) {
+                const pendingAck = room.game._moveAcks.get(pendingAckKey);
+                // Verify it's the same move from the same sender
+                if (pendingAck.senderWs === ws) {
+                    // This is a retry of a pending move - resend to clients that haven't acked yet
+                    const otherParticipants = room.participants.filter(p => p.ws !== ws && p.connected);
+                    otherParticipants.forEach(p => {
+                        // Only resend to clients that haven't acknowledged
+                        if (!pendingAck.receivedAcks.has(p.ws) && p.ws.readyState === 1) {
+                            try { sendPayload(p.ws, pendingAck.payload); } catch { /* ignore */ }
+                        }
+                    });
+                    // Don't process this as a new move
+                    return;
+                }
+            }
+
+            // Now validate turn (only for NEW moves, not retries)
             if (fromIndex !== currentTurn) {
                 const expectedPlayer = players[currentTurn];
                 try { sendPayload(ws, { type: 'error', error: 'Not your turn', expectedIndex: currentTurn, expectedPlayer }); } catch { /* ignore */ }
                 return;
             }
 
-            // Accept move: compute next turn and broadcast
+            // Accept move: compute next turn and prepare for broadcast
             const nextIndex = (fromIndex + 1) % Math.max(1, players.length);
             // Derive the authoritative color for this player, if available
             const assignedColor = (room.game && Array.isArray(room.game.colors))
                 ? room.game.colors[fromIndex]
                 : (typeof msg.color === 'string' ? msg.color : undefined);
+            
             const payload = {
                 type: 'move',
                 room: meta.roomName,
@@ -535,26 +641,81 @@ wss.on('connection', (ws) => {
                 fromIndex,
                 nextIndex,
                 color: assignedColor,
+                seq: newMoveSeq
             };
 
-            // Sequence and buffer this move for catch-up on reconnect
-            try {
-                if (room.game) {
-                    room.game.moveSeq = (room.game.moveSeq || 0) + 1;
-                    const moveRecord = { seq: room.game.moveSeq, room: meta.roomName, row: r, col: c, fromIndex, nextIndex, color: assignedColor };
+            // Get all other participants (not the sender)
+            const otherParticipants = room.participants.filter(p => p.ws !== ws && p.connected);
+            
+            // Function to commit the move (increment sequence and update turn)
+            const commitMove = () => {
+                // Now commit the sequence increment and buffer the move
+                room.game.moveSeq = newMoveSeq;
+                room.game.turnIndex = nextIndex;
+                
+                // Buffer for reconnect catch-up
+                try {
+                    const moveRecord = { seq: newMoveSeq, room: meta.roomName, row: r, col: c, fromIndex, nextIndex, color: assignedColor };
                     if (!Array.isArray(room.game.recentMoves)) room.game.recentMoves = [];
-                    const bufferSize = Math.max(1, (Array.isArray(room.game.players) ? room.game.players.length : 2) - 1);
+                    const bufferSize = Math.max(1, (Array.isArray(room.game.players) ? room.game.players.length : 2));
                     room.game.recentMoves.push(moveRecord);
                     if (room.game.recentMoves.length > bufferSize) room.game.recentMoves.shift();
-                }
-            } catch { /* ignore buffering errors */ }
+                } catch { /* ignore buffering errors */ }
+            };
+            
+            // If there are no other participants, immediately confirm to sender
+            if (otherParticipants.length === 0) {
+                commitMove();
+                try { sendPayload(ws, payload); } catch { /* ignore */ }
+            } else {
+                // Initialize move acknowledgment tracking
+                if (!room.game._moveAcks) room.game._moveAcks = new Map();
+                
+                const ackKey = `move_${newMoveSeq}`;
+                const ackData = {
+                    senderWs: ws,
+                    payload,
+                    commitMove, // Pass the commit function
+                    expectedAcks: new Set(otherParticipants.map(p => p.ws)), // Track by WebSocket, not name
+                    receivedAcks: new Set()
+                    // No timeout: wait indefinitely for all acks
+                };
+                room.game._moveAcks.set(ackKey, ackData);
 
-            room.participants.forEach(p => {
-                if (p.ws.readyState === 1) {
-                    try { sendPayload(p.ws, { ...payload, seq: room.game?.moveSeq }); } catch { /* ignore */ }
-                }
-            });
-            room.game.turnIndex = nextIndex;
+                // Broadcast move to all OTHER participants (not the sender)
+                otherParticipants.forEach(p => {
+                    if (p.ws.readyState === 1) {
+                        try { sendPayload(p.ws, payload); } catch { /* ignore */ }
+                    }
+                });
+            }
+        } else if (msg.type === 'move_ack') {
+            // Client acknowledged receipt of a move
+            const meta = connectionMeta.get(ws);
+            if (!meta || !meta.roomName) return;
+            const room = rooms[meta.roomName];
+            if (!room || !room.game || !room.game._moveAcks) return;
+            
+            const moveSeq = Number(msg.seq);
+            if (!Number.isInteger(moveSeq)) return;
+            
+            const ackKey = `move_${moveSeq}`;
+            const ackData = room.game._moveAcks.get(ackKey);
+            if (!ackData) return; // No pending acknowledgment for this move
+            
+            // Record this client's acknowledgment by WebSocket, not name
+            ackData.receivedAcks.add(ws);
+            
+            // Check if all expected clients have acknowledged
+            const allAcked = [...ackData.expectedAcks].every(expectedWs => ackData.receivedAcks.has(expectedWs));
+            
+            if (allAcked) {
+                // All clients acknowledged - commit the move, send echo to sender
+                            // No timeout to clear
+                ackData.commitMove(); // Commit sequence and turn
+                try { sendPayload(ackData.senderWs, ackData.payload); } catch { /* ignore */ }
+                room.game._moveAcks.delete(ackKey);
+            }
         } else if (msg.type === 'preferred_color') {
             // A client responded with their current preferred color (from cycler)
             const meta = connectionMeta.get(ws);

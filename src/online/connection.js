@@ -206,9 +206,33 @@ export class OnlineConnection {
 					break;
 				case 'joined':
 					break;
-				case 'move':
+				case 'move': {
+					// Cancel pending move retries when we receive any move
+					// This includes our own echo (confirmation) or other players' moves
+					const moveSeq = Number(msg.seq);
+					if (Number.isInteger(moveSeq)) {
+						// Cancel all pending move packets with seq <= received seq
+						// (our move was accepted if we see any move at or beyond our sequence)
+						for (const key of this._pendingPackets.keys()) {
+							if (key.startsWith('move:')) {
+								// Extract the fromIndex from the pending packet to match
+								const pending = this._pendingPackets.get(key);
+								if (pending && pending.packet && Number.isInteger(pending.packet.seq)) {
+									const pendingSeq = pending.packet.seq;
+									// Cancel if the received move's sequence is >= our pending move's sequence
+									// This means either:
+									// 1. This is our echo (same seq), or
+									// 2. Game has progressed beyond our move (higher seq)
+									if (moveSeq >= pendingSeq) {
+										this._cancelPendingPacket(key);
+									}
+								}
+							}
+						}
+					}
 					this._emit('move', msg);
 					break;
+				}
 				case 'rejoined':
 					this._emit('rejoined', msg);
 					break;
@@ -225,6 +249,22 @@ export class OnlineConnection {
 						// Clear the pending join_by_key flag since the attempt failed
 						this._pendingJoinByKey = false;
 					}
+					
+					// Cancel move retries if sequence is too old (game has progressed)
+					if (errStr.includes('Sequence too old') && Number.isInteger(msg.receivedSeq)) {
+						// Cancel all pending move packets with seq <= the rejected sequence
+						for (const key of this._pendingPackets.keys()) {
+							if (key.startsWith('move:')) {
+								const pending = this._pendingPackets.get(key);
+								if (pending && pending.packet && Number.isInteger(pending.packet.seq)) {
+									if (pending.packet.seq <= msg.receivedSeq) {
+										this._cancelPendingPacket(key);
+									}
+								}
+							}
+						}
+					}
+					
 					this._emit('error', msg);
 					break;
 				}
@@ -288,10 +328,6 @@ export class OnlineConnection {
 	 * @param {object} obj Serializable object payload.
 	 */
 	_sendPayload(obj) {
-		// Debug: 50% chance to drop any outgoing packet
-		/*if (Math.random() < 0.5) {
-			return;
-		}*/
 		try {
 			this.ensureConnected();
 			if (this._ws && this._ws.readyState === WebSocket.OPEN) {
@@ -299,6 +335,13 @@ export class OnlineConnection {
 					// Log sent packet
 					const type = obj && typeof obj === 'object' ? obj.type : undefined;
 					console.log('[Client] ⬆️ Sending:', type, obj);
+					
+					// Debug: Simulate 25% packet loss
+					if (Math.random() < 0.25) {
+						console.warn('[Client] 🔥 SIMULATED PACKET LOSS:', type, obj);
+						return;
+					}
+					
 					this._ws.send(JSON.stringify(obj));
 				} catch (err) {
 					const t = obj && typeof obj === 'object' ? obj.type : undefined;
@@ -365,12 +408,21 @@ export class OnlineConnection {
 	}
 
 	/** Broadcast a move.
-	 * @param {{row:number, col:number, fromIndex:number, nextIndex:number, color:string}} move
+	 * @param {{row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} move
 	 */
-	sendMove({ row, col, fromIndex, nextIndex, color }) {
+	sendMove({ row, col, fromIndex, nextIndex, color, seq }) {
 		const moveKey = `move:${fromIndex}:${row}:${col}`;
 		const packet = { type: 'move', row, col, fromIndex, nextIndex, color };
+		if (Number.isInteger(seq)) packet.seq = seq;
 		this._sendWithRetry(moveKey, packet, 'move');
+	}
+
+	/** Send acknowledgment for received move.
+	 * @param {number} seq - The sequence number of the move being acknowledged
+	 */
+	sendMoveAck(seq) {
+		if (!Number.isInteger(seq)) return;
+		this._sendPayload({ type: 'move_ack', seq });
 	}
 
 	/**

@@ -23,7 +23,8 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  *  - 'started' (StartedMessage): Game start information (players, grid size, colors).
  *  - 'request_preferred_colors' (): Server asks client to provide a preferred color.
  *  - (deprecated) 'joined' (JoinedMessage): replaced by enriched 'roomlist'.
- *  - 'move' (MoveMessage): A game move broadcast.
+ *  - 'move' (MoveMessage): A game move broadcast (other players' moves).
+ *  - 'move_ack' (MoveMessage): Server confirmation that our move was accepted.
  *  - 'rejoined' (RejoinedMessage): State catch-up after reconnect.
  *  - 'error' (ErrorMessage): Server-side validation or protocol error.
  *
@@ -231,6 +232,25 @@ export class OnlineConnection {
 						}
 					}
 					this._emit('move', msg);
+					break;
+				}
+				case 'move_ack': {
+					// Server confirmation that our move was accepted (echo)
+					const moveSeq = Number(msg.seq);
+					if (Number.isInteger(moveSeq)) {
+						// Cancel the specific pending move packet
+						for (const key of this._pendingPackets.keys()) {
+							if (key.startsWith('move:')) {
+								const pending = this._pendingPackets.get(key);
+								if (pending && pending.packet && Number.isInteger(pending.packet.seq)) {
+									if (pending.packet.seq === moveSeq) {
+										this._cancelPendingPacket(key);
+									}
+								}
+							}
+						}
+					}
+					this._emit('move_ack', msg);
 					break;
 				}
 				case 'rejoined':
@@ -551,6 +571,21 @@ export class OnlineConnection {
 				}
 				case 'move': {
 					// For move packets, verify it's the same move
+					if (packetKey.startsWith('move:')) {
+						const parts = packetKey.split(':');
+						if (parts.length === 4) {
+							const [, fromIndex, row, col] = parts;
+							if (String(msg.fromIndex) === fromIndex && 
+								String(msg.row) === row && 
+								String(msg.col) === col) {
+								shouldCancel = true;
+							}
+						}
+					}
+					break;
+				}
+				case 'move_ack': {
+					// Server echo confirms our move was accepted
 					if (packetKey.startsWith('move:')) {
 						const parts = packetKey.split(':');
 						if (parts.length === 4) {

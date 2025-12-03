@@ -655,7 +655,8 @@ wss.on('connection', (ws) => {
             // If there are no other participants, immediately confirm to sender
             if (otherParticipants.length === 0) {
                 commitMove();
-                try { sendPayload(ws, payload); } catch { /* ignore */ }
+                const ackPayload = { ...payload, type: 'move_ack' };
+                try { sendPayload(ws, ackPayload); } catch { /* ignore */ }
             } else {
                 // Initialize move acknowledgment tracking
                 if (!room.game._moveAcks) room.game._moveAcks = new Map();
@@ -702,7 +703,8 @@ wss.on('connection', (ws) => {
                 // All clients acknowledged - commit the move, send echo to sender
                             // No timeout to clear
                 ackData.commitMove(); // Commit sequence and turn
-                try { sendPayload(ackData.senderWs, ackData.payload); } catch { /* ignore */ }
+                const ackPayload = { ...ackData.payload, type: 'move_ack' };
+                try { sendPayload(ackData.senderWs, ackPayload); } catch { /* ignore */ }
                 room.game._moveAcks.delete(ackKey);
             }
         } else if (msg.type === 'preferred_color') {

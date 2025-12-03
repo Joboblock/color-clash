@@ -294,28 +294,9 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
                 return;
             }
 
-            // Send acknowledgment to server (for both own moves echo and other players' moves)
-            if (Number.isInteger(seq)) {
+            // Send acknowledgment to server (for other players' moves only - we don't ack our own confirmation)
+            if (fromIdx !== myOnlineIndex && Number.isInteger(seq)) {
                 onlineConnection.sendMoveAck(seq);
-            }
-
-            // If this is my own echo, verify sequence matches what we sent
-            if (fromIdx === myOnlineIndex) {
-                if (Number.isInteger(seq)) {
-                    console.log(`[Move Echo] Received echo for seq=${seq}, current lastAppliedSeq=${lastAppliedSeq}, pendingEchoSeq=${pendingEchoSeq}, myOnlineIndex=${myOnlineIndex}`);
-                    if (seq === lastAppliedSeq) {
-                        console.log(`[Move Echo] Seq ${seq} confirmed (own move, myOnlineIndex=${myOnlineIndex})`);
-                        pendingEchoSeq = null; // Clear pending echo
-                        // Echo confirms our local apply; try drain any buffered moves
-                        tryApplyBufferedMoves();
-                    } else if (seq < lastAppliedSeq) {
-                        console.warn(`[Move Echo] Old echo seq ${seq}, already at ${lastAppliedSeq}. Ignoring. (myOnlineIndex=${myOnlineIndex})`);
-                    } else {
-                        // seq > lastAppliedSeq - should not happen in normal flow
-                        console.warn(`[Move Echo] Future echo seq ${seq}, currently at ${lastAppliedSeq}. Server ahead? (myOnlineIndex=${myOnlineIndex})`);
-                    }
-                }
-                return;
             }
 
             // For other players' moves: only apply when in-order; otherwise store
@@ -365,11 +346,43 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
                 console.warn(`[Move] Future move seq ${seq}, expected ${expectedNext}. Buffering. (pending: ${Array.from(pendingMoves.keys()).sort((a,b)=>a-b).join(', ')}) (myOnlineIndex=${myOnlineIndex})`);
                 // Future move: store and wait for earlier moves
                 pendingMoves.set(seq, { r, c, fromIdx });
-            } else {
-                console.warn(`[Move] Old move seq ${seq}, expected ${expectedNext}, lastApplied ${lastAppliedSeq}. Ignoring. (myOnlineIndex=${myOnlineIndex})`);
-            } // seq <= lastAppliedSeq already handled implicitly by expectedNext logic
+            }
         } catch (err) { 
             console.error('[Move] Error handling move:', err);
+        }
+    });
+    onlineConnection.on('move_ack', (msg) => {
+        try {
+            console.log(`[Move Ack] Received move confirmation:`, msg, `onlineGameActive=${onlineGameActive}, lastAppliedSeq=${lastAppliedSeq}, myOnlineIndex=${myOnlineIndex}`);
+            if (!onlineGameActive) {
+                console.warn(`[Move Ack] Game not active, ignoring ack (myOnlineIndex=${myOnlineIndex})`);
+                return;
+            }
+            const seq = Number(msg.seq);
+            const fromIdx = Number(msg.fromIndex);
+            
+            // This should be our own move confirmation
+            if (fromIdx !== myOnlineIndex) {
+                console.warn(`[Move Ack] Received ack for wrong player: fromIdx=${fromIdx}, myOnlineIndex=${myOnlineIndex}`);
+                return;
+            }
+            
+            if (Number.isInteger(seq)) {
+                console.log(`[Move Ack] Received echo for seq=${seq}, current lastAppliedSeq=${lastAppliedSeq}, pendingEchoSeq=${pendingEchoSeq}, myOnlineIndex=${myOnlineIndex}`);
+                if (seq === lastAppliedSeq) {
+                    console.log(`[Move Ack] Seq ${seq} confirmed (own move, myOnlineIndex=${myOnlineIndex})`);
+                    pendingEchoSeq = null; // Clear pending echo
+                    // Echo confirms our local apply; try drain any buffered moves
+                    tryApplyBufferedMoves();
+                } else if (seq < lastAppliedSeq) {
+                    console.warn(`[Move Ack] Old echo seq ${seq}, already at ${lastAppliedSeq}. Ignoring. (myOnlineIndex=${myOnlineIndex})`);
+                } else {
+                    // seq > lastAppliedSeq - should not happen in normal flow
+                    console.warn(`[Move Ack] Future echo seq ${seq}, currently at ${lastAppliedSeq}. Server ahead? (myOnlineIndex=${myOnlineIndex})`);
+                }
+            }
+        } catch (err) { 
+            console.error('[Move Ack] Error handling move ack:', err);
         }
     });
     onlineConnection.on('rejoined', (msg) => {

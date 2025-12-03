@@ -129,8 +129,8 @@ const GRACE_MS = 300000; // 5 min grace window
  * @param {object} payload - The payload object to send (will be JSON-stringified).
  */
 function sendPayload(ws, payload) {
-    // Debug: Simulate 25% packet loss
-    if (Math.random() < 0.25) {
+    // Debug: Simulate 50% packet loss
+    if (Math.random() < 0.50) {
         console.warn('[Server] 🔥 SIMULATED PACKET LOSS:', ws, payload);
         return;
     }
@@ -390,17 +390,20 @@ wss.on('connection', (ws) => {
             // Only the host can start; use their current room from connectionMeta
             const meta = connectionMeta.get(ws);
             if (!meta || !meta.roomName) {
+                console.log(`[Start] ❌ Client not in a room`);
                 sendPayload(ws, { type: 'error', error: 'Not in a room' });
                 return;
             }
             const room = rooms[meta.roomName];
             if (!room) {
+                console.log(`[Start] ❌ Room ${meta.roomName} not found`);
                 sendPayload(ws, { type: 'error', error: 'Room not found' });
                 return;
             }
             // Verify host
             const isHost = room.participants.length && room.participants[0].ws === ws;
             if (!isHost) {
+                console.log(`[Start] ❌ ${meta.name} is not the host of ${meta.roomName}`);
                 sendPayload(ws, { type: 'error', error: 'Only the host can start the game' });
                 return;
             }
@@ -408,87 +411,137 @@ wss.on('connection', (ws) => {
             const playerCount = room.participants.length;
             const mustBeFull = true;
             if (mustBeFull && playerCount < room.maxPlayers) {
+                console.log(`[Start] ❌ Room ${meta.roomName} not full: ${playerCount}/${room.maxPlayers}`);
                 sendPayload(ws, { type: 'error', error: 'Room is not full yet' });
                 return;
             }
-            // Initiate preferred color collection before starting
-            if (room._colorCollect && room._colorCollect.inProgress) {
-                // Already collecting (debounce multiple start clicks)
+            console.log(`[Start] 🎮 Host ${meta.name} initiating start for room ${meta.roomName} with ${playerCount} players`);
+            
+            // Check if game already started (host is retrying after colors confirmation was lost)
+            if (room.game && room.game.started) {
+                console.log(`[Start] 🔄 Game already started, resending colors confirmation to host ${meta.name}`);
+                const colorsPayload = {
+                    type: 'colors',
+                    room: meta.roomName,
+                    players: room.game.players,
+                    gridSize: room.game.gridSize || 3, // Use stored gridSize
+                    colors: room.game.colors
+                };
+                try { sendPayload(ws, colorsPayload); } catch (err) { console.error('[Server] Failed to resend colors to host', err); }
+                return;
+            }
+            
+            // Initiate color collection before starting (similar to move confirmation flow)
+            if (room._startAcks && room._startAcks.inProgress) {
+                // Already collecting - this is a retry from host
+                console.log(`[Start] 🔄 Start already in progress for room ${meta.roomName}, retrying...`);
+                
+                const otherParticipants = room.participants.filter(p => p.ws !== ws);
+                const players = room.participants.map(p => p.name);
+                
+                // Case 1: Not all start_acks received yet - resend start to clients who haven't acked
+                if (!room._startAcks.colorsCollected) {
+                    console.log(`[Start] 🔄 Colors not yet collected (${room._startAcks.responses.size}/${room._startAcks.expected}), resending start...`);
+                    const startPayload = JSON.stringify({ type: 'start', room: meta.roomName, players, gridSize: room._startAcks.gridSize });
+                    let resentCount = 0;
+                    room.participants.forEach(p => {
+                        // Only resend to clients who haven't sent start_ack yet (tracked by ws)
+                        if (!room._startAcks.responses.has(p.ws) && p.ws.readyState === 1) {
+                            console.log(`[Start]   🔁 Resending start to ${p.name} (no start_ack yet)`);
+                            try { p.ws.send(startPayload); resentCount++; } catch (err) { console.error('[Server] Failed to resend start', p.name, err); }
+                        }
+                    });
+                    console.log(`[Start] 📤 Resent start to ${resentCount} clients`);
+                    return;
+                }
+                
+                // Case 2: Colors collected but not all colors_acks received - resend colors to clients who haven't acked
+                if (room._startAcks.colorsAcksReceived.size < room._startAcks.colorsAcksExpected) {
+                    console.log(`[Start] 🔄 Colors collected but acks pending (${room._startAcks.colorsAcksReceived.size}/${room._startAcks.colorsAcksExpected}), resending colors...`);
+                    const colorsPayload = JSON.stringify({ type: 'colors', room: meta.roomName, players, colors: room._startAcks.assignedColors });
+                    let resentCount = 0;
+                    otherParticipants.forEach(p => {
+                        // Only resend to clients who haven't sent colors_ack yet
+                        if (!room._startAcks.colorsAcksReceived.has(p.ws) && p.ws.readyState === 1) {
+                            console.log(`[Start]   🔁 Resending colors to ${p.name} (no colors_ack yet)`);
+                            try { p.ws.send(colorsPayload); resentCount++; } catch (err) { console.error('[Server] Failed to resend colors', p.name, err); }
+                        }
+                    });
+                    console.log(`[Start] 📤 Resent colors to ${resentCount} clients`);
+                    return;
+                }
+                
+                // Case 3: All acks received, just resend colors to host
+                console.log(`[Start] 🔄 All acks collected, resending colors to host`);
+                const colorsPayload = { type: 'colors', room: meta.roomName, players, colors: room._startAcks.assignedColors, gridSize: room._startAcks.gridSize };
+                try { sendPayload(ws, colorsPayload); } catch (err) { console.error('[Server] Failed to resend colors to host', err); }
                 return;
             }
             const players = room.participants.map(p => p.name);
-            const collect = {
-                inProgress: true,
-                expected: playerCount,
-                responses: new Map(), // name -> preferred color
-                timeout: null
-            };
-            room._colorCollect = collect;
-            // Ask every participant for their current preferred color (client color cycler)
-            const requestPayload = JSON.stringify({ type: 'request_preferred_colors', room: meta.roomName, players });
-            room.participants.forEach(p => {
-                if (p.ws.readyState === 1) {
-                    try { p.ws.send(requestPayload); } catch (err) { console.error('[Server] Failed to send request_preferred_colors to participant', err); }
-                }
-            });
-            // Helper to finalize assignment (on all responses or timeout)
-            const finalizeAssignment = () => {
-                if (!rooms[meta.roomName]) return; // room gone
-                const r = rooms[meta.roomName];
-                // Idempotency: ensure we only finalize once
-                if (!r._colorCollect || !r._colorCollect.inProgress) return;
-                r._colorCollect.inProgress = false;
-                if (r._colorCollect.timeout) {
-                    clearTimeout(r._colorCollect.timeout);
-                    r._colorCollect.timeout = null;
-                }
-                // Check if we have all responses - if not, abort start
-                if (r._colorCollect.responses.size < r._colorCollect.expected) {
-                    delete r._colorCollect;
-                    return;
-                }
-                // Build preferred list in participant order
-                const prefs = players.map(name => {
-                    const raw = r._colorCollect.responses.get(name);
-                    const c = typeof raw === 'string' ? String(raw) : 'green';
-                    // sanitize to known palette
-                    return playerColors.includes(c) ? c : 'green';
-                });
-                const assigned = assignColorsDeterministic(players, prefs, playerColors);
+            
+            // Get other participants (not the host)
+            const otherParticipants = room.participants.filter(p => p.ws !== ws);
+            
+            // If host is alone, start immediately with their color
+            if (otherParticipants.length === 0) {
+                console.log(`[Start] 👤 Solo host - starting immediately for ${meta.name}`);
+                const hostColor = 'green'; // Default, host will use their cycler color locally
+                const assigned = [hostColor];
                 function recommendedGridSize(p) {
                     if (p <= 2) return 3;
                     if (p <= 4) return 4;
                     if (p === 5) return 5;
                     return 6;
                 }
-                // Determine grid size: if host specified, clamp it; otherwise default to (playerCount + 3)
-                // while never going below the per-player schedule minimum and never above 16.
-                const gridSize = Number.isFinite(r.desiredGridSize)
-                    ? Math.max(recommendedGridSize(playerCount), Math.min(16, Math.max(3, r.desiredGridSize)))
+                const gridSize = Number.isFinite(room.desiredGridSize)
+                    ? Math.max(recommendedGridSize(playerCount), Math.min(16, Math.max(3, room.desiredGridSize)))
                     : Math.max(recommendedGridSize(playerCount), Math.min(16, Math.max(3, playerCount + 3)));
-                // Initialize per-room game state for turn enforcement and color validation
-                r.game = {
+                room.game = {
                     started: true,
                     players: players.slice(),
                     turnIndex: 0,
-                    colors: assigned.slice(),
+                    colors: assigned,
+                    gridSize, // Store for potential retry
                     moveSeq: 0,
                     recentMoves: []
                 };
-                if (!r._lastSeqByName) r._lastSeqByName = new Map();
-                // Broadcast start to all participants with authoritative colors
-                const startPayload = JSON.stringify({ type: 'started', room: meta.roomName, players, gridSize, colors: assigned });
-                r.participants.forEach(p => {
-                    if (p.ws.readyState === 1) {
-                        try { p.ws.send(startPayload); } catch (err) { console.error('[Server] Failed to send started to participant', err); }
-                    }
-                });
-                // Cleanup
-                delete r._colorCollect;
+                if (!room._lastSeqByName) room._lastSeqByName = new Map();
+                const colorsPayload = { type: 'colors', room: meta.roomName, players, gridSize, colors: assigned };
+                console.log(`[Start] ✅ Sending immediate colors confirmation to solo host ${meta.name}`);
+                try { sendPayload(ws, colorsPayload); } catch (err) { console.error('[Server] Failed to send colors to host', err); }
+                return;
+            }
+            
+            // Calculate gridSize now so non-host clients can start their games
+            function recommendedGridSize(p) {
+                if (p <= 2) return 3;
+                if (p <= 4) return 4;
+                if (p === 5) return 5;
+                return 6;
+            }
+            const gridSize = Number.isFinite(room.desiredGridSize)
+                ? Math.max(recommendedGridSize(playerCount), Math.min(16, Math.max(3, room.desiredGridSize)))
+                : Math.max(recommendedGridSize(playerCount), Math.min(16, Math.max(3, playerCount + 3)));
+            
+            const collect = {
+                inProgress: true,
+                expected: room.participants.length, // expect acks from ALL participants (including host)
+                responses: new Map(), // ws -> { name, color }
+                hostWs: ws,
+                hostName: meta.name,
+                gridSize // Store for later use when sending to host
             };
-            // Timeout to avoid hanging if a client doesn't respond
-            collect.timeout = setTimeout(finalizeAssignment, 2500);
-            // If everyone responds earlier, we'll finalize immediately in the handler below
+            room._startAcks = collect;
+            
+            // Send start to ALL participants (including host) - each will respond with start_ack
+            const startPayload = JSON.stringify({ type: 'start', room: meta.roomName, players, gridSize });
+            console.log(`[Start] 📤 Sending start request to ${room.participants.length} clients, expecting ${collect.expected} acks`);
+            room.participants.forEach(p => {
+                if (p.ws.readyState === 1) {
+                    console.log(`[Start]   → Sending to ${p.name}`);
+                    try { p.ws.send(startPayload); } catch (err) { console.error('[Server] Failed to send start to participant', p.name, err); }
+                }
+            });
         } else if (msg.type === 'move') {
             const meta = connectionMeta.get(ws);
             if (!meta || !meta.roomName) return;
@@ -707,56 +760,99 @@ wss.on('connection', (ws) => {
                 try { sendPayload(ackData.senderWs, ackPayload); } catch { /* ignore */ }
                 room.game._moveAcks.delete(ackKey);
             }
-        } else if (msg.type === 'preferred_color') {
-            // A client responded with their current preferred color (from cycler)
+        } else if (msg.type === 'start_ack') {
+            // A client acknowledged start and sent their preferred color
             const meta = connectionMeta.get(ws);
             if (!meta || !meta.roomName) return;
             const room = rooms[meta.roomName];
-            if (!room || !room._colorCollect || !room._colorCollect.inProgress) return;
-            const name = meta.name;
-            const color = typeof msg.color === 'string' ? String(msg.color) : '';
-            // Sanitize color to known palette, else ignore
-            if (!playerColors.includes(color)) {
-                // ignore invalid colors
+            if (!room || !room._startAcks || !room._startAcks.inProgress) {
+                console.log(`[Start Ack] ❌ Received ack from ${meta?.name || 'unknown'} but no start in progress`);
                 return;
             }
-            room._colorCollect.responses.set(name, color);
-            // If we have all responses, finalize immediately
-            if (room._colorCollect.responses.size >= room._colorCollect.expected) {
-                // finalize (simulate start branch behavior)
-                if (room._colorCollect.timeout) {
-                    clearTimeout(room._colorCollect.timeout);
-                    room._colorCollect.timeout = null;
-                }
-                // Reuse the same logic as in start finalization
+            const name = meta.name;
+            const color = typeof msg.color === 'string' ? String(msg.color) : '';
+            // Sanitize color to known palette, else use default
+            const sanitizedColor = playerColors.includes(color) ? color : 'green';
+            room._startAcks.responses.set(ws, { name, color: sanitizedColor });
+            console.log(`[Start Ack] ✅ Received ack from ${name} with color ${sanitizedColor} (${room._startAcks.responses.size}/${room._startAcks.expected})`);
+            
+            // Check if we have all responses from other clients
+            if (room._startAcks.responses.size >= room._startAcks.expected) {
+                console.log(`[Start Ack] 🎉 All ${room._startAcks.expected} acks received! Assigning colors...`);
+                room._startAcks.colorsCollected = true;
+                
+                // Build preferred list in participant order
                 const players = room.participants.map(p => p.name);
-                const prefs = players.map(nm => room._colorCollect.responses.get(nm) || 'green');
+                const prefs = room.participants.map(p => {
+                    const entry = room._startAcks.responses.get(p.ws);
+                    return entry && typeof entry.color === 'string' ? entry.color : 'green';
+                });
                 const assigned = assignColorsDeterministic(players, prefs, playerColors);
-                function recommendedGridSize(p) {
-                    if (p <= 2) return 3;
-                    if (p <= 4) return 4;
-                    if (p === 5) return 5;
-                    return 6;
-                }
-                const gridSize = Number.isFinite(room.desiredGridSize)
-                    ? Math.max(recommendedGridSize(players.length), Math.min(16, Math.max(3, room.desiredGridSize)))
-                    : Math.max(recommendedGridSize(players.length), Math.min(16, Math.max(3, players.length + 3)));
+                
+                // Store assigned colors
+                room._startAcks.assignedColors = assigned;
+                
+                // Use the gridSize calculated when start was initiated
+                const gridSize = room._startAcks.gridSize;
+                
+                // Initialize game state (but don't mark as fully started yet)
                 room.game = {
-                    started: true,
+                    started: false, // Will be set to true after host receives colors
                     players: players.slice(),
                     turnIndex: 0,
                     colors: assigned.slice(),
+                    gridSize, // Store for potential retry
                     moveSeq: 0,
                     recentMoves: []
                 };
                 if (!room._lastSeqByName) room._lastSeqByName = new Map();
-                const startPayload = JSON.stringify({ type: 'started', room: meta.roomName, players, gridSize, colors: assigned });
-                room.participants.forEach(p => {
+                console.log(`[Start Ack] � Colors assigned:`, { players, colors: assigned, gridSize });
+                
+                // Now send colors to non-host clients and wait for their acks
+                const otherParticipants = room.participants.filter(p => p.name !== room._startAcks.hostName);
+                room._startAcks.colorsAcksExpected = otherParticipants.length;
+                room._startAcks.colorsAcksReceived = new Set(); // Track by WebSocket
+                
+                const colorsPayload = JSON.stringify({ type: 'colors', room: meta.roomName, players, colors: assigned });
+                console.log(`[Start Ack] 📤 Sending colors to ${otherParticipants.length} non-host clients`);
+                otherParticipants.forEach(p => {
                     if (p.ws.readyState === 1) {
-                        try { p.ws.send(startPayload); } catch (err) { console.error('[Server] Failed to send started to participant', err); }
+                        console.log(`[Start Ack]   → Sending colors to ${p.name}`);
+                        try { p.ws.send(colorsPayload); } catch (err) { console.error('[Server] Failed to send colors to participant', p.name, err); }
                     }
                 });
-                delete room._colorCollect;
+            }
+        } else if (msg.type === 'colors_ack') {
+            // A client acknowledged receiving the colors
+            const meta = connectionMeta.get(ws);
+            if (!meta || !meta.roomName) return;
+            const room = rooms[meta.roomName];
+            if (!room || !room._startAcks || !room._startAcks.colorsCollected) {
+                console.log(`[Colors Ack] ❌ Received ack from ${meta?.name || 'unknown'} but no colors sent`);
+                return;
+            }
+            const name = meta.name;
+            room._startAcks.colorsAcksReceived.add(ws);
+            console.log(`[Colors Ack] ✅ Received ack from ${name} (${room._startAcks.colorsAcksReceived.size}/${room._startAcks.colorsAcksExpected})`);
+            
+            // Check if we have all color acks from non-host clients
+            if (room._startAcks.colorsAcksReceived.size >= room._startAcks.colorsAcksExpected) {
+                console.log(`[Colors Ack] 🎉 All color acks received! Sending colors to host...`);
+                
+                // Mark game as fully started now
+                if (room.game) room.game.started = true;
+                
+                // Send colors to host as final confirmation
+                const players = room.game.players;
+                const colors = room._startAcks.assignedColors;
+                const gridSize = room._startAcks.gridSize;
+                const colorsPayload = { type: 'colors', room: meta.roomName, players, colors, gridSize };
+                console.log(`[Colors Ack] 📤 Sending colors confirmation to host ${room._startAcks.hostName}`);
+                try { sendPayload(room._startAcks.hostWs, colorsPayload); } catch (err) { console.error('[Server] Failed to send colors to host', err); }
+                
+                // Cleanup
+                delete room._startAcks;
+                console.log(`[Colors Ack] ✨ Start sequence complete for room ${meta.roomName}`);
             }
         } else if (msg.type === 'leave') {
             const meta = connectionMeta.get(ws);

@@ -20,8 +20,8 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  *  - 'packet_confirmed' ({ packetKey:string, retryCount:number }): Packet confirmed by server.
  *  - (deprecated) 'hosted' (HostedMessage): replaced by enriched 'roomlist'.
  *  - 'roomlist' (Record<string, RoomListEntry>): Updated list of rooms.
- *  - 'started' (StartedMessage): Game start information (players, grid size, colors).
- *  - 'request_preferred_colors' (): Server asks client to provide a preferred color.
+ *  - 'start' (StartMessage): Server requesting start_ack from non-host clients.
+ *  - 'colors' (ColorsMessage): Server sending assigned colors (to non-host for ack, or to host as final confirmation).
  *  - (deprecated) 'joined' (JoinedMessage): replaced by enriched 'roomlist'.
  *  - 'move' (MoveMessage): A game move broadcast (other players' moves).
  *  - 'move_ack' (MoveMessage): Server confirmation that our move was accepted.
@@ -35,7 +35,8 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  *  - joinByKey(roomKey, debugName)
  *  - leave(roomName?)
  *  - start(gridSize?)
- *  - sendPreferredColor(color)
+ *  - sendStartAck(color)
+ *  - sendColorsAck()
  *  - sendMove({ row, col, fromIndex, nextIndex, color })
  *  - requestRoomList()
  *  - on(event, handler), off(event, handler)
@@ -50,7 +51,8 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  * @typedef {{currentPlayers:number, maxPlayers:number, players?:PlayerEntry[], hostName?:string}} RoomListEntry
  * // Deprecated: HostedMessage is no longer used; server emits enriched roomlist
  * @typedef {{type:'roomlist', rooms:Record<string, RoomListEntry>}} RawRoomListMessage
- * @typedef {{type:'started', players:string[], gridSize?:number, colors?:string[]}} StartedMessage
+ * @typedef {{type:'start', players:string[], gridSize?:number}} StartMessage
+ * @typedef {{type:'colors', players:string[], gridSize?:number, colors:string[]}} ColorsMessage
  * // Deprecated: JoinedMessage is no longer used; server emits enriched roomlist
 // RoomUpdateMessage is obsolete; use enriched roomlist entries instead
  * @typedef {{type:'move', room?:string, row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} MoveMessage
@@ -196,14 +198,13 @@ export class OnlineConnection {
 				case 'roomlist':
 					this._emit('roomlist', msg.rooms || {});
 					break;
-				case 'started':
-					this._cancelPendingPacket('start_timeout');
-					this._emit('started', msg);
+				case 'start':
+					// Server sends 'start' to non-host clients (requesting start_ack)
+					this._emit('start', msg);
 					break;
-				case 'request_preferred_colors':
-					// Now wait for 'started' - if it doesn't come, a color packet was lost
-					this._scheduleStartTimeout();
-					this._emit('request_preferred_colors');
+				case 'colors':
+					// Server sends 'colors' with assigned colors (to non-host for ack, or to host as final confirmation)
+					this._emit('colors', msg);
 					break;
 				case 'joined':
 					break;
@@ -356,8 +357,8 @@ export class OnlineConnection {
 					const type = obj && typeof obj === 'object' ? obj.type : undefined;
 					console.log('[Client] ⬆️ Sending:', type, obj);
 					
-					// Debug: Simulate 25% packet loss
-					if (Math.random() < 0.25) {
+					// Debug: Simulate 50% packet loss
+					if (Math.random() < 0.50) {
 						console.warn('[Client] 🔥 SIMULATED PACKET LOSS:', type, obj);
 						return;
 					}
@@ -417,14 +418,21 @@ export class OnlineConnection {
 		// Store gridSize for retry and mark this client as host
 		this._lastStartGridSize = gridSize;
 		this._initiatedStart = true;
-		this._sendWithRetry('start', payload, 'request_preferred_colors');
+		this._sendWithRetry('start', payload, 'colors');
 	}
 
-	/** Send preferred color selection.
+	/** Send start acknowledgment with preferred color.
 	 * @param {string} color
 	 */
-	sendPreferredColor(color) {
-		this._sendWithRetry('preferred_color', { type: 'preferred_color', color }, 'started');
+	sendStartAck(color) {
+		this._sendPayload({ type: 'start_ack', color });
+	}
+
+	/** Send colors acknowledgment.
+	 */
+	sendColorsAck() {
+		// Send once - server will resend 'colors' if it doesn't receive this ack
+		this._sendPayload({ type: 'colors_ack' });
 	}
 
 	/** Broadcast a move.
@@ -609,10 +617,11 @@ export class OnlineConnection {
 					}
 					break;
 				}
-				case 'request_preferred_colors':
-				case 'started':
-					// These responses always confirm their corresponding requests
-					shouldCancel = true;
+				case 'colors':
+					// Colors response confirms the start request for host (final confirmation)
+					if (packetKey === 'start' && msg.colors) {
+						shouldCancel = true;
+					}
 					break;
 				default:
 					// Unknown response type - cancel to be safe
@@ -643,37 +652,7 @@ export class OnlineConnection {
 		}
 	}
 
-	/**
-	 * Schedule a timeout to detect lost color packets after receiving request_preferred_colors.
-	 * If 'started' doesn't arrive within 1s, resend start (host only).
-	 * @private
-	 */
-	_scheduleStartTimeout() {
-		// Cancel any existing timeout
-		this._cancelPendingPacket('start_timeout');
 
-		const timeoutMs = 1000;
-		const retryTimer = setTimeout(() => {
-			// Only resend if this client is the host who initiated the start
-			if (!this._initiatedStart) {
-				this._log('Start timeout: not host, skipping resend');
-				return;
-			}
-			this._log('Start timeout: no "started" after color request, resending start');
-			// Resend start packet
-			const payload = { type: 'start' };
-			if (Number.isInteger(this._lastStartGridSize)) payload.gridSize = this._lastStartGridSize;
-			this._sendWithRetry('start', payload, 'request_preferred_colors');
-		}, timeoutMs);
-
-		this._pendingPackets.set('start_timeout', {
-			packet: null,
-			retryTimer,
-			backoffMs: timeoutMs,
-			retryCount: 0,
-			expectedResponseType: 'started'
-		});
-	}
 
 	/**
 	 * Resolve default WebSocket base URL using simplified fallback chain:

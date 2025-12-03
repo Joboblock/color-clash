@@ -80,8 +80,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Track if we're waiting for an echo after sending our own move
     let pendingEchoSeq = null;
 console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
-    // Grid size planned by server at start (used by non-host when colors arrive without gridSize)
-    let pendingStartGridSize = null;
 
     // Connection banner helpers stay in UI layer; OnlineConnection just emits events.
 
@@ -211,35 +209,27 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
         try { rlView && rlView.render(rooms); } catch { /* ignore */ }
         updateStartButtonState(rooms);
     });
-    onlineConnection.on('start', (msg) => {
-        // All clients (host and non-host): server requesting start_ack with our color preference
-        console.log('[Start Request] Server requesting start acknowledgment');
+    onlineConnection.on('color', () => {
+        // All clients (host and non-host): server requesting color_ans with our color preference
+        console.log('[Color Request] Server requesting color preference');
         if (!clientFullyInitialized) return;
         
-        // Send our color preference and wait for colors confirmation
+        // Send our color preference and wait for start/start_cnf
         try { 
             const color = playerColors[getStartingColorIndex()] || 'green';
-            onlineConnection.sendStartAck(color);
-            console.log('[Start] Sent start_ack, waiting for colors confirmation...');
-        } catch { /* ignore */ }
-
-        // Store grid size planned by server so non-host can use it when colors arrive
-        try {
-            const s = Number.isInteger(msg?.gridSize) ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10))) : null;
-            pendingStartGridSize = s;
+            onlineConnection.sendColorAns(color);
+            console.log('[Color] Sent color_ans, waiting for start confirmation...');
         } catch { /* ignore */ }
     });
     
-    onlineConnection.on('colors', (msg) => {
-        // Receive assigned colors from server - this is when we start the game
-        console.log('[Colors] Server sent colors:', msg.colors);
+    // Handler for non-host clients receiving 'start' with assigned colors
+    onlineConnection.on('start', (msg) => {
+        // Non-host receives assigned colors from server - this is when we start the game
+        console.log('[Start] Server sent start with colors:', msg.colors);
         if (!clientFullyInitialized) return;
         
-    // Determine if we're host (colors include gridSize for host as final confirmation)
-    const isHost = msg.gridSize !== undefined;
-        
         try {
-            // Initialize game state for all clients
+            // Initialize game state for non-host clients
             lastAppliedSeq = 0;
             pendingEchoSeq = null;
             onlineGameActive = true;
@@ -248,10 +238,10 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
             console.log(`[Colors] myPlayerName="${myPlayerName}", onlinePlayers=`, onlinePlayers, `myOnlineIndex=${myOnlineIndex}`);
             
             const p = Math.max(2, Math.min(playerColors.length, onlinePlayers.length || 2));
-            // Get gridSize from msg (host) or calculate it (non-host)
+            // Get gridSize from msg (server always sends it in colors packet)
             const s = Number.isInteger(msg.gridSize) 
                 ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10))) 
-                : (Number.isInteger(pendingStartGridSize) ? pendingStartGridSize : recommendedGridSize(p));
+                : recommendedGridSize(p);
             
             // Use server-provided colors
             if (msg.colors && Array.isArray(msg.colors) && msg.colors.length >= p) {
@@ -279,16 +269,65 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
             
-            console.log(`[Colors] Game started for ${isHost ? 'host' : 'non-host'}`);
+            console.log(`[Start] Game started for non-host`);
             
             // Non-host sends acknowledgment
-            if (!isHost) {
-                onlineConnection.sendColorsAck();
-                // Clear pending grid size after ack
-                pendingStartGridSize = null;
-            }
+            onlineConnection.sendStartAck();
         } catch (err) {
-            console.error('[Colors] Failed to start game:', err);
+            console.error('[Start] Failed to start game:', err);
+        }
+    });
+    
+    // Handler for host receiving 'start_cnf' as final confirmation
+    onlineConnection.on('start_cnf', (msg) => {
+        // Host receives final confirmation with assigned colors
+        console.log('[Start Cnf] Server sent start confirmation with colors:', msg.colors);
+        if (!clientFullyInitialized) return;
+        
+        try {
+            // Initialize game state for host
+            lastAppliedSeq = 0;
+            pendingEchoSeq = null;
+            onlineGameActive = true;
+            onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
+            myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
+            console.log(`[Start Cnf] myPlayerName="${myPlayerName}", onlinePlayers=`, onlinePlayers, `myOnlineIndex=${myOnlineIndex}`);
+            
+            const p = Math.max(2, Math.min(playerColors.length, onlinePlayers.length || 2));
+            // Get gridSize from msg (server always sends it)
+            const s = Number.isInteger(msg.gridSize) 
+                ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10))) 
+                : recommendedGridSize(p);
+            
+            // Use server-provided colors
+            if (msg.colors && Array.isArray(msg.colors) && msg.colors.length >= p) {
+                gameColors = msg.colors.slice(0, p);
+            } else {
+                gameColors = playerColors.slice(0, p);
+            }
+            
+            playerCount = p;
+            gridSize = s;
+            document.documentElement.style.setProperty('--grid-size', gridSize);
+            
+            // Hide menus and start game UI
+            const firstMenu = document.getElementById('firstMenu');
+            const mainMenu = document.getElementById('mainMenu');
+            const onlineMenu = document.getElementById('onlineMenu');
+            if (firstMenu) setHidden(firstMenu, true);
+            if (mainMenu) setHidden(mainMenu, true);
+            if (onlineMenu) setHidden(onlineMenu, true);
+            
+            practiceMode = false;
+            recreateGrid(s, p);
+            currentPlayer = 0;
+            document.body.className = activeColors()[currentPlayer];
+            updateGrid();
+            try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
+            
+            console.log(`[Start Cnf] Game started for host`);
+        } catch (err) {
+            console.error('[Start Cnf] Failed to start game:', err);
         }
     });
     // Ordered move buffer: store out-of-order or deferred moves by sequence

@@ -20,8 +20,9 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  *  - 'packet_confirmed' ({ packetKey:string, retryCount:number }): Packet confirmed by server.
  *  - (deprecated) 'hosted' (HostedMessage): replaced by enriched 'roomlist'.
  *  - 'roomlist' (Record<string, RoomListEntry>): Updated list of rooms.
- *  - 'start' (StartMessage): Server requesting start_ack from non-host clients.
- *  - 'colors' (ColorsMessage): Server sending assigned colors (to non-host for ack, or to host as final confirmation).
+ *  - 'color' (ColorMessage): Server requesting color_ans from all clients.
+ *  - 'start' (StartMessage): Server sending assigned colors to non-host clients (requesting start_ack).
+ *  - 'start_cnf' (StartCnfMessage): Server sending final confirmation to host.
  *  - (deprecated) 'joined' (JoinedMessage): replaced by enriched 'roomlist'.
  *  - 'move' (MoveMessage): A game move broadcast (other players' moves).
  *  - 'move_ack' (MoveMessage): Server confirmation that our move was accepted.
@@ -35,8 +36,8 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  *  - joinByKey(roomKey, debugName)
  *  - leave(roomName?)
  *  - start(gridSize?)
- *  - sendStartAck(color)
- *  - sendColorsAck()
+ *  - sendColorAns(color)
+ *  - sendStartAck()
  *  - sendMove({ row, col, fromIndex, nextIndex, color })
  *  - requestRoomList()
  *  - on(event, handler), off(event, handler)
@@ -51,8 +52,9 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  * @typedef {{currentPlayers:number, maxPlayers:number, players?:PlayerEntry[], hostName?:string}} RoomListEntry
  * // Deprecated: HostedMessage is no longer used; server emits enriched roomlist
  * @typedef {{type:'roomlist', rooms:Record<string, RoomListEntry>}} RawRoomListMessage
- * @typedef {{type:'start', players:string[], gridSize?:number}} StartMessage
- * @typedef {{type:'colors', players:string[], gridSize?:number, colors:string[]}} ColorsMessage
+ * @typedef {{type:'color', players:string[]}} ColorMessage
+ * @typedef {{type:'start', players:string[], gridSize:number, colors:string[]}} StartMessage
+ * @typedef {{type:'start_cnf', players:string[], gridSize:number, colors:string[]}} StartCnfMessage
  * // Deprecated: JoinedMessage is no longer used; server emits enriched roomlist
 // RoomUpdateMessage is obsolete; use enriched roomlist entries instead
  * @typedef {{type:'move', room?:string, row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} MoveMessage
@@ -198,13 +200,17 @@ export class OnlineConnection {
 				case 'roomlist':
 					this._emit('roomlist', msg.rooms || {});
 					break;
+				case 'color':
+					// Server sends 'color' to all clients (requesting color_ans)
+					this._emit('color', msg);
+					break;
 				case 'start':
-					// Server sends 'start' to non-host clients (requesting start_ack)
+					// Server sends 'start' to non-host clients with assigned colors (requesting start_ack)
 					this._emit('start', msg);
 					break;
-				case 'colors':
-					// Server sends 'colors' with assigned colors (to non-host for ack, or to host as final confirmation)
-					this._emit('colors', msg);
+				case 'start_cnf':
+					// Server sends 'start_cnf' to host as final confirmation
+					this._emit('start_cnf', msg);
 					break;
 				case 'joined':
 					break;
@@ -413,26 +419,26 @@ export class OnlineConnection {
 	 * @param {number} [gridSize]
 	 */
 	start(gridSize) {
-		const payload = { type: 'start' };
+		const payload = { type: 'start_req' };
 		if (Number.isInteger(gridSize)) payload.gridSize = gridSize;
 		// Store gridSize for retry and mark this client as host
 		this._lastStartGridSize = gridSize;
 		this._initiatedStart = true;
-		this._sendWithRetry('start', payload, 'colors');
+		this._sendWithRetry('start', payload, 'start_cnf');
 	}
 
-	/** Send start acknowledgment with preferred color.
+	/** Send color answer with preferred color.
 	 * @param {string} color
 	 */
-	sendStartAck(color) {
-		this._sendPayload({ type: 'start_ack', color });
+	sendColorAns(color) {
+		this._sendPayload({ type: 'color_ans', color });
 	}
 
-	/** Send colors acknowledgment.
+	/** Send start acknowledgment.
 	 */
-	sendColorsAck() {
-		// Send once - server will resend 'colors' if it doesn't receive this ack
-		this._sendPayload({ type: 'colors_ack' });
+	sendStartAck() {
+		// Send once - server will resend 'start' if it doesn't receive this ack
+		this._sendPayload({ type: 'start_ack' });
 	}
 
 	/** Broadcast a move.
@@ -617,8 +623,8 @@ export class OnlineConnection {
 					}
 					break;
 				}
-				case 'colors':
-					// Colors response confirms the start request for host (final confirmation)
+				case 'start_cnf':
+					// start_cnf response confirms the start_req from host (final confirmation)
 					if (packetKey === 'start' && msg.colors) {
 						shouldCancel = true;
 					}

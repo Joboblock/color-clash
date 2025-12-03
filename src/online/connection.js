@@ -1,4 +1,4 @@
-import { WS_PROD_BASE_URL } from '../config/index.js';
+import { WS_PROD_BASE_URL, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from '../config/index.js';
 /**
 /**
  * OnlineConnection encapsulates the WebSocket lifecycle for Color Clash, providing
@@ -60,34 +60,34 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  * @typedef {{type:'move', room?:string, row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} MoveMessage
  * @typedef {{type:'rejoined', room?:string, roomKey?:string, players?:PlayerEntry[], recentMoves?:MoveMessage[], maxPlayers?:number}} RejoinedMessage
  * @typedef {{type:'error', error:string}} ErrorMessage
- * @typedef {{initialBackoffMs?:number, maxBackoffMs?:number, getWebSocketUrl?:()=>string, debug?:boolean}} OnlineConnectionOptions
+ * @typedef {{initialBackoffMs?:number, maxBackoffMs?:number, getWebSocketUrl?:()=>string}} OnlineConnectionOptions
  */
 export class OnlineConnection {
 	/**
-	 * Create a new OnlineConnection instance.
-	 * @param {OnlineConnectionOptions} [options]
-	 * @param {number} [options.initialBackoffMs=800] Initial reconnect delay in ms.
-	 * @param {number} [options.maxBackoffMs=10000] Maximum backoff delay ceiling in ms.
-	 * @param {() => string} [options.getWebSocketUrl] Optional provider for dynamic WS base URL.
-	 * @param {boolean} [options.debug=false] Enable verbose debug logging.
-	 */
-	constructor({ initialBackoffMs = 800, maxBackoffMs = 10000, getWebSocketUrl, debug = false } = {}) {
-		this._initialBackoffMs = initialBackoffMs;
-		this._maxBackoffMs = maxBackoffMs;
-		this._backoffMs = initialBackoffMs;
-		this._ws = null;
-		this._reconnectTimer = null;
-		this._everOpened = false;
-		this._events = new Map();
-		this._debug = debug;
-		this._getWebSocketUrl = typeof getWebSocketUrl === 'function' ? getWebSocketUrl : () => this._defaultUrl();
-		// Generic packet retry tracking: Map of packetKey -> {packet, retryTimer, backoffMs, retryCount, responseType}
-		this._pendingPackets = new Map();
-		// Track if this client initiated a start request (is host)
-		this._initiatedStart = false;
-		// Track if we're waiting for a join_by_key response to avoid redundant roomlist requests
-		this._pendingJoinByKey = false;
-	}
+		 * Create a new OnlineConnection instance.
+		 * @param {OnlineConnectionOptions} [options]
+		 * @param {number} [options.initialBackoffMs] Initial reconnect delay in ms.
+		 * @param {number} [options.maxBackoffMs] Maximum backoff delay ceiling in ms.
+		 * @param {() => string} [options.getWebSocketUrl] Optional provider for dynamic WS base URL.
+		 * @param {boolean} [options.debug=false] Enable verbose debug logging.
+		 */
+		constructor({ initialBackoffMs = WS_INITIAL_BACKOFF_MS, maxBackoffMs = WS_MAX_BACKOFF_MS, getWebSocketUrl, debug = false } = {}) {
+			this._initialBackoffMs = initialBackoffMs;
+			this._maxBackoffMs = maxBackoffMs;
+			this._backoffMs = initialBackoffMs;
+			this._ws = null;
+			this._reconnectTimer = null;
+			this._everOpened = false;
+			this._events = new Map();
+			this._debug = debug;
+			this._getWebSocketUrl = typeof getWebSocketUrl === 'function' ? getWebSocketUrl : () => this._defaultUrl();
+			// Generic packet retry tracking: Map of packetKey -> {packet, retryTimer, backoffMs, retryCount, responseType}
+			this._pendingPackets = new Map();
+			// Track if this client initiated a start request (is host)
+			this._initiatedStart = false;
+			// Track if we're waiting for a join_by_key response to avoid redundant roomlist requests
+			this._pendingJoinByKey = false;
+		}
 
 	/** @private */
 	_log() { }

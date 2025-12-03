@@ -132,8 +132,7 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
     // Instantiate extracted connection
     const onlineConnection = new OnlineConnection({
         initialBackoffMs: WS_INITIAL_BACKOFF_MS,
-        maxBackoffMs: WS_MAX_BACKOFF_MS,
-        debug: false
+        maxBackoffMs: WS_MAX_BACKOFF_MS
     });
     onlineConnection.on('reconnect_scheduled', () => {
         showConnBanner('Reconnecting…', 'info');

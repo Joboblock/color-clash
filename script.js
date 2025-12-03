@@ -185,6 +185,10 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
 
         });
         if (foundSelf) {
+            // Store session info for reconnection when we're in a room
+            if (myJoinedRoom && myRoomKey && myPlayerName) {
+                onlineConnection.storeSessionInfo({ roomKey: myRoomKey, playerName: myPlayerName });
+            }
             // Navigate to online menu when transitioning into a room (from none)
             if (!window._wasInRoom && myJoinedRoom) navigateToMenu('online');
             window._wasInRoom = true;

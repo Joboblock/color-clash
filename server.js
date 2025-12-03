@@ -102,7 +102,7 @@ server.listen(PORT, '0.0.0.0', () => {
 // rooms = {
 //   [roomName]: {
 //     maxPlayers: number,
-//     participants: Array<{ ws: WebSocket, name: string, isHost: boolean, connected: boolean }>,
+//     participants: Array<{ ws: WebSocket, name: string, isHost: boolean, connected: boolean, sessionId?: string }>,
 //     _disconnectTimers?: Map<string, NodeJS.Timeout>,
 //     game?: {
 //       started: boolean,
@@ -118,7 +118,7 @@ const roomKeys = new Map();
 // Keep server-authoritative list of available player colors (must match client order)
 const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'orange', 'purple'];
 // Track which room a connection belongs to and the player's name (per tab)
-const connectionMeta = new Map(); // ws -> { roomName: string, name: string }
+const connectionMeta = new Map(); // ws -> { roomName: string, name: string, sessionId?: string }
 // Allow brief disconnects to reattach by name before freeing the seat
 const GRACE_MS = 300000; // 5 min grace window
 
@@ -156,7 +156,87 @@ wss.on('connection', (ws) => {
             return;
         }
 
-        if (msg.type === 'host') {
+        if (msg.type === 'restore_session' && typeof msg.roomKey === 'string' && typeof msg.playerName === 'string' && typeof msg.sessionId === 'string') {
+            // Client is attempting to restore a previous session
+            const roomKey = String(msg.roomKey);
+            const playerName = String(msg.playerName);
+            const sessionId = String(msg.sessionId);
+            
+            console.log('[Session Restore] Attempt from client:', { roomKey, playerName, sessionId });
+            
+            // Find room by key
+            const roomName = roomKeys.get(roomKey);
+            if (!roomName || !rooms[roomName]) {
+                console.log('[Session Restore] ❌ Room not found for key:', roomKey);
+                // Don't send error - just let normal reconnection flow handle it
+                return;
+            }
+            
+            const room = rooms[roomName];
+            
+            // Find participant by name and sessionId
+            const participant = room.participants.find(p => p.name === playerName && p.sessionId === sessionId);
+            if (!participant) {
+                console.log('[Session Restore] ❌ No matching participant found:', { playerName, sessionId });
+                // Player not in this room or sessionId doesn't match
+                return;
+            }
+            
+            // Clear any pending disconnect timer for this participant
+            if (room._disconnectTimers && room._disconnectTimers.has(playerName)) {
+                try { clearTimeout(room._disconnectTimers.get(playerName)); } catch { /* ignore */ }
+                room._disconnectTimers.delete(playerName);
+            }
+            
+            // Close old WebSocket if still open
+            if (participant.ws && participant.ws !== ws && participant.ws.readyState === 1) {
+                try { participant.ws.terminate(); } catch { /* ignore */ }
+            }
+            
+            // Swap out the old WebSocket with the new one
+            participant.ws = ws;
+            participant.connected = true;
+            
+            // Update connectionMeta for the new WebSocket
+            connectionMeta.set(ws, { roomName, name: playerName, sessionId });
+            
+            console.log('[Session Restore] ✅ Session restored for', playerName, 'in room', roomName);
+            
+            // Send enriched roomlist to confirm restoration
+            const perClientExtras = new Map();
+            perClientExtras.set(ws, {
+                room: roomName,
+                roomKey: room.roomKey,
+                maxPlayers: room.maxPlayers,
+                player: playerName,
+                players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
+                gridSize: Number.isFinite(room.desiredGridSize) ? room.desiredGridSize : undefined,
+                started: !!(room.game && room.game.started)
+            });
+            broadcastRoomList(perClientExtras);
+            
+            // If game is active, send catch-up data
+            if (room.game && room.game.started) {
+                const lastSeq = (room._lastSeqByName && room._lastSeqByName.get(playerName)) || 0;
+                const recentMoves = (room.game && Array.isArray(room.game.recentMoves))
+                    ? room.game.recentMoves.filter(m => (m.seq || 0) > lastSeq)
+                    : [];
+                const rejoinPayload = {
+                    type: 'rejoined',
+                    room: roomName,
+                    roomKey: room.roomKey,
+                    maxPlayers: room.maxPlayers,
+                    players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
+                    started: true,
+                    turnIndex: room.game && Number.isInteger(room.game.turnIndex) ? room.game.turnIndex : 0,
+                    colors: room.game && Array.isArray(room.game.colors) ? room.game.colors : undefined,
+                    recentMoves
+                };
+                try { sendPayload(ws, rejoinPayload); } catch { /* ignore */ }
+            }
+            
+            return;
+        } else if (msg.type === 'host') {
             // If this connection is already in a room, remove it from that room first
             const metaExisting = connectionMeta.get(ws);
             if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
@@ -204,15 +284,17 @@ wss.on('connection', (ws) => {
             }
             // Generate unique join key for this room
             const roomKey = generateRoomKey();
+            // Accept sessionId from client if provided, otherwise generate one
+            const sessionId = (typeof msg.sessionId === 'string' && msg.sessionId) ? String(msg.sessionId) : generateSessionId();
             rooms[uniqueRoomName] = {
                 maxPlayers: clamped,
-                participants: [{ ws, name: playerName, isHost: true, connected: true }],
+                participants: [{ ws, name: playerName, isHost: true, connected: true, sessionId }],
                 _disconnectTimers: new Map(),
                 desiredGridSize: requestedGrid, // null means use dynamic playerCount+3
                 roomKey
             };
             roomKeys.set(roomKey, uniqueRoomName);
-            connectionMeta.set(ws, { roomName: uniqueRoomName, name: playerName });
+            connectionMeta.set(ws, { roomName: uniqueRoomName, name: playerName, sessionId });
             // Compute a planned grid size for the lobby background for the host as well.
             // Use host's desiredGridSize if provided; otherwise default to (playerTarget + 3)
             // No direct roomupdate confirmation; rely on enriched roomlist
@@ -264,8 +346,10 @@ wss.on('connection', (ws) => {
                 try { sendPayload(ws, { type: 'error', error: 'All name variants are taken in this room. Please choose a different name.' }); } catch { /* ignore */ }
                 return;
             }
-            room.participants.push({ ws, name: playerName, isHost: false, connected: true });
-            connectionMeta.set(ws, { roomName: msg.roomName, name: playerName });
+            // Accept sessionId from client if provided, otherwise generate one
+            const sessionId = (typeof msg.sessionId === 'string' && msg.sessionId) ? String(msg.sessionId) : generateSessionId();
+            room.participants.push({ ws, name: playerName, isHost: false, connected: true, sessionId });
+            connectionMeta.set(ws, { roomName: msg.roomName, name: playerName, sessionId });
 
             // No direct roomupdate confirmation; rely on enriched roomlist
             // Enrich roomlist for the joiner so their room entry includes player/roomKey confirmation
@@ -323,8 +407,10 @@ wss.on('connection', (ws) => {
                 try { sendPayload(ws, { type: 'error', error: 'All name variants are taken in this room. Please choose a different name.' }); } catch { /* ignore */ }
                 return;
             }
-            room.participants.push({ ws, name: playerName, isHost: false, connected: true });
-            connectionMeta.set(ws, { roomName, name: playerName });
+            // Accept sessionId from client if provided, otherwise generate one
+            const sessionId = (typeof msg.sessionId === 'string' && msg.sessionId) ? String(msg.sessionId) : generateSessionId();
+            room.participants.push({ ws, name: playerName, isHost: false, connected: true, sessionId });
+            connectionMeta.set(ws, { roomName, name: playerName, sessionId });
             // No direct roomupdate confirmation; rely on enriched roomlist
             // Enrich roomlist for the joiner so their room entry includes player/roomKey confirmation
             {
@@ -363,7 +449,7 @@ wss.on('connection', (ws) => {
             }
             participant.ws = ws;
             participant.connected = true;
-            connectionMeta.set(ws, { roomName: msg.roomName, name });
+            connectionMeta.set(ws, { roomName: msg.roomName, name, sessionId: participant.sessionId });
             // Compute missed moves since last seen sequence for this player
             const lastSeq = (room._lastSeqByName && room._lastSeqByName.get(name)) || 0;
             const recentMoves = (room.game && Array.isArray(room.game.recentMoves))
@@ -1092,4 +1178,9 @@ function generateRoomKey() {
         if (attempts > 500) break;
     } while (roomKeys.has(key));
     return key;
+}
+
+// Generate a unique session ID for tracking client sessions across reconnects
+function generateSessionId() {
+    return `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
 }

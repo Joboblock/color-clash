@@ -71,26 +71,73 @@ export class OnlineConnection {
 		 * @param {() => string} [options.getWebSocketUrl] Optional provider for dynamic WS base URL.
 		 * @param {boolean} [options.debug=false] Enable verbose debug logging.
 		 */
-		constructor({ initialBackoffMs = WS_INITIAL_BACKOFF_MS, maxBackoffMs = WS_MAX_BACKOFF_MS, getWebSocketUrl, debug = false } = {}) {
-			this._initialBackoffMs = initialBackoffMs;
-			this._maxBackoffMs = maxBackoffMs;
-			this._backoffMs = initialBackoffMs;
-			this._ws = null;
-			this._reconnectTimer = null;
-			this._everOpened = false;
-			this._events = new Map();
-			this._debug = debug;
-			this._getWebSocketUrl = typeof getWebSocketUrl === 'function' ? getWebSocketUrl : () => this._defaultUrl();
-			// Generic packet retry tracking: Map of packetKey -> {packet, retryTimer, backoffMs, retryCount, responseType}
-			this._pendingPackets = new Map();
-			// Track if this client initiated a start request (is host)
-			this._initiatedStart = false;
-			// Track if we're waiting for a join_by_key response to avoid redundant roomlist requests
-			this._pendingJoinByKey = false;
-		}
-
-	/** @private */
+	constructor({ initialBackoffMs = WS_INITIAL_BACKOFF_MS, maxBackoffMs = WS_MAX_BACKOFF_MS, getWebSocketUrl, debug = false } = {}) {
+		this._initialBackoffMs = initialBackoffMs;
+		this._maxBackoffMs = maxBackoffMs;
+		this._backoffMs = initialBackoffMs;
+		this._ws = null;
+		this._reconnectTimer = null;
+		this._everOpened = false;
+		this._events = new Map();
+		this._debug = debug;
+		this._getWebSocketUrl = typeof getWebSocketUrl === 'function' ? getWebSocketUrl : () => this._defaultUrl();
+		// Generic packet retry tracking: Map of packetKey -> {packet, retryTimer, backoffMs, retryCount, responseType}
+		this._pendingPackets = new Map();
+		// Track if this client initiated a start request (is host)
+		this._initiatedStart = false;
+		// Track if we're waiting for a join_by_key response to avoid redundant roomlist requests
+		this._pendingJoinByKey = false;
+		// Session info for reconnection
+		this._sessionInfo = this._loadSessionInfo();
+	}	/** @private */
 	_log() { }
+
+	/**
+	 * Load session info from localStorage for reconnection.
+	 * @private
+	 * @returns {{roomKey?: string, playerName?: string, sessionId?: string}}
+	 */
+	_loadSessionInfo() {
+		try {
+			const stored = localStorage.getItem('ws_session');
+			if (stored) {
+				return JSON.parse(stored);
+			}
+		} catch { /* ignore */ }
+		return {};
+	}
+
+	/**
+	 * Save session info to localStorage.
+	 * @private
+	 * @param {{roomKey?: string, playerName?: string, sessionId?: string}} info
+	 */
+	_saveSessionInfo(info) {
+		try {
+			this._sessionInfo = { ...this._sessionInfo, ...info };
+			localStorage.setItem('ws_session', JSON.stringify(this._sessionInfo));
+		} catch { /* ignore */ }
+	}
+
+	/**
+	 * Clear session info from localStorage.
+	 * @private
+	 */
+	_clearSessionInfo() {
+		try {
+			this._sessionInfo = {};
+			localStorage.removeItem('ws_session');
+		} catch { /* ignore */ }
+	}
+
+	/**
+	 * Generate a unique session ID for this browser tab.
+	 * @private
+	 * @returns {string}
+	 */
+	_generateSessionId() {
+		return `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+	}
 
 	/**
 	 * Check if any packets are currently being retried.
@@ -165,6 +212,18 @@ export class OnlineConnection {
 			this._everOpened = true;
 			this._backoffMs = this._initialBackoffMs;
 			if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+			
+			// Try to restore session if we have stored info
+			if (this._sessionInfo && this._sessionInfo.roomKey && this._sessionInfo.playerName && this._sessionInfo.sessionId) {
+				console.log('[Client] Attempting session restoration with stored info:', this._sessionInfo);
+				this._sendPayload({
+					type: 'restore_session',
+					roomKey: this._sessionInfo.roomKey,
+					playerName: this._sessionInfo.playerName,
+					sessionId: this._sessionInfo.sessionId
+				});
+			}
+			
 			this._emit('open');
 			// Only request room list if we're not waiting for a join_by_key response
 			if (!this._pendingJoinByKey) {
@@ -197,9 +256,18 @@ export class OnlineConnection {
 				// 'hosted' no longer used; ignore if received
 				case 'hosted':
 					break;
-				case 'roomlist':
-					this._emit('roomlist', msg.rooms || {});
+				case 'roomlist': {
+					const rooms = msg.rooms || {};
+					// Check if we successfully restored session (we're in a room with our stored info)
+					for (const [roomName, info] of Object.entries(rooms)) {
+						if (info && info.player && info.roomKey === this._sessionInfo?.roomKey) {
+							console.log('[Client] ✅ Session restored! Rejoined room:', roomName);
+							break;
+						}
+					}
+					this._emit('roomlist', rooms);
 					break;
+				}
 				case 'color':
 					// Server sends 'color' to all clients (requesting color_ans)
 					this._emit('color', msg);
@@ -300,7 +368,14 @@ export class OnlineConnection {
 		};
 		ws.onerror = () => { this._log('socket error'); };
 		ws.onclose = () => {
-			this._emit('close', { wasEverOpened: this._everOpened });
+			// Save packets that are still being attempted to be sent
+			this._unsentPackets = [];
+			for (const [packetKey, pending] of this._pendingPackets.entries()) {
+				if (pending && pending.packet) {
+					this._unsentPackets.push({ packetKey, packet: pending.packet });
+				}
+			}
+			this._emit('close', { wasEverOpened: this._everOpened, unsentPackets: this._unsentPackets });
 			this._scheduleReconnect();
 		};
 	}
@@ -363,8 +438,16 @@ export class OnlineConnection {
 					const type = obj && typeof obj === 'object' ? obj.type : undefined;
 					console.log('[Client] ⬆️ Sending:', type, obj);
 					
-					// Debug: Simulate 50% packet loss
-					if (Math.random() < 0.50) {
+					// Debug: Simulate 10% forced disconnect before move packets only
+					if (type === 'move' && Math.random() < 0.10) {
+						console.warn('[Client] 🔌 SIMULATED DISCONNECT:', type, obj);
+						if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+							this._ws.close();
+						}
+						return;
+					}
+					// Debug: Simulate 25% packet loss
+					if (Math.random() < 0.25) {
 						console.warn('[Client] 🔥 SIMULATED PACKET LOSS:', type, obj);
 						return;
 					}
@@ -391,29 +474,61 @@ export class OnlineConnection {
 	/** Host a new room.
 	 * @param {{roomName:string, maxPlayers:number, gridSize?:number, debugName?:string}} p
 	 */
-	host({ roomName, maxPlayers, gridSize, debugName }) { this._sendPayload({ type: 'host', roomName, maxPlayers, gridSize, debugName }); }
+	host({ roomName, maxPlayers, gridSize, debugName }) { 
+		// Generate sessionId if not already present
+		if (!this._sessionInfo.sessionId) {
+			this._sessionInfo.sessionId = this._generateSessionId();
+		}
+		this._sendPayload({ type: 'host', roomName, maxPlayers, gridSize, debugName, sessionId: this._sessionInfo.sessionId }); 
+	}
 
 	/** Join an existing room by name.
 	 * @param {string} roomName
 	 * @param {string} debugName Client name (display/debug only)
 	 */
-	join(roomName, debugName) { this._sendPayload({ type: 'join', roomName, debugName }); }
+	join(roomName, debugName) { 
+		// Generate sessionId if not already present
+		if (!this._sessionInfo.sessionId) {
+			this._sessionInfo.sessionId = this._generateSessionId();
+		}
+		this._sendPayload({ type: 'join', roomName, debugName, sessionId: this._sessionInfo.sessionId }); 
+	}
 
 	/** Join a room using its key.
 	 * @param {string} roomKey
 	 * @param {string} debugName Client name
 	 */
 	joinByKey(roomKey, debugName) {
+		// Generate sessionId if not already present
+		if (!this._sessionInfo.sessionId) {
+			this._sessionInfo.sessionId = this._generateSessionId();
+		}
 		// Mark that we're waiting for a join_by_key response to avoid redundant roomlist request
 		this._pendingJoinByKey = true;
-		const packet = { type: 'join_by_key', roomKey, debugName };
+		const packet = { type: 'join_by_key', roomKey, debugName, sessionId: this._sessionInfo.sessionId };
 		this._sendWithRetry(`join_by_key:${roomKey}`, packet, 'roomlist');
 	}
 
 	/** Leave a room (roomName optional if server infers current room).
 	 * @param {string} [roomName]
 	 */
-	leave(roomName) { this._sendPayload({ type: 'leave', roomName }); }
+	leave(roomName) { 
+		this._clearSessionInfo(); // Clear session on explicit leave
+		this._sendPayload({ type: 'leave', roomName }); 
+	}
+
+	/**
+	 * Store session info for reconnection (called when successfully joining a room).
+	 * @param {{roomKey: string, playerName: string}} info
+	 */
+	storeSessionInfo({ roomKey, playerName }) {
+		if (!this._sessionInfo.sessionId) {
+			// Generate session ID on first join
+			this._sessionInfo.sessionId = this._generateSessionId();
+		}
+		this._saveSessionInfo({ roomKey, playerName, sessionId: this._sessionInfo.sessionId });
+		console.log('[Client] Stored session info for reconnection:', this._sessionInfo);
+	}
 
 	/** Start the game (host only). Optionally override gridSize.
 	 * @param {number} [gridSize]

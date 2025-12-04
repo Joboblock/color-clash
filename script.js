@@ -713,6 +713,46 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
     /** @type {{row:number,col:number}|null} */
 
     /**
+     * Centralized handler for online move attempts.
+     * This ensures consistent sequence tracking regardless of input method (click/keyboard).
+     * @param {number} row - Grid row
+     * @param {number} col - Grid column
+     * @param {string} source - Input source for logging ('click', 'keyboard', etc.)
+     * @returns {void}
+     */
+    function handleOnlineMove(row, col, source = 'unknown') {
+        if (!clientFullyInitialized) return;
+        if (isProcessing) return; // Prevent sending moves while processing
+        if (currentPlayer !== myOnlineIndex) return;
+        if (!isValidLocalMove(row, col, myOnlineIndex)) return;
+        
+        // Only act when connected; avoid local desync while offline
+        if (!onlineConnection.isConnected()) {
+            showConnBanner('You are offline. Reconnecting…', 'error');
+            onlineConnection.ensureConnected();
+            return;
+        }
+        
+        // Apply move locally first
+        const moveApplied = handleClick(row, col);
+        console.log(`[Online Move/${source}] handleClick returned ${moveApplied}, lastAppliedSeq before increment: ${lastAppliedSeq}`);
+        
+        if (moveApplied) {
+            lastAppliedSeq++;
+            pendingEchoSeq = lastAppliedSeq;
+            console.log(`[Online Move/${source}] Applied and incremented seq to ${lastAppliedSeq}, waiting for echo (myOnlineIndex=${myOnlineIndex})`);
+            onlineConnection.sendMove({ 
+                row, 
+                col, 
+                fromIndex: myOnlineIndex, 
+                nextIndex: (myOnlineIndex + 1) % playerCount, 
+                color: activeColors()[myOnlineIndex], 
+                seq: lastAppliedSeq 
+            });
+        }
+    }
+
+    /**
      * Delegated grid click handler. Uses event.target.closest('.cell') to
      * resolve the clicked cell and routes to handleClick(row, col).
      * @param {MouseEvent|PointerEvent} ev - the click/pointer event.
@@ -724,27 +764,9 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
         const row = parseInt(el.dataset.row, 10);
         const col = parseInt(el.dataset.col, 10);
         if (Number.isInteger(row) && Number.isInteger(col)) {
-            // In online mode, only the active player may act and only valid moves can be sent
+            // In online mode, use centralized handler
             if (onlineGameActive) {
-                if (!clientFullyInitialized) return;
-                if (isProcessing) return; // Prevent sending moves while processing
-                if (currentPlayer !== myOnlineIndex) return;
-                if (!isValidLocalMove(row, col, myOnlineIndex)) return;
-                // Only act when connected; avoid local desync while offline
-                if (!onlineConnection.isConnected()) {
-                    showConnBanner('You are offline. Reconnecting…', 'error');
-                    onlineConnection.ensureConnected();
-                    return;
-                }
-                // Apply move locally first
-                const moveApplied = handleClick(row, col);
-                console.log(`[Local Move] handleClick returned ${moveApplied}, lastAppliedSeq before increment: ${lastAppliedSeq}`);
-                if (moveApplied) {
-                    lastAppliedSeq++;
-                    pendingEchoSeq = lastAppliedSeq;
-                    console.log(`[Local Move] Applied and incremented seq to ${lastAppliedSeq}, waiting for echo (myOnlineIndex=${myOnlineIndex})`);
-                    onlineConnection.sendMove({ row, col, fromIndex: myOnlineIndex, nextIndex: (myOnlineIndex + 1) % playerCount, color: activeColors()[myOnlineIndex], seq: lastAppliedSeq });
-                }
+                handleOnlineMove(row, col, 'click');
                 return;
             }
             // Local / Practice mode: proceed as usual
@@ -1671,18 +1693,8 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
         // Prevent keyboard activation if AI is processing or it's not the human player's turn
         if (typeof isProcessing !== 'undefined' && isProcessing) return;
         if (onlineGameActive) {
-            if (!clientFullyInitialized) return;
-            if (currentPlayer !== myOnlineIndex) return;
-            if (!isValidLocalMove(row, col, myOnlineIndex)) return;
-            // Only act when connected; avoid local desync while offline
-            if (!onlineConnection.isConnected()) {
-                showConnBanner('You are offline. Reconnecting…', 'error');
-                onlineConnection.ensureConnected();
-                return;
-            }
             e.preventDefault();
-            onlineConnection.sendMove({ row, col, fromIndex: myOnlineIndex, nextIndex: (myOnlineIndex + 1) % playerCount, color: activeColors()[myOnlineIndex] });
-            handleClick(row, col);
+            handleOnlineMove(row, col, 'keyboard');
             return;
         }
         if (typeof practiceMode !== 'undefined' && practiceMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;

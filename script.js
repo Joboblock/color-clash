@@ -13,7 +13,7 @@ import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLO
 // Edge circles component
 import { createEdgeCircles, updateEdgeCirclesActive, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
 // Navigation and routing
-import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
+import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, removeMenuParam, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
 
 // PLAYER_NAME_LENGTH now imported from nameUtils.js
 document.addEventListener('DOMContentLoaded', () => {
@@ -77,6 +77,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const hostCustomGameBtnRef = document.getElementById('hostCustomGameBtn');
     // Track last applied server move sequence to avoid duplicates
     let lastAppliedSeq = 0;
+    // Track if we're waiting for an echo after sending our own move
+    let pendingEchoSeq = null;
+console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
 
     // Connection banner helpers stay in UI layer; OnlineConnection just emits events.
 
@@ -122,146 +125,364 @@ document.addEventListener('DOMContentLoaded', () => {
         if (bar) bar.style.display = 'none';
     }
 
+    // Register page modules BEFORE setting up connection handlers
+    // This ensures pageRegistry.get() calls in event handlers don't fail
+    pageRegistry.register([firstPage, onlinePage, mainPage]);
+
     // Instantiate extracted connection
     const onlineConnection = new OnlineConnection({
         initialBackoffMs: WS_INITIAL_BACKOFF_MS,
-        maxBackoffMs: WS_MAX_BACKOFF_MS,
-        debug: false
+        maxBackoffMs: WS_MAX_BACKOFF_MS
     });
     onlineConnection.on('reconnect_scheduled', () => {
         showConnBanner('Reconnecting…', 'info');
     });
     onlineConnection.on('open', () => { hideConnBanner(); });
-    onlineConnection.on('hosted', (msg) => {
-        myJoinedRoom = msg.room;
-        myRoomKey = msg.roomKey || null;
-        myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
-        myRoomCurrentPlayers = 1;
-        if (typeof msg.player === 'string' && msg.player) myPlayerName = msg.player;
-        // Menu transition logic (same as before)
-        const onlineMenu = document.getElementById('onlineMenu');
-        const mainMenu = document.getElementById('mainMenu');
-        let deferredRoomKey = null;
-        if (onlineMenu && mainMenu) {
-            mainMenu.classList.add('hidden');
-            mainMenu.setAttribute('aria-hidden', 'true');
-            onlineMenu.classList.remove('hidden');
-            onlineMenu.setAttribute('aria-hidden', 'false');
-            try { mainMenu.dataset.openedBy = ''; } catch { /* ignore */ }
+    onlineConnection.on('packet_retry_started', () => {
+        showConnBanner('Retrying connection…', 'info');
+    });
+    onlineConnection.on('packet_confirmed', () => {
+        // Only hide banner if no other packets are being retried
+        if (!onlineConnection.hasRetryingPackets()) {
+            hideConnBanner();
         }
-        if (msg.roomKey) {
-            const params = new URLSearchParams(window.location.search);
-            const currentMenu = params.get('menu');
-            if (currentMenu === 'host') {
-                deferredRoomKey = msg.roomKey;
-                const popHandler = () => { updateUrlRoomKey(deferredRoomKey); window.removeEventListener('popstate', popHandler, true); };
-                window.addEventListener('popstate', popHandler, true);
-            } else { updateUrlRoomKey(msg.roomKey); }
-        }
-        updateStartButtonState();
     });
     onlineConnection.on('roomlist', (rooms) => {
+        // Store for access by connection retry logic
+        window.lastRoomList = rooms;
+        // If any room entry contains player info matching us, treat as confirmation of join/host
+        let foundSelf = false;
         Object.entries(rooms || {}).forEach(([roomName, info]) => {
-            if (info && Array.isArray(info.players)) {
-                const names = info.players.map(p => p.name).join(', ');
-                console.debug(`[RoomList] Room: ${roomName} | Players: ${names} (${info.currentPlayers}/${info.maxPlayers})`);
-            } else {
-                console.debug(`[RoomList] Room: ${roomName} | Players: ? (${info.currentPlayers}/${info.maxPlayers})`);
+            // Check if this room contains our player info (matches current name or we don't have a name yet)
+            if (info && typeof info.player === 'string' && (info.player === myPlayerName || myPlayerName === null)) {
+                // Update our player name from the server (important for join_by_key where we don't know our final name)
+                myPlayerName = info.player;
+                myJoinedRoom = roomName;
+                myRoomKey = info.roomKey || null;
+                myRoomMaxPlayers = Number.isFinite(info.maxPlayers) ? info.maxPlayers : myRoomMaxPlayers;
+                if (Array.isArray(info.players)) { myRoomPlayers = info.players.slice(); myRoomCurrentPlayers = info.players.length; }
+                // Update window references
+                window.myJoinedRoom = myJoinedRoom;
+                window.myRoomMaxPlayers = myRoomMaxPlayers;
+                window.myRoomCurrentPlayers = myRoomCurrentPlayers;
+                window.myRoomPlayers = myRoomPlayers;
+                window.myPlayerName = myPlayerName;
+                if (info.roomKey) updateUrlRoomKey(info.roomKey);
+                // If grid size provided (lobby background), sync the UI tile and grid
+                try {
+                    if (Number.isInteger(info.gridSize)) {
+                        const s = Math.max(3, Math.min(16, parseInt(info.gridSize, 10)));
+                        menuGridSizeVal = s;
+                        try {
+                            const gridSizeTile = pageRegistry.get('main')?.components?.gridSizeTile;
+                            gridSizeTile && gridSizeTile.setSize(s, 'network', { silent: true, bump: false });
+                        } catch { /* ignore */ }
+                        if (s !== gridSize) recreateGrid(s, playerCount);
+                    }
+                } catch { /* ignore */ }
+                foundSelf = true;
             }
+
         });
+        if (foundSelf) {
+            // Store session info for reconnection when we're in a room
+            if (myJoinedRoom && myRoomKey && myPlayerName) {
+                onlineConnection.storeSessionInfo({ roomKey: myRoomKey, playerName: myPlayerName });
+            }
+            // Navigate to online menu when transitioning into a room (from none)
+            if (!window._wasInRoom && myJoinedRoom) navigateToMenu('online');
+            window._wasInRoom = true;
+        } else {
+            // Client is no longer in any room - clear all membership state
+            if (myJoinedRoom || myRoomKey) {
+                myJoinedRoom = null;
+                myRoomKey = null;
+                myRoomMaxPlayers = null;
+                myRoomCurrentPlayers = 0;
+                myRoomPlayers = [];
+                window.myJoinedRoom = myJoinedRoom;
+                window.myRoomMaxPlayers = myRoomMaxPlayers;
+                window.myRoomCurrentPlayers = myRoomCurrentPlayers;
+                window.myRoomPlayers = myRoomPlayers;
+                removeUrlRoomKey();
+            }
+            window._wasInRoom = false;
+        }
         const rlView = pageRegistry.get('online')?.components?.roomListView;
         try { rlView && rlView.render(rooms); } catch { /* ignore */ }
         updateStartButtonState(rooms);
     });
-    onlineConnection.on('started', (msg) => {
+    onlineConnection.on('color', () => {
+        // All clients (host and non-host): server requesting color_ans with our color preference
+        console.log('[Color Request] Server requesting color preference');
+        if (!clientFullyInitialized) return;
+        
+        // Send our color preference and wait for start/start_cnf
+        try { 
+            const color = playerColors[getStartingColorIndex()] || 'green';
+            onlineConnection.sendColorAns(color);
+            console.log('[Color] Sent color_ans, waiting for start confirmation...');
+        } catch { /* ignore */ }
+    });
+    
+    // Handler for non-host clients receiving 'start' with assigned colors
+    onlineConnection.on('start', (msg) => {
+        // Non-host receives assigned colors from server - this is when we start the game
+        console.log('[Start] Server sent start with colors:', msg.colors);
+        if (!clientFullyInitialized) return;
+        
         try {
+            // Initialize game state for non-host clients
             lastAppliedSeq = 0;
+            pendingEchoSeq = null;
             onlineGameActive = true;
             onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
             myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
+            console.log(`[Colors] myPlayerName="${myPlayerName}", onlinePlayers=`, onlinePlayers, `myOnlineIndex=${myOnlineIndex}`);
+            
             const p = Math.max(2, Math.min(playerColors.length, onlinePlayers.length || 2));
-            const s = Number.isInteger(msg.gridSize) ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10))) : recommendedGridSize(p);
+            // Get gridSize from msg (server always sends it in colors packet)
+            const s = Number.isInteger(msg.gridSize) 
+                ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10))) 
+                : recommendedGridSize(p);
+            
+            // Use server-provided colors
             if (msg.colors && Array.isArray(msg.colors) && msg.colors.length >= p) {
                 gameColors = msg.colors.slice(0, p);
             } else {
                 gameColors = playerColors.slice(0, p);
             }
+            
             playerCount = p;
             gridSize = s;
             document.documentElement.style.setProperty('--grid-size', gridSize);
+            
+            // Hide menus and start game UI
             const firstMenu = document.getElementById('firstMenu');
             const mainMenu = document.getElementById('mainMenu');
             const onlineMenu = document.getElementById('onlineMenu');
             if (firstMenu) setHidden(firstMenu, true);
             if (mainMenu) setHidden(mainMenu, true);
             if (onlineMenu) setHidden(onlineMenu, true);
+            
             practiceMode = false;
             recreateGrid(s, p);
             currentPlayer = 0;
             document.body.className = activeColors()[currentPlayer];
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
-        } catch (err) { console.error('[Online] Failed to start online game', err); }
+            
+            // Remove menu parameter from URL when game starts
+            removeMenuParam();
+            
+            // Enable session restoration during active game
+            onlineConnection.setGameActive();
+            
+            console.log(`[Start] Game started for non-host`);
+            
+            // Non-host sends acknowledgment
+            onlineConnection.sendStartAck();
+        } catch (err) {
+            console.error('[Start] Failed to start game:', err);
+        }
     });
-    onlineConnection.on('request_preferred_colors', () => {
-        try { const color = playerColors[getStartingColorIndex()] || 'green'; onlineConnection.sendPreferredColor(color); } catch (e) { console.warn('[Online] Failed preferred_color', e); }
-    });
-    onlineConnection.on('joined', (msg) => {
-        myJoinedRoom = msg.room;
-        myRoomKey = msg.roomKey || null;
-        if (msg.roomKey) updateUrlRoomKey(msg.roomKey);
-        if (typeof msg.player === 'string' && msg.player) myPlayerName = msg.player;
-        myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
-        if (Array.isArray(msg.players)) { myRoomCurrentPlayers = msg.players.length; myRoomPlayers = msg.players; }
+    
+    // Handler for host receiving 'start_cnf' as final confirmation
+    onlineConnection.on('start_cnf', (msg) => {
+        // Host receives final confirmation with assigned colors
+        console.log('[Start Cnf] Server sent start confirmation with colors:', msg.colors);
+        if (!clientFullyInitialized) return;
+        
         try {
-            if (Number.isInteger(msg.gridSize)) {
-                const s = Math.max(3, Math.min(16, parseInt(msg.gridSize, 10)));
-                menuGridSizeVal = s;
-                try {
-                    const gridSizeTile = pageRegistry.get('main')?.components?.gridSizeTile;
-                    gridSizeTile && gridSizeTile.setSize(s, 'network', { silent: true, bump: false });
-                } catch { /* ignore */ }
-                if (s !== gridSize) recreateGrid(s, playerCount);
+            // Initialize game state for host
+            lastAppliedSeq = 0;
+            pendingEchoSeq = null;
+            onlineGameActive = true;
+            onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
+            myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
+            console.log(`[Start Cnf] myPlayerName="${myPlayerName}", onlinePlayers=`, onlinePlayers, `myOnlineIndex=${myOnlineIndex}`);
+            
+            const p = Math.max(2, Math.min(playerColors.length, onlinePlayers.length || 2));
+            // Get gridSize from msg (server always sends it)
+            const s = Number.isInteger(msg.gridSize) 
+                ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10))) 
+                : recommendedGridSize(p);
+            
+            // Use server-provided colors
+            if (msg.colors && Array.isArray(msg.colors) && msg.colors.length >= p) {
+                gameColors = msg.colors.slice(0, p);
+            } else {
+                gameColors = playerColors.slice(0, p);
             }
-        } catch { /* ignore */ }
-        updateStartButtonState();
-    });
-    onlineConnection.on('left', (msg) => {
-        if (!msg.room || msg.room === myJoinedRoom) {
-            myJoinedRoom = null;
-            myRoomKey = null;
+            
+            playerCount = p;
+            gridSize = s;
+            document.documentElement.style.setProperty('--grid-size', gridSize);
+            
+            // Hide menus and start game UI
+            const firstMenu = document.getElementById('firstMenu');
+            const mainMenu = document.getElementById('mainMenu');
+            const onlineMenu = document.getElementById('onlineMenu');
+            if (firstMenu) setHidden(firstMenu, true);
+            if (mainMenu) setHidden(mainMenu, true);
+            if (onlineMenu) setHidden(onlineMenu, true);
+            
+            practiceMode = false;
+            recreateGrid(s, p);
+            currentPlayer = 0;
+            document.body.className = activeColors()[currentPlayer];
+            updateGrid();
+            try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
+            
+            // Remove menu parameter from URL when game starts
+            removeMenuParam();
+            
+            // Enable session restoration during active game
+            onlineConnection.setGameActive();
+            
+            console.log(`[Start Cnf] Game started for host`);
+        } catch (err) {
+            console.error('[Start Cnf] Failed to start game:', err);
         }
-        myRoomMaxPlayers = null; myRoomCurrentPlayers = 0; myRoomPlayers = [];
-        removeUrlRoomKey();
-        updateStartButtonState();
     });
-    onlineConnection.on('roomupdate', (msg) => {
-        if (msg.room && msg.room === myJoinedRoom && Array.isArray(msg.players)) {
-            myRoomCurrentPlayers = msg.players.length; myRoomPlayers = msg.players; updateStartButtonState();
+    // Ordered move buffer: store out-of-order or deferred moves by sequence
+    const pendingMoves = new Map(); // seq -> { r, c, fromIdx }
+    function tryApplyBufferedMoves() {
+        // Apply any contiguous moves starting from lastAppliedSeq + 1
+        let appliedCount = 0;
+        while (onlineGameActive) {
+            const nextSeq = (Number(lastAppliedSeq) || 0) + 1;
+            const m = pendingMoves.get(nextSeq);
+            if (!m) break;
+            // Apply this buffered move
+            const { r, c, fromIdx } = m;
+            console.log(`[Buffer] Draining seq ${nextSeq} from player ${fromIdx} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
+            currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
+            const applied = handleClick(r, c);
+            console.log(`[Buffer] handleClick returned ${applied} for seq=${nextSeq}`);
+            if (applied) {
+                lastAppliedSeq = nextSeq;
+                console.log(`[Buffer] Updated lastAppliedSeq to ${lastAppliedSeq}`);
+                pendingMoves.delete(nextSeq);
+                appliedCount++;
+            } else {
+                console.warn(`[Buffer] Failed to apply seq ${nextSeq}, stopping drain (myOnlineIndex=${myOnlineIndex})`);
+                break;
+            }
         }
-    });
+        if (appliedCount > 0) {
+            console.log(`[Buffer] Drained ${appliedCount} buffered move(s). Remaining: ${pendingMoves.size} (myOnlineIndex=${myOnlineIndex})`);
+        }
+    }
+
     onlineConnection.on('move', (msg) => {
         try {
-            if (!onlineGameActive) return;
-            if (msg.room && msg.room !== myJoinedRoom) return;
+            console.log(`[Move Handler] Received move:`, msg, `onlineGameActive=${onlineGameActive}, myJoinedRoom=${myJoinedRoom}, lastAppliedSeq=${lastAppliedSeq}, myOnlineIndex=${myOnlineIndex}`);
+            if (!onlineGameActive) {
+                console.warn(`[Move Handler] Game not active, ignoring move (myOnlineIndex=${myOnlineIndex})`);
+                return;
+            }
+            if (msg.room && msg.room !== myJoinedRoom) {
+                console.warn(`[Move Handler] Wrong room: received ${msg.room}, in ${myJoinedRoom} (myOnlineIndex=${myOnlineIndex})`);
+                return;
+            }
             const seq = Number(msg.seq);
-            if (Number.isInteger(seq) && seq <= lastAppliedSeq) return;
             const r = Number(msg.row), c = Number(msg.col); const fromIdx = Number(msg.fromIndex);
-            if (!Number.isInteger(r) || !Number.isInteger(c)) return;
-            if (fromIdx === myOnlineIndex) { if (Number.isInteger(seq)) lastAppliedSeq = Math.max(lastAppliedSeq, seq); return; }
-            if (Number.isInteger(seq)) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
-            const applyNow = () => { currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx)); handleClick(r, c); };
-            if (isProcessing) {
-                const startTs = Date.now();
-                const tryApply = () => {
-                    if (!onlineGameActive) return;
-                    if (!isProcessing) { applyNow(); return; }
-                    if (Date.now() - startTs > 4000) { console.warn('[Online] Dropping deferred move after timeout'); return; }
-                    setTimeout(tryApply, 100);
+            if (!Number.isInteger(r) || !Number.isInteger(c)) {
+                console.warn(`[Move Handler] Invalid coordinates (myOnlineIndex=${myOnlineIndex})`);
+                return;
+            }
+
+            // Send acknowledgment to server (for other players' moves only - we don't ack our own confirmation)
+            if (fromIdx !== myOnlineIndex && Number.isInteger(seq)) {
+                onlineConnection.sendMoveAck(seq);
+            }
+
+            // For other players' moves: only apply when in-order; otherwise store
+            if (!Number.isInteger(seq)) {
+                console.warn(`[Move] Received move without sequence number. Ignoring. (myOnlineIndex=${myOnlineIndex})`);
+                return;
+            }
+            
+            // Handle implicit echo confirmation: if we sent a move but haven't received our echo,
+            // and we receive the opponent's next move, treat it as if our echo arrived
+            if (pendingEchoSeq !== null && seq === pendingEchoSeq + 1) {
+                console.log(`[Implicit Echo] Received opponent move seq=${seq} while waiting for echo seq=${pendingEchoSeq}. Confirming our move implicitly. (myOnlineIndex=${myOnlineIndex})`);
+                // Our move was accepted by the server (otherwise opponent couldn't have moved next)
+                // No need to apply locally again - we already did that when we sent it
+                pendingEchoSeq = null;
+                // Now proceed to apply the opponent's move normally
+            }
+            
+            const expectedNext = (Number(lastAppliedSeq) || 0) + 1;
+            if (seq === expectedNext) {
+                // Apply immediately, or buffer if UI is currently processing
+                const doApply = () => {
+                    console.log(`[Move] Applying seq ${seq} from player ${fromIdx} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
+                    currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
+                    const applied = handleClick(r, c);
+                    console.log(`[Move] handleClick returned ${applied} for seq=${seq}`);
+                    if (applied) {
+                        lastAppliedSeq = seq;
+                        console.log(`[Move] Updated lastAppliedSeq to ${lastAppliedSeq}`);
+                        // After applying, try to drain any subsequent buffered moves in order
+                        tryApplyBufferedMoves();
+                    } else {
+                        console.warn(`[Move] Failed to apply seq ${seq}, buffering to retry after processing (myOnlineIndex=${myOnlineIndex})`);
+                        // Buffer the move to retry after current processing completes
+                        pendingMoves.set(seq, { r, c, fromIdx });
+                    }
                 };
-                tryApply();
-            } else { applyNow(); }
-        } catch (err) { console.error('[Online] Error applying remote move', err); }
+                if (isProcessing) {
+                    console.log(`[Move] Seq ${seq} is next but UI processing. Buffering. (myOnlineIndex=${myOnlineIndex})`);
+                    // Buffer this exact-next move and it will be applied when processing finishes
+                    pendingMoves.set(seq, { r, c, fromIdx });
+                    // No timeout: deterministic ordered application
+                } else {
+                    doApply();
+                }
+            } else if (seq > expectedNext) {
+                console.warn(`[Move] Future move seq ${seq}, expected ${expectedNext}. Buffering. (pending: ${Array.from(pendingMoves.keys()).sort((a,b)=>a-b).join(', ')}) (myOnlineIndex=${myOnlineIndex})`);
+                // Future move: store and wait for earlier moves
+                pendingMoves.set(seq, { r, c, fromIdx });
+            }
+        } catch (err) { 
+            console.error('[Move] Error handling move:', err);
+        }
+    });
+    onlineConnection.on('move_ack', (msg) => {
+        try {
+            console.log(`[Move Ack] Received move confirmation:`, msg, `onlineGameActive=${onlineGameActive}, lastAppliedSeq=${lastAppliedSeq}, myOnlineIndex=${myOnlineIndex}`);
+            if (!onlineGameActive) {
+                console.warn(`[Move Ack] Game not active, ignoring ack (myOnlineIndex=${myOnlineIndex})`);
+                return;
+            }
+            const seq = Number(msg.seq);
+            const fromIdx = Number(msg.fromIndex);
+            
+            // This should be our own move confirmation
+            if (fromIdx !== myOnlineIndex) {
+                console.warn(`[Move Ack] Received ack for wrong player: fromIdx=${fromIdx}, myOnlineIndex=${myOnlineIndex}`);
+                return;
+            }
+            
+            if (Number.isInteger(seq)) {
+                console.log(`[Move Ack] Received echo for seq=${seq}, current lastAppliedSeq=${lastAppliedSeq}, pendingEchoSeq=${pendingEchoSeq}, myOnlineIndex=${myOnlineIndex}`);
+                if (seq === lastAppliedSeq) {
+                    console.log(`[Move Ack] Seq ${seq} confirmed (own move, myOnlineIndex=${myOnlineIndex})`);
+                    pendingEchoSeq = null; // Clear pending echo
+                    // Echo confirms our local apply; try drain any buffered moves
+                    tryApplyBufferedMoves();
+                } else if (seq < lastAppliedSeq) {
+                    console.warn(`[Move Ack] Old echo seq ${seq}, already at ${lastAppliedSeq}. Ignoring. (myOnlineIndex=${myOnlineIndex})`);
+                } else {
+                    // seq > lastAppliedSeq - should not happen in normal flow
+                    console.warn(`[Move Ack] Future echo seq ${seq}, currently at ${lastAppliedSeq}. Server ahead? (myOnlineIndex=${myOnlineIndex})`);
+                }
+            }
+        } catch (err) { 
+            console.error('[Move Ack] Error handling move ack:', err);
+        }
     });
     onlineConnection.on('rejoined', (msg) => {
         myJoinedRoom = msg.room || myJoinedRoom;
@@ -269,6 +490,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (msg.roomKey) updateUrlRoomKey(msg.roomKey);
         if (Array.isArray(msg.players)) { myRoomPlayers = msg.players; myRoomCurrentPlayers = msg.players.length; }
         myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
+        // Clear pending echo on rejoin - we'll get the full state from server
+        pendingEchoSeq = null;
         try {
             const missed = Array.isArray(msg.recentMoves) ? msg.recentMoves.slice() : [];
             if (missed.length) {
@@ -278,15 +501,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     const m = missed[idx]; const r = Number(m.row), c = Number(m.col), fromIdx = Number(m.fromIndex); const seq = Number(m.seq);
                     if (Number.isInteger(seq) && seq <= lastAppliedSeq) { idx++; applyNext(); return; }
                     if (!Number.isInteger(r) || !Number.isInteger(c) || !Number.isInteger(fromIdx)) { idx++; applyNext(); return; }
-                    const doApply = () => { if (!onlineGameActive) { idx++; applyNext(); return; } currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx)); handleClick(r, c); if (Number.isInteger(seq)) lastAppliedSeq = Math.max(lastAppliedSeq, seq); idx++; setTimeout(applyNext, 0); };
+                    const doApply = () => { 
+                        if (!onlineGameActive) { idx++; applyNext(); return; } 
+                        currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx)); 
+                        const applied = handleClick(r, c); 
+                        console.log(`[Rejoined] handleClick returned ${applied} for seq=${seq}, lastAppliedSeq before=${lastAppliedSeq}`);
+                        if (applied && Number.isInteger(seq)) {
+                            lastAppliedSeq = Math.max(lastAppliedSeq, seq);
+                            console.log(`[Rejoined] Updated lastAppliedSeq to ${lastAppliedSeq}`);
+                        }
+                        idx++; 
+                        setTimeout(applyNext, 0); 
+                    };
                     if (isProcessing) { setTimeout(applyNext, 100); } else { doApply(); }
                 }; applyNext();
             }
-        } catch (e) { console.warn('[Online] Failed to apply catch-up moves', e); }
+        } catch { /* ignore */ }
         updateStartButtonState();
     });
     onlineConnection.on('error', (msg) => {
-        console.debug('[Error]', msg.error);
         alert(msg.error);
         try {
             const err = String(msg.error || '');
@@ -300,6 +533,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let myRoomCurrentPlayers = 0; // current players in my room
     let myRoomPlayers = []; // last known players (first is host)
     let myPlayerName = null; // this client's player name used to join/host
+    
+    // Expose to window for connection retry logic
+    window.myJoinedRoom = myJoinedRoom;
+    window.myRoomMaxPlayers = myRoomMaxPlayers;
+    window.myRoomCurrentPlayers = myRoomCurrentPlayers;
+    window.myRoomPlayers = myRoomPlayers;
+    window.myPlayerName = myPlayerName;
 
     /**
      * Toggle the online bottom button between "Host Custom" and "Start Game" depending on room state.
@@ -353,6 +593,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // updateRoomList removed: replaced by OnlineRoomList component (roomListView.render)
 
     function hostRoom() {
+        if (!clientFullyInitialized) return;
         const name = onlinePlayerNameInput.value.trim() || 'Player';
         function sendHost() {
             try {
@@ -362,18 +603,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 const desiredGrid = Number.isInteger(menuGridSizeVal) ? Math.max(3, Math.min(16, menuGridSizeVal)) : Math.max(3, selectedPlayers + 3);
                 hostedDesiredGridSize = desiredGrid;
                 onlineConnection.host({ roomName: name, maxPlayers: selectedPlayers, gridSize: desiredGrid, debugName: debugPlayerName });
-            } catch (err) {
-                console.error('[Host] Error hosting room:', err);
-                if (err && err.stack) console.error(err.stack);
-            }
+            } catch { /* ignore */ }
         }
+        const sendHostOnce = () => { sendHost(); onlineConnection.off('open', sendHostOnce); };
         onlineConnection.ensureConnected();
-        if (onlineConnection.isConnected()) sendHost(); else onlineConnection.on('open', sendHost);
+        if (onlineConnection.isConnected()) sendHost(); else onlineConnection.on('open', sendHostOnce);
     }
 
     // Expose to onlinePage via context (used there)
     window.joinRoom = function joinRoom(roomName) {
-        console.debug('[Join] Joining room:', roomName);
+        if (!clientFullyInitialized) return;
         // For debug: send player name, but do not use for logic
         let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player'));
         // Check for duplicate names in the room list
@@ -398,18 +637,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Ensure connection and send once open
         const doJoin = () => { onlineConnection.join(roomName, debugPlayerName); };
+        const doJoinOnce = () => { doJoin(); onlineConnection.off('open', doJoinOnce); };
         onlineConnection.ensureConnected();
-        if (onlineConnection.isConnected()) doJoin(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doJoin); }
+        if (onlineConnection.isConnected()) doJoin(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doJoinOnce); }
     }
 
     // Expose to onlinePage via context (used there)
     window.leaveRoom = function leaveRoom(roomName) {
-        console.debug('[Leave] Leaving room:', roomName);
+        if (!clientFullyInitialized) return;
         const doLeave = () => { onlineConnection.leave(roomName); };
+        const doLeaveOnce = () => { doLeave(); onlineConnection.off('open', doLeaveOnce); };
         onlineConnection.ensureConnected();
-        if (onlineConnection.isConnected()) doLeave(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doLeave); }
-        // Remove key from URL when leaving
-        removeUrlRoomKey();
+        if (onlineConnection.isConnected()) doLeave(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doLeaveOnce); }
+    // Defer URL key removal until server confirms via roomlist update.
     }
 
     // Wire Host Custom / Start Game button behavior in the online menu
@@ -418,18 +658,24 @@ document.addEventListener('DOMContentLoaded', () => {
             const btn = e.currentTarget;
             // If we're in Start Game mode and enabled, trigger online start (stub)
             if (btn.classList && btn.classList.contains('start-mode') && !btn.disabled) {
+                if (!clientFullyInitialized) return;
                 // Host starts the online game
                 const startPayload = { type: 'start' };
                 if (Number.isInteger(hostedDesiredGridSize)) startPayload.gridSize = hostedDesiredGridSize;
+                const startGame = () => { onlineConnection.start(hostedDesiredGridSize); };
+                const startGameOnce = () => { startGame(); onlineConnection.off('open', startGameOnce); };
                 onlineConnection.ensureConnected();
-                if (onlineConnection.isConnected()) { onlineConnection.start(hostedDesiredGridSize); }
-                else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', () => onlineConnection.start(hostedDesiredGridSize)); }
+                if (onlineConnection.isConnected()) { startGame(); }
+                else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', startGameOnce); }
                 return;
             }
             // Otherwise behave as Host Custom -> navigate to host menu
             navigateToMenu('host');
         });
     }
+
+    // Track client initialization state
+    let clientFullyInitialized = false;
 
     onlineConnection.connect();
 
@@ -439,23 +685,19 @@ document.addEventListener('DOMContentLoaded', () => {
             // Use sendBeacon for reliable cleanup during unload
             try {
                 onlineConnection.leave(myJoinedRoom);
-            } catch (e) {
-                console.debug('[Cleanup] Failed to leave room on unload:', e);
-            }
+            } catch { /* ignore */ }
         }
     });
 
     // Auto-join flow: if ?key= present and not already in a room, attempt join_by_key
-    (function attemptAutoJoinByKey() {
+    // Deferred until after page initialization
+    let pendingAutoJoinKey = null;
+    (function detectAutoJoinByKey() {
         try {
             const params = new URLSearchParams(window.location.search);
             const key = params.get('key');
             if (key && !myJoinedRoom) {
-                // Ensure WS is open then send
-                const sendJoinKey = () => { onlineConnection.joinByKey(key, (localStorage.getItem('playerName') || 'Player')); };
-                if (onlineConnection.isConnected()) sendJoinKey(); else onlineConnection.on('open', sendJoinKey);
-                // Navigate to online menu for visibility
-                navigateToMenu('online');
+                pendingAutoJoinKey = key;
             }
         } catch { /* ignore */ }
     })();
@@ -484,6 +726,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (Number.isInteger(row) && Number.isInteger(col)) {
             // In online mode, only the active player may act and only valid moves can be sent
             if (onlineGameActive) {
+                if (!clientFullyInitialized) return;
                 if (isProcessing) return; // Prevent sending moves while processing
                 if (currentPlayer !== myOnlineIndex) return;
                 if (!isValidLocalMove(row, col, myOnlineIndex)) return;
@@ -493,9 +736,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     onlineConnection.ensureConnected();
                     return;
                 }
-                // Send move to server and rely on echo for other clients; apply locally for responsiveness
-                onlineConnection.sendMove({ row, col, fromIndex: myOnlineIndex, nextIndex: (myOnlineIndex + 1) % playerCount, color: activeColors()[myOnlineIndex] });
-                handleClick(row, col);
+                // Apply move locally first
+                const moveApplied = handleClick(row, col);
+                console.log(`[Local Move] handleClick returned ${moveApplied}, lastAppliedSeq before increment: ${lastAppliedSeq}`);
+                if (moveApplied) {
+                    lastAppliedSeq++;
+                    pendingEchoSeq = lastAppliedSeq;
+                    console.log(`[Local Move] Applied and incremented seq to ${lastAppliedSeq}, waiting for echo (myOnlineIndex=${myOnlineIndex})`);
+                    onlineConnection.sendMove({ row, col, fromIndex: myOnlineIndex, nextIndex: (myOnlineIndex + 1) % playerCount, color: activeColors()[myOnlineIndex], seq: lastAppliedSeq });
+                }
                 return;
             }
             // Local / Practice mode: proceed as usual
@@ -739,8 +988,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const aiStrengthTile = document.getElementById('aiStrengthTile');
         if (aiStrengthTile) aiStrengthTile.style.display = (mode === 'practice') ? '' : 'none';
     }
-    // Register and init page modules (after setMainMenuMode is defined so context functions exist)
-    pageRegistry.register([firstPage, onlinePage, mainPage]);
+    // Initialize page modules (registration already done earlier before connection handlers)
     try {
         pageRegistry.initAll({
             onlineConnection,
@@ -776,6 +1024,23 @@ document.addEventListener('DOMContentLoaded', () => {
             menuHistoryStack
         });
     } catch { /* ignore */ }
+    
+    // Mark client as fully initialized
+    clientFullyInitialized = true;
+    
+    // Process pending auto-join if any
+    if (pendingAutoJoinKey) {
+        const key = pendingAutoJoinKey;
+        pendingAutoJoinKey = null;
+        const sendJoinKey = () => { 
+            onlineConnection.joinByKey(key, (localStorage.getItem('playerName') || 'Player')); 
+            // Remove this handler after it's called once to prevent re-joining on reconnect
+            onlineConnection.off('open', sendJoinKey);
+        };
+        if (onlineConnection.isConnected()) sendJoinKey(); else onlineConnection.on('open', sendJoinKey);
+        // Navigate to online menu for visibility
+        navigateToMenu('online');
+    }
     // Initial routing based on typed menu param
     const typedMenu = getMenuParam();
     if (!typedMenu && hasPlayersOrSize) {
@@ -821,7 +1086,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Build visual player box slider
     const playerBoxSlider = document.getElementById('playerBoxSlider');
-    console.debug('[PlayerBoxSlider] element lookup:', playerBoxSlider ? '#playerBoxSlider found' : 'not found');
 
     // Ensure CSS variables for colors are set on :root BEFORE building boxes
     applyPaletteCssVariables();
@@ -889,7 +1153,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         // Prevent left/right navigation from moving focus when slider is focused
         if ((mappedKey === 'ArrowLeft' || mappedKey === 'ArrowRight') && focused === playerBoxSlider) {
-            console.debug('[PlayerBoxSlider] focus guard: intercept left/right while slider focused');
             return false;
         }
         const curRect = focused.getBoundingClientRect();
@@ -1148,7 +1411,8 @@ document.addEventListener('DOMContentLoaded', () => {
             setAiDepth: (val) => { aiDepth = val; },
             setGameColors: (val) => { gameColors = val; },
             getMyJoinedRoom: () => myJoinedRoom,
-            getRoomKeyForRoom: (roomName) => (roomName === myJoinedRoom) ? myRoomKey : null
+            getRoomKeyForRoom: (roomName) => (roomName === myJoinedRoom) ? myRoomKey : null,
+            getGameColors: () => gameColors
         });
     }
 
@@ -1247,6 +1511,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function scheduleGameEnd() {
         if (gameWon) return;
         gameWon = true;
+        
+        // Disable session restoration when game ends
+        onlineConnection.setGameInactive();
+        
         if (menuShownAfterWin) return; // schedule only once
         menuShownAfterWin = true;
         setTimeout(() => {
@@ -1285,7 +1553,8 @@ document.addEventListener('DOMContentLoaded', () => {
             onlineGameActive,
             myOnlineIndex,
             practiceMode,
-            humanPlayer
+            humanPlayer,
+            gameColors
         };
     }
 
@@ -1402,6 +1671,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Prevent keyboard activation if AI is processing or it's not the human player's turn
         if (typeof isProcessing !== 'undefined' && isProcessing) return;
         if (onlineGameActive) {
+            if (!clientFullyInitialized) return;
             if (currentPlayer !== myOnlineIndex) return;
             if (!isValidLocalMove(row, col, myOnlineIndex)) return;
             // Only act when connected; avoid local desync while offline
@@ -1475,7 +1745,7 @@ document.addEventListener('DOMContentLoaded', () => {
         highlightInvalidInitialPositions();
         document.body.className = activeColors()[currentPlayer];
         // Sync active circle emphasis after grid rebuild
-        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer); } catch { /* ignore */ }
+        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
 
         // Reflect actual grid size in display value while menu is present
         menuGridSizeVal = Math.max(3, newSize);
@@ -1510,16 +1780,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void}
      */
     function handleClick(row, col) {
-        if (isProcessing || gameWon) return;
-
-        // Debug log for every move
-        console.debug('[Move]', {
-            player: activeColors()[currentPlayer],
-            playerIndex: currentPlayer,
-            row,
-            col,
-            online: onlineGameActive
-        });
+        if (isProcessing || gameWon) return false;
 
         const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
         // Save last focused cell for current player
@@ -1527,7 +1788,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const cellColor = getPlayerColor(row, col);
 
         if (!initialPlacements[currentPlayer]) {
-            if (isInitialPlacementInvalid(row, col)) return;
+            if (isInitialPlacementInvalid(row, col)) return false;
 
             if (grid[row][col].value === 0) {
                 grid[row][col].value = initialPlacementValue;
@@ -1543,7 +1804,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     processExplosions();
                     initialPlacements[currentPlayer] = true;
                 }, delayExplosion);
-                return;
+                return true;
             }
 
         } else {
@@ -1557,8 +1818,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     switchPlayer();
                 }
+                return true;
             }
         }
+        return false;
     }
 
     /**
@@ -1906,7 +2169,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.body.className = activeColors()[currentPlayer];
         // Update edge circle emphasis for new active player
-        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer); } catch { /* ignore */ }
+        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
         clearCellFocus();
         updateGrid();
         // Restore focus to last focused cell for this player, if any

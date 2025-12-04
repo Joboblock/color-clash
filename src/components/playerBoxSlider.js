@@ -26,16 +26,6 @@ function noop() { }
         this.getStartingColorIndex = typeof opts.getStartingColorIndex === 'function' ? opts.getStartingColorIndex : function () { return 0; };
         this.onCountChange = typeof opts.onCountChange === 'function' ? opts.onCountChange : noop;
 
-        // Debug: constructor called and key options
-        try {
-            console.debug('[PlayerBoxSlider] ctor', {
-                hasRootEl: !!this.rootEl,
-                maxPlayers: this.maxPlayers,
-                minPlayers: this.minPlayers,
-                delayAnimation: this.delayAnimation
-            });
-        } catch { /* ignore */ }
-
         this._currentPreview = null;
         this._isDragging = false;
         this._count = clamp(this, opts.initialCount != null ? opts.initialCount : this.minPlayers);

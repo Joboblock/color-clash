@@ -77,6 +77,21 @@ export function removeUrlRoomKey() {
 }
 
 /**
+ * Remove the menu parameter from the URL (used when game starts).
+ * @returns {void}
+ */
+export function removeMenuParam() {
+    try {
+        const params = new URLSearchParams(window.location.search);
+        params.delete('menu');
+        const url = params.toString() 
+            ? `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`
+            : `${window.location.pathname}${window.location.hash || ''}`;
+        window.history.replaceState({ ...(window.history.state || {}) }, '', url);
+    } catch { /* ignore */ }
+}
+
+/**
  * Ensure the current history entry has a state and initialize the in-memory stack.
  * @returns {void}
  */

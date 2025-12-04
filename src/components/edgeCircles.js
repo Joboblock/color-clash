@@ -123,12 +123,13 @@ export function computeEdgePositions(count, restrict) {
 /**
  * Create and render edge circles for all players. Removes any existing container first.
  * @param {number} [playerCount] - Optional player count; falls back to active colors length.
- * @param {object} [state] - Optional runtime state for initial active/inactive highlighting.
+ * @param {object} [state] - Optional state object.
  * @param {number} [state.currentPlayer=0] - Zero-based index of the active player.
  * @param {boolean} [state.onlineGameActive=false] - Whether an online game is active.
  * @param {number} [state.myOnlineIndex] - Local player index during online play.
  * @param {boolean} [state.practiceMode=false] - Whether practice mode is active.
  * @param {number} [state.humanPlayer] - Human player index in practice mode.
+ * @param {string[]|null} [state.gameColors] - Current game's color array (player-selected colors).
  * @returns {void}
  */
 export function createEdgeCircles(playerCount, state = {}) {
@@ -137,7 +138,8 @@ export function createEdgeCircles(playerCount, state = {}) {
         onlineGameActive = false,
         myOnlineIndex,
         practiceMode = false,
-        humanPlayer
+        humanPlayer,
+        gameColors = null
     } = state || {};
     // Remove old container
     const old = document.getElementById('edgeCirclesContainer');
@@ -158,7 +160,7 @@ export function createEdgeCircles(playerCount, state = {}) {
         try { return innerCircleColors[key] || '#fff'; } catch { return '#fff'; }
     };
     // Determine number of players (use activeColors when available)
-    const ac = (typeof activeColors === 'function') ? activeColors() : playerColors;
+    const ac = (typeof activeColors === 'function') ? activeColors(gameColors) : playerColors;
     const count = Math.min(ac.length || 0, Math.max(2, (typeof playerCount === 'number' ? playerCount : ac.length || 2)));
     const restrict = getRestrictionType();
 
@@ -180,7 +182,7 @@ export function createEdgeCircles(playerCount, state = {}) {
     // Initialize active/inactive states on the next frame so CSS transitions run from opacity:0
     requestAnimationFrame(() => {
         try {
-            updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer);
+            updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors);
         } catch { /* ignore */ }
     });
 }
@@ -193,9 +195,10 @@ export function createEdgeCircles(playerCount, state = {}) {
  * @param {number} [myOnlineIndex] - Local player index in online mode.
  * @param {boolean} [practiceMode=false] - Whether practice mode is active.
  * @param {number} [humanPlayer] - Human player index in practice mode.
+ * @param {string[]|null} [gameColors=null] - Current game's color array (player-selected colors).
  * @returns {void}
  */
-export function updateEdgeCirclesActive(currentPlayer = 0, onlineGameActive = false, myOnlineIndex, practiceMode = false, humanPlayer) {
+export function updateEdgeCirclesActive(currentPlayer = 0, onlineGameActive = false, myOnlineIndex, practiceMode = false, humanPlayer, gameColors = null) {
     const container = document.getElementById('edgeCirclesContainer');
     if (!container) return;
     const circles = Array.from(container.querySelectorAll('.edge-circle'));
@@ -208,7 +211,7 @@ export function updateEdgeCirclesActive(currentPlayer = 0, onlineGameActive = fa
 
     // Also dim the page background toward black when it's not the local player's turn
     try {
-        const ac = (typeof activeColors === 'function') ? activeColors() : playerColors;
+        const ac = (typeof activeColors === 'function') ? activeColors(gameColors) : playerColors;
         const key = ac[activeIdx % ac.length];
         const baseBody = getComputedStyle(document.documentElement).getPropertyValue(`--body-${key}`).trim();
         const notMyTurn = (() => {

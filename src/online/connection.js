@@ -1,4 +1,4 @@
-import { WS_PROD_BASE_URL } from '../config/index.js';
+import { WS_PROD_BASE_URL, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from '../config/index.js';
 /**
 /**
  * OnlineConnection encapsulates the WebSocket lifecycle for Color Clash, providing
@@ -16,14 +16,16 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  *  - 'open' (): Socket successfully opened.
  *  - 'close' ({ wasEverOpened:boolean }): Socket closed (may trigger reconnect scheduling afterward).
  *  - 'reconnect_scheduled' ({ delay:number }): A reconnect attempt will occur after `delay` ms.
- *  - 'hosted' (HostedMessage): Host confirmation for newly created room.
+ *  - 'packet_retry_started' ({ packetKey:string }): First retry of a packet started.
+ *  - 'packet_confirmed' ({ packetKey:string, retryCount:number }): Packet confirmed by server.
+ *  - (deprecated) 'hosted' (HostedMessage): replaced by enriched 'roomlist'.
  *  - 'roomlist' (Record<string, RoomListEntry>): Updated list of rooms.
- *  - 'started' (StartedMessage): Game start information (players, grid size, colors).
- *  - 'request_preferred_colors' (): Server asks client to provide a preferred color.
- *  - 'joined' (JoinedMessage): Confirmation that this client joined a room.
- *  - 'left' (LeftMessage): Notification that a player (possibly us) left the room.
- *  - 'roomupdate' (RoomUpdateMessage): Player list / occupancy changes.
- *  - 'move' (MoveMessage): A game move broadcast.
+ *  - 'color' (ColorMessage): Server requesting color_ans from all clients.
+ *  - 'start' (StartMessage): Server sending assigned colors to non-host clients (requesting start_ack).
+ *  - 'start_cnf' (StartCnfMessage): Server sending final confirmation to host.
+ *  - (deprecated) 'joined' (JoinedMessage): replaced by enriched 'roomlist'.
+ *  - 'move' (MoveMessage): A game move broadcast (other players' moves).
+ *  - 'move_ack' (MoveMessage): Server confirmation that our move was accepted.
  *  - 'rejoined' (RejoinedMessage): State catch-up after reconnect.
  *  - 'error' (ErrorMessage): Server-side validation or protocol error.
  *
@@ -34,7 +36,8 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  *  - joinByKey(roomKey, debugName)
  *  - leave(roomName?)
  *  - start(gridSize?)
- *  - sendPreferredColor(color)
+ *  - sendColorAns(color)
+ *  - sendStartAck()
  *  - sendMove({ row, col, fromIndex, nextIndex, color })
  *  - requestRoomList()
  *  - on(event, handler), off(event, handler)
@@ -47,27 +50,28 @@ import { WS_PROD_BASE_URL } from '../config/index.js';
  *
  * @typedef {{name:string}} PlayerEntry
  * @typedef {{currentPlayers:number, maxPlayers:number, players?:PlayerEntry[], hostName?:string}} RoomListEntry
- * @typedef {{type:'hosted', room:string, roomKey?:string, maxPlayers?:number, player?:string}} HostedMessage
+ * // Deprecated: HostedMessage is no longer used; server emits enriched roomlist
  * @typedef {{type:'roomlist', rooms:Record<string, RoomListEntry>}} RawRoomListMessage
- * @typedef {{type:'started', players:string[], gridSize?:number, colors?:string[]}} StartedMessage
- * @typedef {{type:'joined', room:string, roomKey?:string, players?:PlayerEntry[], maxPlayers?:number, gridSize?:number, player?:string}} JoinedMessage
- * @typedef {{type:'left', room?:string, player?:string}} LeftMessage
- * @typedef {{type:'roomupdate', room:string, players:PlayerEntry[]}} RoomUpdateMessage
+ * @typedef {{type:'color', players:string[]}} ColorMessage
+ * @typedef {{type:'start', players:string[], gridSize:number, colors:string[]}} StartMessage
+ * @typedef {{type:'start_cnf', players:string[], gridSize:number, colors:string[]}} StartCnfMessage
+ * // Deprecated: JoinedMessage is no longer used; server emits enriched roomlist
+// RoomUpdateMessage is obsolete; use enriched roomlist entries instead
  * @typedef {{type:'move', room?:string, row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} MoveMessage
  * @typedef {{type:'rejoined', room?:string, roomKey?:string, players?:PlayerEntry[], recentMoves?:MoveMessage[], maxPlayers?:number}} RejoinedMessage
  * @typedef {{type:'error', error:string}} ErrorMessage
- * @typedef {{initialBackoffMs?:number, maxBackoffMs?:number, getWebSocketUrl?:()=>string, debug?:boolean}} OnlineConnectionOptions
+ * @typedef {{initialBackoffMs?:number, maxBackoffMs?:number, getWebSocketUrl?:()=>string}} OnlineConnectionOptions
  */
 export class OnlineConnection {
 	/**
-	 * Create a new OnlineConnection instance.
-	 * @param {OnlineConnectionOptions} [options]
-	 * @param {number} [options.initialBackoffMs=800] Initial reconnect delay in ms.
-	 * @param {number} [options.maxBackoffMs=10000] Maximum backoff delay ceiling in ms.
-	 * @param {() => string} [options.getWebSocketUrl] Optional provider for dynamic WS base URL.
-	 * @param {boolean} [options.debug=false] Enable verbose debug logging.
-	 */
-	constructor({ initialBackoffMs = 800, maxBackoffMs = 10000, getWebSocketUrl, debug = false } = {}) {
+		 * Create a new OnlineConnection instance.
+		 * @param {OnlineConnectionOptions} [options]
+		 * @param {number} [options.initialBackoffMs] Initial reconnect delay in ms.
+		 * @param {number} [options.maxBackoffMs] Maximum backoff delay ceiling in ms.
+		 * @param {() => string} [options.getWebSocketUrl] Optional provider for dynamic WS base URL.
+		 * @param {boolean} [options.debug=false] Enable verbose debug logging.
+		 */
+	constructor({ initialBackoffMs = WS_INITIAL_BACKOFF_MS, maxBackoffMs = WS_MAX_BACKOFF_MS, getWebSocketUrl, debug = false } = {}) {
 		this._initialBackoffMs = initialBackoffMs;
 		this._maxBackoffMs = maxBackoffMs;
 		this._backoffMs = initialBackoffMs;
@@ -77,10 +81,78 @@ export class OnlineConnection {
 		this._events = new Map();
 		this._debug = debug;
 		this._getWebSocketUrl = typeof getWebSocketUrl === 'function' ? getWebSocketUrl : () => this._defaultUrl();
+		// Generic packet retry tracking: Map of packetKey -> {packet, retryTimer, backoffMs, retryCount, responseType}
+		this._pendingPackets = new Map();
+		// Track if this client initiated a start request (is host)
+		this._initiatedStart = false;
+		// Track if we're waiting for a join_by_key response to avoid redundant roomlist requests
+		this._pendingJoinByKey = false;
+		// Session info for reconnection
+		this._sessionInfo = this._loadSessionInfo();
+		// Track if we're in an active game (only restore session if disconnected during game)
+		this._inActiveGame = false;
+		// Track if session restoration was attempted
+		this._sessionRestorationAttempted = false;
+	}	/** @private */
+	_log() { }
+
+	/**
+	 * Load session info from localStorage for reconnection.
+	 * @private
+	 * @returns {{roomKey?: string, playerName?: string, sessionId?: string}}
+	 */
+	_loadSessionInfo() {
+		try {
+			const stored = localStorage.getItem('ws_session');
+			if (stored) {
+				return JSON.parse(stored);
+			}
+		} catch { /* ignore */ }
+		return {};
 	}
 
-	/** @private */
-	_log(...args) { if (this._debug) console.debug('[OnlineConnection]', ...args); }
+	/**
+	 * Save session info to localStorage.
+	 * @private
+	 * @param {{roomKey?: string, playerName?: string, sessionId?: string}} info
+	 */
+	_saveSessionInfo(info) {
+		try {
+			this._sessionInfo = { ...this._sessionInfo, ...info };
+			localStorage.setItem('ws_session', JSON.stringify(this._sessionInfo));
+		} catch { /* ignore */ }
+	}
+
+	/**
+	 * Clear session info from localStorage.
+	 * @private
+	 */
+	_clearSessionInfo() {
+		try {
+			this._sessionInfo = {};
+			localStorage.removeItem('ws_session');
+		} catch { /* ignore */ }
+	}
+
+	/**
+	 * Generate a unique session ID for this browser tab.
+	 * @private
+	 * @returns {string}
+	 */
+	_generateSessionId() {
+		return `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+	}
+
+	/**
+	 * Check if any packets are currently being retried.
+	 * @returns {boolean}
+	 */
+	hasRetryingPackets() {
+		for (const pending of this._pendingPackets.values()) {
+			if (pending.retryCount > 0) return true;
+		}
+		return false;
+	}
 
 	/**
 	 * Emit an event to all registered handlers.
@@ -91,8 +163,11 @@ export class OnlineConnection {
 	_emit(name, payload) {
 		const handlers = this._events.get(name);
 		if (handlers) {
+			if (name === 'open') {
+				console.log(`[Client] 🎯 Emitting 'open' event to ${handlers.size} handlers`);
+			}
 			for (const fn of [...handlers]) {
-				try { fn(payload); } catch (e) { console.error('[OnlineConnection] handler error', e); }
+				try { fn(payload); } catch { /* ignore */ }
 			}
 		}
 	}
@@ -144,29 +219,185 @@ export class OnlineConnection {
 			this._everOpened = true;
 			this._backoffMs = this._initialBackoffMs;
 			if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+			
+			// Only try to restore session if:
+			// 1. We have stored session info
+			// 2. We were in an active game when disconnected
+			// 3. We haven't already attempted restoration this session
+			if (this._inActiveGame && 
+			    this._sessionInfo && 
+			    this._sessionInfo.roomKey && 
+			    this._sessionInfo.playerName && 
+			    this._sessionInfo.sessionId &&
+			    !this._sessionRestorationAttempted) {
+				console.log('[Client] Attempting session restoration with stored info:', this._sessionInfo);
+				this._sessionRestorationAttempted = true;
+				this._sendPayload({
+					type: 'restore_session',
+					roomKey: this._sessionInfo.roomKey,
+					playerName: this._sessionInfo.playerName,
+					sessionId: this._sessionInfo.sessionId
+				});
+				// Don't request room list - wait for restore_session response
+				this._emit('open');
+				return;
+			}
+			
 			this._emit('open');
-			this.requestRoomList();
+			// Only request room list if we're not waiting for a join_by_key response
+			console.log('[Client] WS Opened. Request list:', !this._pendingJoinByKey);
+			if (!this._pendingJoinByKey) {
+				this.requestRoomList();
+			}
 		};
 		ws.onmessage = (evt) => {
 			let msg; try { msg = JSON.parse(evt.data); } catch { return; }
 			const type = msg.type;
+			
+			// Log received packet with additional info for roomlist
+			if (type === 'roomlist') {
+				const rooms = msg.rooms || {};
+				let inRoom = null;
+				for (const [roomName, info] of Object.entries(rooms)) {
+					if (info && info.player) {
+						inRoom = roomName;
+						break;
+					}
+				}
+				console.log('[Client] ⬇️ Received:', type, inRoom ? `(in room: ${inRoom})` : '(not in any room)', msg);
+			} else {
+				console.log('[Client] ⬇️ Received:', type, msg);
+			}
+			
+			// Automatically cancel pending packets based on expectedResponseType
+			this._autoCancelPendingPackets(type, msg);
+			
 			switch (type) {
-				case 'hosted': this._emit('hosted', msg); break;
-				case 'roomlist': this._emit('roomlist', msg.rooms || {}); break;
-				case 'started': this._emit('started', msg); break;
-				case 'request_preferred_colors': this._emit('request_preferred_colors'); break;
-				case 'joined': this._emit('joined', msg); break;
-				case 'left': this._emit('left', msg); break;
-				case 'roomupdate': this._emit('roomupdate', msg); break;
-				case 'move': this._emit('move', msg); break;
-				case 'rejoined': this._emit('rejoined', msg); break;
-				case 'error': this._emit('error', msg); break;
+				// 'hosted' no longer used; ignore if received
+				case 'hosted':
+					break;
+				case 'roomlist': {
+					const rooms = msg.rooms || {};
+					// Check if we successfully restored session (we're in a room with our stored info)
+					for (const [roomName, info] of Object.entries(rooms)) {
+						if (info && info.player && info.roomKey === this._sessionInfo?.roomKey) {
+							console.log('[Client] ✅ Session restored! Rejoined room:', roomName);
+							// Reset restoration attempt flag so we can restore again on next disconnect
+							this._sessionRestorationAttempted = false;
+							break;
+						}
+					}
+					this._emit('roomlist', rooms);
+					break;
+				}
+				case 'color':
+					// Server sends 'color' to all clients (requesting color_ans)
+					this._emit('color', msg);
+					break;
+				case 'start':
+					// Server sends 'start' to non-host clients with assigned colors (requesting start_ack)
+					this._emit('start', msg);
+					break;
+				case 'start_cnf':
+					// Server sends 'start_cnf' to host as final confirmation
+					this._emit('start_cnf', msg);
+					break;
+				case 'joined':
+					break;
+				case 'move': {
+					// Cancel pending move retries when we receive any move
+					// This includes our own echo (confirmation) or other players' moves
+					const moveSeq = Number(msg.seq);
+					if (Number.isInteger(moveSeq)) {
+						// Cancel all pending move packets with seq <= received seq
+						// (our move was accepted if we see any move at or beyond our sequence)
+						for (const key of this._pendingPackets.keys()) {
+							if (key.startsWith('move:')) {
+								// Extract the fromIndex from the pending packet to match
+								const pending = this._pendingPackets.get(key);
+								if (pending && pending.packet && Number.isInteger(pending.packet.seq)) {
+									const pendingSeq = pending.packet.seq;
+									// Cancel if the received move's sequence is >= our pending move's sequence
+									// This means either:
+									// 1. This is our echo (same seq), or
+									// 2. Game has progressed beyond our move (higher seq)
+									if (moveSeq >= pendingSeq) {
+										this._cancelPendingPacket(key);
+									}
+								}
+							}
+						}
+					}
+					this._emit('move', msg);
+					break;
+				}
+				case 'move_ack': {
+					// Server confirmation that our move was accepted (echo)
+					const moveSeq = Number(msg.seq);
+					if (Number.isInteger(moveSeq)) {
+						// Cancel the specific pending move packet
+						for (const key of this._pendingPackets.keys()) {
+							if (key.startsWith('move:')) {
+								const pending = this._pendingPackets.get(key);
+								if (pending && pending.packet && Number.isInteger(pending.packet.seq)) {
+									if (pending.packet.seq === moveSeq) {
+										this._cancelPendingPacket(key);
+									}
+								}
+							}
+						}
+					}
+					this._emit('move_ack', msg);
+					break;
+				}
+				case 'rejoined':
+					this._emit('rejoined', msg);
+					break;
+				case 'error': {
+					// Cancel join_by_key retries if room not found or full
+					const errStr = String(msg.error || '');
+					if (errStr.includes('Room not found') || errStr.includes('full') || errStr.includes('already started')) {
+						// Cancel all pending join_by_key packets
+						for (const key of this._pendingPackets.keys()) {
+							if (key.startsWith('join_by_key:')) {
+								this._cancelPendingPacket(key);
+							}
+						}
+						// Clear the pending join_by_key flag since the attempt failed
+						this._pendingJoinByKey = false;
+					}
+					
+					// Cancel move retries if sequence is too old (game has progressed)
+					if (errStr.includes('Sequence too old') && Number.isInteger(msg.receivedSeq)) {
+						// Cancel all pending move packets with seq <= the rejected sequence
+						for (const key of this._pendingPackets.keys()) {
+							if (key.startsWith('move:')) {
+								const pending = this._pendingPackets.get(key);
+								if (pending && pending.packet && Number.isInteger(pending.packet.seq)) {
+									if (pending.packet.seq <= msg.receivedSeq) {
+										this._cancelPendingPacket(key);
+									}
+								}
+							}
+						}
+					}
+					
+					this._emit('error', msg);
+					break;
+				}
 				default: this._log('unhandled message type', type);
 			}
 		};
 		ws.onerror = () => { this._log('socket error'); };
 		ws.onclose = () => {
-			this._emit('close', { wasEverOpened: this._everOpened });
+			// Save packets that are still being attempted to be sent
+			this._unsentPackets = [];
+			for (const [packetKey, pending] of this._pendingPackets.entries()) {
+				if (pending && pending.packet) {
+					this._unsentPackets.push({ packetKey, packet: pending.packet });
+				}
+			}
+			this._emit('close', { wasEverOpened: this._everOpened, unsentPackets: this._unsentPackets });
 			this._scheduleReconnect();
 		};
 	}
@@ -184,6 +415,18 @@ export class OnlineConnection {
 			try { this._ws.close(); } catch { /* ignore */ }
 		}
 		if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+		this._clearPendingPackets();
+	}
+
+	/**
+	 * Clear all pending packet retry timers.
+	 * @private
+	 */
+	_clearPendingPackets() {
+		for (const pending of this._pendingPackets.values()) {
+			if (pending.retryTimer) clearTimeout(pending.retryTimer);
+		}
+		this._pendingPackets.clear();
 	}
 
 	/**
@@ -198,7 +441,7 @@ export class OnlineConnection {
 		this._reconnectTimer = setTimeout(() => {
 			this._reconnectTimer = null;
 			this.connect();
-			this._backoffMs = Math.min(this._backoffMs * 2, this._maxBackoffMs);
+			this._backoffMs = Math.min(this._backoffMs * 1.5, this._maxBackoffMs);
 		}, delay);
 	}
 
@@ -208,54 +451,364 @@ export class OnlineConnection {
 	 * @private
 	 * @param {object} obj Serializable object payload.
 	 */
-	_send(obj) {
+	_sendPayload(obj) {
 		try {
 			this.ensureConnected();
 			if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-				this._ws.send(JSON.stringify(obj));
+				try {
+					// Log sent packet
+					const type = obj && typeof obj === 'object' ? obj.type : undefined;
+					console.log('[Client] ⬆️ Sending:', type, obj);
+					
+					// Debug: Simulate 0% forced disconnect before move packets only
+					if (type === 'move' && Math.random() < 0.00) {
+						console.warn('[Client] 🔌 SIMULATED DISCONNECT:', type, obj);
+						if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+							this._ws.close();
+						}
+						return;
+					}
+					
+					this._ws.send(JSON.stringify(obj));
+				} catch (err) {
+					const t = obj && typeof obj === 'object' ? obj.type : undefined;
+					const state = typeof this._ws?.readyState === 'number' ? this._ws.readyState : undefined;
+					console.error('[Client] Failed to send packet', { type: t, readyState: state }, err);
+				}
 			}
-		} catch (e) { this._log('send failed', e); }
+		} catch (err) {
+			const t = obj && typeof obj === 'object' ? obj.type : undefined;
+			console.error('[Client] Ensure/send failed', { type: t }, err);
+		}
 	}
 
 	/** Request latest room list. */
-	requestRoomList() { this._send({ type: 'list' }); }
-	
+	requestRoomList() {
+		const packet = { type: 'list' };
+		this._sendWithRetry('list', packet, 'roomlist');
+	}
+
 	/** Host a new room.
 	 * @param {{roomName:string, maxPlayers:number, gridSize?:number, debugName?:string}} p
 	 */
-	host({ roomName, maxPlayers, gridSize, debugName }) { this._send({ type: 'host', roomName, maxPlayers, gridSize, debugName }); }
-	
+	host({ roomName, maxPlayers, gridSize, debugName }) { 
+		// Generate sessionId if not already present
+		if (!this._sessionInfo.sessionId) {
+			this._sessionInfo.sessionId = this._generateSessionId();
+		}
+		this._sendPayload({ type: 'host', roomName, maxPlayers, gridSize, debugName, sessionId: this._sessionInfo.sessionId }); 
+	}
+
 	/** Join an existing room by name.
 	 * @param {string} roomName
 	 * @param {string} debugName Client name (display/debug only)
 	 */
-	join(roomName, debugName) { this._send({ type: 'join', roomName, debugName }); }
-	
+	join(roomName, debugName) { 
+		// Generate sessionId if not already present
+		if (!this._sessionInfo.sessionId) {
+			this._sessionInfo.sessionId = this._generateSessionId();
+		}
+		this._sendPayload({ type: 'join', roomName, debugName, sessionId: this._sessionInfo.sessionId }); 
+	}
+
 	/** Join a room using its key.
 	 * @param {string} roomKey
 	 * @param {string} debugName Client name
 	 */
-	joinByKey(roomKey, debugName) { this._send({ type: 'join_by_key', roomKey, debugName }); }
-	
+	joinByKey(roomKey, debugName) {
+		console.log('[Client] 🔑 joinByKey() called:', { roomKey, debugName, stack: new Error().stack });
+		// Generate sessionId if not already present
+		if (!this._sessionInfo.sessionId) {
+			this._sessionInfo.sessionId = this._generateSessionId();
+		}
+		// Mark that we're waiting for a join_by_key response to avoid redundant roomlist request
+		this._pendingJoinByKey = true;
+		const packet = { type: 'join_by_key', roomKey, debugName, sessionId: this._sessionInfo.sessionId };
+		this._sendWithRetry(`join_by_key:${roomKey}`, packet, 'roomlist');
+	}
+
 	/** Leave a room (roomName optional if server infers current room).
 	 * @param {string} [roomName]
 	 */
-	leave(roomName) { this._send({ type: 'leave', roomName }); }
-	
+	leave(roomName) { 
+		this._clearSessionInfo(); // Clear session on explicit leave
+		this._sendPayload({ type: 'leave', roomName }); 
+	}
+
+	/**
+	 * Store session info for reconnection (called when successfully joining a room).
+	 * @param {{roomKey: string, playerName: string}} info
+	 */
+	storeSessionInfo({ roomKey, playerName }) {
+		if (!this._sessionInfo.sessionId) {
+			// Generate session ID on first join
+			this._sessionInfo.sessionId = this._generateSessionId();
+		}
+		this._saveSessionInfo({ roomKey, playerName, sessionId: this._sessionInfo.sessionId });
+		console.log('[Client] Stored session info for reconnection:', this._sessionInfo);
+	}
+
+	/**
+	 * Mark that the game has started (enables session restoration on disconnect).
+	 */
+	setGameActive() {
+		this._inActiveGame = true;
+		console.log('[Client] Game marked as active - session restoration enabled');
+	}
+
+	/**
+	 * Mark that the game has ended (disables session restoration).
+	 */
+	setGameInactive() {
+		this._inActiveGame = false;
+		this._sessionRestorationAttempted = false;
+		console.log('[Client] Game marked as inactive - session restoration disabled');
+	}
+
 	/** Start the game (host only). Optionally override gridSize.
 	 * @param {number} [gridSize]
 	 */
-	start(gridSize) { const payload = { type: 'start' }; if (Number.isInteger(gridSize)) payload.gridSize = gridSize; this._send(payload); }
-	
-	/** Send preferred color selection.
+	start(gridSize) {
+		const payload = { type: 'start_req' };
+		if (Number.isInteger(gridSize)) payload.gridSize = gridSize;
+		// Store gridSize for retry and mark this client as host
+		this._lastStartGridSize = gridSize;
+		this._initiatedStart = true;
+		this._sendWithRetry('start', payload, 'start_cnf');
+	}
+
+	/** Send color answer with preferred color.
 	 * @param {string} color
 	 */
-	sendPreferredColor(color) { this._send({ type: 'preferred_color', color }); }
+	sendColorAns(color) {
+		this._sendPayload({ type: 'color_ans', color });
+	}
+
+	/** Send start acknowledgment.
+	 */
+	sendStartAck() {
+		// Send once - server will resend 'start' if it doesn't receive this ack
+		this._sendPayload({ type: 'start_ack' });
+	}
 
 	/** Broadcast a move.
-	 * @param {{row:number, col:number, fromIndex:number, nextIndex:number, color:string}} move
+	 * @param {{row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} move
 	 */
-	sendMove({ row, col, fromIndex, nextIndex, color }) { this._send({ type: 'move', row, col, fromIndex, nextIndex, color }); }
+	sendMove({ row, col, fromIndex, nextIndex, color, seq }) {
+		const moveKey = `move:${fromIndex}:${row}:${col}`;
+		const packet = { type: 'move', row, col, fromIndex, nextIndex, color };
+		if (Number.isInteger(seq)) packet.seq = seq;
+		this._sendWithRetry(moveKey, packet, 'move');
+	}
+
+	/** Send acknowledgment for received move.
+	 * @param {number} seq - The sequence number of the move being acknowledged
+	 */
+	sendMoveAck(seq) {
+		if (!Number.isInteger(seq)) return;
+		this._sendPayload({ type: 'move_ack', seq });
+	}
+
+	/**
+	 * Send a packet with automatic retry on no response.
+	 * @private
+	 * @param {string} packetKey - Unique key for this packet
+	 * @param {object} packet - The packet to send
+	 * @param {string} expectedResponseType - The message type expected as confirmation
+	 */
+	_sendWithRetry(packetKey, packet, expectedResponseType) {
+		// Cancel any existing retry for this packet
+		if (this._pendingPackets.has(packetKey)) {
+			const existing = this._pendingPackets.get(packetKey);
+			if (existing.retryTimer) clearTimeout(existing.retryTimer);
+		}
+
+		// Send the packet
+		this._sendPayload(packet);
+
+		const backoffMs = this._initialBackoffMs;
+		const retryTimer = setTimeout(() => {
+			this._retryPacket(packetKey);
+		}, backoffMs);
+
+		this._pendingPackets.set(packetKey, {
+			packet,
+			retryTimer,
+			backoffMs,
+			retryCount: 0,
+			expectedResponseType
+		});
+	}
+
+	/**
+	 * Retry sending a packet with exponential backoff.
+	 * @private
+	 * @param {string} packetKey
+	 */
+	_retryPacket(packetKey) {
+		const pending = this._pendingPackets.get(packetKey);
+		if (!pending) return;
+
+		pending.retryCount++;
+		const nextBackoff = Math.min(pending.backoffMs * 2, this._maxBackoffMs);
+		pending.backoffMs = nextBackoff;
+
+		// Emit event on first retry to trigger UI feedback
+		if (pending.retryCount === 1) {
+			this._emit('packet_retry_started', { packetKey });
+		}
+
+		// Special logic for 'start' packet: only resend if starting conditions are still met
+		if (packetKey === 'start') {
+			// These variables are defined in the main script.js scope
+			// We'll use window-scoped variables to check conditions
+			const inRoom = !!window.myJoinedRoom;
+			const isFull = inRoom && Number.isFinite(window.myRoomMaxPlayers) && window.myRoomCurrentPlayers >= window.myRoomMaxPlayers;
+			let hostName = null;
+			if (window.lastRoomList && window.myJoinedRoom && window.lastRoomList[window.myJoinedRoom] && window.lastRoomList[window.myJoinedRoom].hostName) {
+				hostName = window.lastRoomList[window.myJoinedRoom].hostName;
+			} else if (Array.isArray(window.myRoomPlayers) && window.myRoomPlayers[0] && window.myRoomPlayers[0].name) {
+				hostName = window.myRoomPlayers[0].name;
+			}
+			const isHost = inRoom && window.myPlayerName && hostName && (window.myPlayerName === hostName);
+			if (!(inRoom && isFull && isHost)) {
+				this._log('Cancelling start retry: starting conditions not met');
+				this._cancelPendingPacket('start');
+				return;
+			}
+		}
+		
+		// Special logic for 'join_by_key' packet: only resend if we haven't already joined a room
+		if (packetKey.startsWith('join_by_key:')) {
+			// If we successfully joined, myJoinedRoom will be set and we should stop retrying
+			if (window.myJoinedRoom) {
+				this._log('Cancelling join_by_key retry: already joined a room');
+				this._cancelPendingPacket(packetKey);
+				return;
+			}
+			// Continue retrying - the server will send an error if room doesn't exist or is full
+		}
+		this._log(`Retrying packet ${packetKey} (attempt ${pending.retryCount})`);
+		this._sendPayload(pending.packet);
+		// Schedule next retry
+		pending.retryTimer = setTimeout(() => {
+			this._retryPacket(packetKey);
+		}, nextBackoff);
+	}
+
+	/**
+	 * Automatically cancel pending packets based on received message type and content.
+	 * @private
+	 * @param {string} msgType - The type of message received
+	 * @param {object} msg - The full message object
+	 */
+	_autoCancelPendingPackets(msgType, msg) {
+		for (const [packetKey, pending] of this._pendingPackets.entries()) {
+			// Skip packets without expected response type
+			if (!pending.expectedResponseType) continue;
+			
+			// Check if message type matches expected response
+			if (pending.expectedResponseType !== msgType) continue;
+			
+			// Type matches - now check if content conditions are met
+			let shouldCancel = false;
+			
+			switch (pending.expectedResponseType) {
+				case 'roomlist': {
+					// For join_by_key packets, verify we actually joined a room
+					if (packetKey.startsWith('join_by_key:')) {
+						const rooms = msg.rooms || {};
+						// Check if any room contains our player info
+						for (const info of Object.values(rooms)) {
+							if (info && info.player) {
+								shouldCancel = true;
+								// Clear the pending join_by_key flag
+								this._pendingJoinByKey = false;
+								break;
+							}
+						}
+					} else {
+						// For other roomlist requests (like 'list'), always cancel
+						shouldCancel = true;
+					}
+					break;
+				}
+				case 'move': {
+					// For move packets, verify it's the same move
+					if (packetKey.startsWith('move:')) {
+						const parts = packetKey.split(':');
+						if (parts.length === 4) {
+							const [, fromIndex, row, col] = parts;
+							if (String(msg.fromIndex) === fromIndex && 
+								String(msg.row) === row && 
+								String(msg.col) === col) {
+								shouldCancel = true;
+							}
+						}
+					}
+					break;
+				}
+				case 'move_ack': {
+					// Server echo confirms our move was accepted
+					if (packetKey.startsWith('move:')) {
+						const parts = packetKey.split(':');
+						if (parts.length === 4) {
+							const [, fromIndex, row, col] = parts;
+							if (String(msg.fromIndex) === fromIndex && 
+								String(msg.row) === row && 
+								String(msg.col) === col) {
+								shouldCancel = true;
+							}
+						}
+					}
+					break;
+				}
+				case 'rejoined': {
+					// For reconnect packets, verify it's the same room
+					if (packetKey.startsWith('reconnect:')) {
+						const roomName = packetKey.substring('reconnect:'.length);
+						if (msg.room === roomName) {
+							shouldCancel = true;
+						}
+					}
+					break;
+				}
+				case 'start_cnf':
+					// start_cnf response confirms the start_req from host (final confirmation)
+					if (packetKey === 'start' && msg.colors) {
+						shouldCancel = true;
+					}
+					break;
+				default:
+					// Unknown response type - cancel to be safe
+					shouldCancel = true;
+			}
+			
+			if (shouldCancel) {
+				this._cancelPendingPacket(packetKey);
+			}
+		}
+	}
+
+	/**
+	 * Cancel retry timer for a specific packet.
+	 * @private
+	 * @param {string} packetKey
+	 */
+	_cancelPendingPacket(packetKey) {
+		const pending = this._pendingPackets.get(packetKey);
+		if (pending) {
+			if (pending.retryTimer) clearTimeout(pending.retryTimer);
+			this._pendingPackets.delete(packetKey);
+			if (pending.retryCount > 0) {
+				this._log(`Packet ${packetKey} confirmed after ${pending.retryCount} retries`);
+				// Emit event when packet is confirmed after retries
+				this._emit('packet_confirmed', { packetKey, retryCount: pending.retryCount });
+			}
+		}
+	}
+
+
 
 	/**
 	 * Resolve default WebSocket base URL using simplified fallback chain:

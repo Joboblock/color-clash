@@ -89,6 +89,10 @@ export class OnlineConnection {
 		this._pendingJoinByKey = false;
 		// Session info for reconnection
 		this._sessionInfo = this._loadSessionInfo();
+		// Track if we're in an active game (only restore session if disconnected during game)
+		this._inActiveGame = false;
+		// Track if session restoration was attempted
+		this._sessionRestorationAttempted = false;
 	}	/** @private */
 	_log() { }
 
@@ -159,6 +163,9 @@ export class OnlineConnection {
 	_emit(name, payload) {
 		const handlers = this._events.get(name);
 		if (handlers) {
+			if (name === 'open') {
+				console.log(`[Client] 🎯 Emitting 'open' event to ${handlers.size} handlers`);
+			}
 			for (const fn of [...handlers]) {
 				try { fn(payload); } catch { /* ignore */ }
 			}
@@ -213,19 +220,32 @@ export class OnlineConnection {
 			this._backoffMs = this._initialBackoffMs;
 			if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
 			
-			// Try to restore session if we have stored info
-			if (this._sessionInfo && this._sessionInfo.roomKey && this._sessionInfo.playerName && this._sessionInfo.sessionId) {
+			// Only try to restore session if:
+			// 1. We have stored session info
+			// 2. We were in an active game when disconnected
+			// 3. We haven't already attempted restoration this session
+			if (this._inActiveGame && 
+			    this._sessionInfo && 
+			    this._sessionInfo.roomKey && 
+			    this._sessionInfo.playerName && 
+			    this._sessionInfo.sessionId &&
+			    !this._sessionRestorationAttempted) {
 				console.log('[Client] Attempting session restoration with stored info:', this._sessionInfo);
+				this._sessionRestorationAttempted = true;
 				this._sendPayload({
 					type: 'restore_session',
 					roomKey: this._sessionInfo.roomKey,
 					playerName: this._sessionInfo.playerName,
 					sessionId: this._sessionInfo.sessionId
 				});
+				// Don't request room list - wait for restore_session response
+				this._emit('open');
+				return;
 			}
 			
 			this._emit('open');
 			// Only request room list if we're not waiting for a join_by_key response
+			console.log('[Client] WS Opened. Request list:', !this._pendingJoinByKey);
 			if (!this._pendingJoinByKey) {
 				this.requestRoomList();
 			}
@@ -262,6 +282,8 @@ export class OnlineConnection {
 					for (const [roomName, info] of Object.entries(rooms)) {
 						if (info && info.player && info.roomKey === this._sessionInfo?.roomKey) {
 							console.log('[Client] ✅ Session restored! Rejoined room:', roomName);
+							// Reset restoration attempt flag so we can restore again on next disconnect
+							this._sessionRestorationAttempted = false;
 							break;
 						}
 					}
@@ -438,17 +460,12 @@ export class OnlineConnection {
 					const type = obj && typeof obj === 'object' ? obj.type : undefined;
 					console.log('[Client] ⬆️ Sending:', type, obj);
 					
-					// Debug: Simulate 10% forced disconnect before move packets only
-					if (type === 'move' && Math.random() < 0.10) {
+					// Debug: Simulate 0% forced disconnect before move packets only
+					if (type === 'move' && Math.random() < 0.00) {
 						console.warn('[Client] 🔌 SIMULATED DISCONNECT:', type, obj);
 						if (this._ws && this._ws.readyState === WebSocket.OPEN) {
 							this._ws.close();
 						}
-						return;
-					}
-					// Debug: Simulate 25% packet loss
-					if (Math.random() < 0.25) {
-						console.warn('[Client] 🔥 SIMULATED PACKET LOSS:', type, obj);
 						return;
 					}
 					
@@ -499,6 +516,7 @@ export class OnlineConnection {
 	 * @param {string} debugName Client name
 	 */
 	joinByKey(roomKey, debugName) {
+		console.log('[Client] 🔑 joinByKey() called:', { roomKey, debugName, stack: new Error().stack });
 		// Generate sessionId if not already present
 		if (!this._sessionInfo.sessionId) {
 			this._sessionInfo.sessionId = this._generateSessionId();
@@ -528,6 +546,23 @@ export class OnlineConnection {
 		}
 		this._saveSessionInfo({ roomKey, playerName, sessionId: this._sessionInfo.sessionId });
 		console.log('[Client] Stored session info for reconnection:', this._sessionInfo);
+	}
+
+	/**
+	 * Mark that the game has started (enables session restoration on disconnect).
+	 */
+	setGameActive() {
+		this._inActiveGame = true;
+		console.log('[Client] Game marked as active - session restoration enabled');
+	}
+
+	/**
+	 * Mark that the game has ended (disables session restoration).
+	 */
+	setGameInactive() {
+		this._inActiveGame = false;
+		this._sessionRestorationAttempted = false;
+		console.log('[Client] Game marked as inactive - session restoration disabled');
 	}
 
 	/** Start the game (host only). Optionally override gridSize.

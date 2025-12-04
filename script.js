@@ -13,7 +13,7 @@ import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLO
 // Edge circles component
 import { createEdgeCircles, updateEdgeCirclesActive, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
 // Navigation and routing
-import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
+import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, removeMenuParam, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
 
 // PLAYER_NAME_LENGTH now imported from nameUtils.js
 document.addEventListener('DOMContentLoaded', () => {
@@ -272,6 +272,12 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
             
+            // Remove menu parameter from URL when game starts
+            removeMenuParam();
+            
+            // Enable session restoration during active game
+            onlineConnection.setGameActive();
+            
             console.log(`[Start] Game started for non-host`);
             
             // Non-host sends acknowledgment
@@ -327,6 +333,12 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
             document.body.className = activeColors()[currentPlayer];
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
+            
+            // Remove menu parameter from URL when game starts
+            removeMenuParam();
+            
+            // Enable session restoration during active game
+            onlineConnection.setGameActive();
             
             console.log(`[Start Cnf] Game started for host`);
         } catch (err) {
@@ -593,8 +605,9 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
                 onlineConnection.host({ roomName: name, maxPlayers: selectedPlayers, gridSize: desiredGrid, debugName: debugPlayerName });
             } catch { /* ignore */ }
         }
+        const sendHostOnce = () => { sendHost(); onlineConnection.off('open', sendHostOnce); };
         onlineConnection.ensureConnected();
-        if (onlineConnection.isConnected()) sendHost(); else onlineConnection.on('open', sendHost);
+        if (onlineConnection.isConnected()) sendHost(); else onlineConnection.on('open', sendHostOnce);
     }
 
     // Expose to onlinePage via context (used there)
@@ -624,16 +637,18 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
 
         // Ensure connection and send once open
         const doJoin = () => { onlineConnection.join(roomName, debugPlayerName); };
+        const doJoinOnce = () => { doJoin(); onlineConnection.off('open', doJoinOnce); };
         onlineConnection.ensureConnected();
-        if (onlineConnection.isConnected()) doJoin(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doJoin); }
+        if (onlineConnection.isConnected()) doJoin(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doJoinOnce); }
     }
 
     // Expose to onlinePage via context (used there)
     window.leaveRoom = function leaveRoom(roomName) {
         if (!clientFullyInitialized) return;
         const doLeave = () => { onlineConnection.leave(roomName); };
+        const doLeaveOnce = () => { doLeave(); onlineConnection.off('open', doLeaveOnce); };
         onlineConnection.ensureConnected();
-        if (onlineConnection.isConnected()) doLeave(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doLeave); }
+        if (onlineConnection.isConnected()) doLeave(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doLeaveOnce); }
     // Defer URL key removal until server confirms via roomlist update.
     }
 
@@ -647,9 +662,11 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
                 // Host starts the online game
                 const startPayload = { type: 'start' };
                 if (Number.isInteger(hostedDesiredGridSize)) startPayload.gridSize = hostedDesiredGridSize;
+                const startGame = () => { onlineConnection.start(hostedDesiredGridSize); };
+                const startGameOnce = () => { startGame(); onlineConnection.off('open', startGameOnce); };
                 onlineConnection.ensureConnected();
-                if (onlineConnection.isConnected()) { onlineConnection.start(hostedDesiredGridSize); }
-                else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', () => onlineConnection.start(hostedDesiredGridSize)); }
+                if (onlineConnection.isConnected()) { startGame(); }
+                else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', startGameOnce); }
                 return;
             }
             // Otherwise behave as Host Custom -> navigate to host menu
@@ -1015,7 +1032,11 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
     if (pendingAutoJoinKey) {
         const key = pendingAutoJoinKey;
         pendingAutoJoinKey = null;
-        const sendJoinKey = () => { onlineConnection.joinByKey(key, (localStorage.getItem('playerName') || 'Player')); };
+        const sendJoinKey = () => { 
+            onlineConnection.joinByKey(key, (localStorage.getItem('playerName') || 'Player')); 
+            // Remove this handler after it's called once to prevent re-joining on reconnect
+            onlineConnection.off('open', sendJoinKey);
+        };
         if (onlineConnection.isConnected()) sendJoinKey(); else onlineConnection.on('open', sendJoinKey);
         // Navigate to online menu for visibility
         navigateToMenu('online');
@@ -1490,6 +1511,10 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
     function scheduleGameEnd() {
         if (gameWon) return;
         gameWon = true;
+        
+        // Disable session restoration when game ends
+        onlineConnection.setGameInactive();
+        
         if (menuShownAfterWin) return; // schedule only once
         menuShownAfterWin = true;
         setTimeout(() => {

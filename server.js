@@ -129,11 +129,6 @@ const GRACE_MS = 300000; // 5 min grace window
  * @param {object} payload - The payload object to send (will be JSON-stringified).
  */
 function sendPayload(ws, payload) {
-    // Debug: Simulate 50% packet loss
-    if (Math.random() < 0.50) {
-        console.warn('[Server] 🔥 SIMULATED PACKET LOSS:', ws, payload);
-        return;
-    }
     try {
         ws.send(JSON.stringify(payload));
     } catch (err) {

@@ -962,6 +962,7 @@ wss.on('connection', (ws) => {
     try { sendPayload(ws, { type: 'info', message: 'Connected to server!' }); } catch { /* ignore */ }
 
     ws.on('close', () => {
+        console.error('[Client] 🔌 Disconnected');
         const meta = connectionMeta.get(ws);
         if (!meta) return;
         const { roomName, name } = meta;

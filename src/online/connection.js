@@ -119,6 +119,11 @@ export class OnlineConnection {
 		this._lastMessageTime = Date.now();
 		this._unansweredPings = 0;
 		this._pingTimer = setInterval(() => {
+			// Only send pings while in a started game
+			if (!this._inActiveGame) {
+				return;
+			}
+			
 			const timeSinceLastMessage = Date.now() - this._lastMessageTime;
 			if (timeSinceLastMessage >= this._PING_TIMEOUT_MS) {
 				// Time to send a ping

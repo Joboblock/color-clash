@@ -127,18 +127,18 @@ const connectionMeta = new Map(); // ws -> { roomName: string, name: string, ses
  * @param {object} payload - The payload object to send (will be JSON-stringified).
  */
 function sendPayload(ws, payload) {
-    // Simulate packet loss
+    /*// Simulate packet loss
     const type = payload && typeof payload === 'object' ? payload.type : undefined;
     if (Math.random() < 0.25) {
         console.warn('[Server] 🔥 Simulated packet loss:', type, payload);
         return;
-    }
+    }*/
     try {
         ws.send(JSON.stringify(payload));
     } catch (err) {
         try {
             const state = typeof ws?.readyState === 'number' ? ws.readyState : undefined;
-            console.error('[Server] Failed to send payload', { type, readyState: state }, err);
+            console.error('[Server] Failed to send payload', { readyState: state }, err);
         } catch { /* ignore meta logging errors */ }
     }
 }
@@ -164,7 +164,7 @@ wss.on('connection', (ws) => {
         // Define packet type groups
         const gamePackets = new Set(['move', 'move_ack']);
         const roomPackets = new Set(['leave', 'start_req', 'start_ack', 'color_ans']);
-        const outOfGamePackets = new Set(['host', 'join', 'join_by_key', 'list', 'roomlist', 'reconnect']);
+    const outOfGamePackets = new Set(['host', 'join', 'join_by_key', 'list', 'roomlist']);
         // restore_session is allowed at any time (it's specifically for reconnecting to started games)
 
         // 1. Game packets from clients not in a started room
@@ -534,50 +534,7 @@ wss.on('connection', (ws) => {
                 });
                 broadcastRoomList(perClientExtras);
             }
-        } else if (msg.type === 'reconnect' && msg.roomName && typeof msg.debugName === 'string') {
-            const room = rooms[msg.roomName];
-            if (!room) {
-                sendPayload(ws, { type: 'error', error: 'Room not found' });
-                return;
-            }
-            const name = sanitizeBaseName(msg.debugName);
-            const participant = room.participants.find(p => p.name === name);
-            if (!participant) {
-                sendPayload(ws, { type: 'error', error: 'No disconnected session to reattach' });
-                return;
-            }
-            // Clear any pending purge timer for this name
-            if (room._disconnectTimers && room._disconnectTimers.has(name)) {
-                try { clearTimeout(room._disconnectTimers.get(name)); } catch { /* ignore */ }
-                room._disconnectTimers.delete(name);
-            }
-            // Attach this socket and mark connected
-            if (participant.ws && participant.ws !== ws && participant.ws.readyState === 1) {
-                try { participant.ws.terminate(); } catch { /* ignore */ }
-            }
-            participant.ws = ws;
-            participant.connected = true;
-            connectionMeta.set(ws, { roomName: msg.roomName, name, sessionId: participant.sessionId });
-            // Compute missed moves since last seen sequence for this player
-            const lastSeq = (room._lastSeqByName && room._lastSeqByName.get(name)) || 0;
-            const recentMoves = (room.game && Array.isArray(room.game.recentMoves))
-                ? room.game.recentMoves.filter(m => (m.seq || 0) > lastSeq)
-                : [];
-            const rejoinPayload = {
-                type: 'rejoined',
-                room: msg.roomName,
-                roomKey: room.roomKey,
-                maxPlayers: room.maxPlayers,
-                players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
-                started: !!(room.game && room.game.started),
-                turnIndex: room.game && Number.isInteger(room.game.turnIndex) ? room.game.turnIndex : 0,
-                colors: room.game && Array.isArray(room.game.colors) ? room.game.colors : undefined,
-                recentMoves
-            };
-            try { sendPayload(ws, rejoinPayload); } catch { /* ignore */ }
-            // Notify others of updated connected roster
-            // No direct roomupdate confirmation; rely on enriched roomlist
-            broadcastRoomList();
+        // ...existing code...
         } else if (msg.type === 'list') {
             sendPayload(ws, { type: 'roomlist', rooms: getRoomList() });
         } else if (msg.type === 'start_req') {
@@ -742,16 +699,16 @@ wss.on('connection', (ws) => {
             const room = rooms[meta.roomName];
             if (!room) return;
 
-            // Simulate 25% chance to close all players' WebSockets
+            /*/ Simulate 25% chance to close all players' WebSockets
             if (Math.random() < 0.25) {
                 console.warn('[Server] 🔌 SIMULATED DISCONNECT: Closing all player WebSockets');
                 room.participants.forEach(p => {
                     if (p.ws && p.ws.readyState === 1) {
-                        try { p.ws.close(); } catch { /* ignore */ }
+                        try { p.ws.close(); } catch { }
                     }
                 });
                 return;
-            }
+            }*/
 
             // Enforce that a game has started and track turn order
             if (!room.game || !room.game.started) {

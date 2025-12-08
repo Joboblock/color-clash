@@ -204,17 +204,32 @@ wss.on('connection', (ws) => {
             console.log('[Session Restore] Attempt from client:', { roomKey, sessionId });
             // Find room by key
             const roomName = roomKeys.get(roomKey);
-            if (!roomName || !rooms[roomName]) {
-                console.log('[Session Restore] ❌ Room not found for key:', roomKey);
-                return;
-            }
-            const room = rooms[roomName];
-            // Find participant by sessionId only
-            const participant = room.participants.find(p => p.sessionId === sessionId);
-            if (!participant) {
-                console.log('[Session Restore] ❌ No matching participant found:', { sessionId });
-                return;
-            }
+                if (!roomName || !rooms[roomName]) {
+                    console.log('[Session Restore] ❌ Room not found for key:', roomKey);
+                    // Send roomlist indicating not in any room
+                    try {
+                        const roomsList = getRoomList();
+                        // No player entry for this client
+                        sendPayload(ws, { type: 'roomlist', rooms: roomsList });
+                    } catch (err) {
+                        console.error('[Server] Failed to send not-in-room roomlist after restore_session fail', err);
+                    }
+                    return;
+                }
+                const room = rooms[roomName];
+                // Find participant by sessionId only
+                const participant = room.participants.find(p => p.sessionId === sessionId);
+                if (!participant) {
+                    console.log('[Session Restore] ❌ No matching participant found:', { sessionId });
+                    // Send roomlist indicating not in any room
+                    try {
+                        const roomsList = getRoomList();
+                        sendPayload(ws, { type: 'roomlist', rooms: roomsList });
+                    } catch (err) {
+                        console.error('[Server] Failed to send not-in-room roomlist after restore_session fail', err);
+                    }
+                    return;
+                }
             // Clear any pending disconnect timer for this participant
             if (room._disconnectTimers && room._disconnectTimers.has(participant.sessionId)) {
                 try { clearTimeout(room._disconnectTimers.get(participant.sessionId)); } catch { /* ignore */ }
@@ -227,6 +242,14 @@ wss.on('connection', (ws) => {
             const oldWs = participant.ws;
             participant.ws = ws;
             participant.connected = true;
+            
+            // Clear room deletion timer now that a player has rejoined
+            if (room._roomDeletionTimer) {
+                try { clearTimeout(room._roomDeletionTimer); } catch { /* ignore */ }
+                room._roomDeletionTimer = null;
+                console.log(`[Session Restore] Cancelled room deletion timer for ${roomName}`);
+            }
+            
             // Update connectionMeta for the new WebSocket
             connectionMeta.set(ws, { roomName, name: participant.name, sessionId });
             // IMPORTANT: Update all pending move acks to map the old WebSocket to the new one
@@ -316,6 +339,7 @@ wss.on('connection', (ws) => {
                 prevRoom.participants = prevRoom.participants.filter(p => p.ws !== ws);
                 if (prevRoom.participants.length === 0) {
                     const oldKey = prevRoom.roomKey;
+                    console.log(`[Room Delete] Room '${metaExisting.roomName}' deleted because last participant left/disconnected.`);
                     delete rooms[metaExisting.roomName];
                     if (oldKey) roomKeys.delete(oldKey);
                 } else {
@@ -399,6 +423,7 @@ wss.on('connection', (ws) => {
                 prevRoom.participants = prevRoom.participants.filter(p => p.ws !== ws);
                 if (prevRoom.participants.length === 0) {
                     const oldKey = prevRoom.roomKey;
+                    console.log(`[Room Delete] Room '${metaExisting.roomName}' deleted because last participant left/disconnected.`);
                     delete rooms[metaExisting.roomName];
                     if (oldKey) roomKeys.delete(oldKey);
                 } else {
@@ -461,6 +486,7 @@ wss.on('connection', (ws) => {
                 prevRoom.participants = prevRoom.participants.filter(p => p.ws !== ws);
                 if (prevRoom.participants.length === 0) {
                     const oldKey = prevRoom.roomKey;
+                    console.log(`[Room Delete] Room '${metaExisting.roomName}' deleted because last participant left/disconnected.`);
                     delete rooms[metaExisting.roomName];
                     if (oldKey) roomKeys.delete(oldKey);
                 } else {
@@ -1041,6 +1067,7 @@ wss.on('connection', (ws) => {
             connectionMeta.delete(ws);
             if (room.participants.length === 0) {
                 const oldKey = room.roomKey;
+                console.log(`[Room Delete] Room '${roomName}' deleted because last participant left/disconnected.`);
                 delete rooms[roomName];
                 if (oldKey) roomKeys.delete(oldKey);
             }
@@ -1062,33 +1089,58 @@ wss.on('connection', (ws) => {
         const room = rooms[roomName];
         if (!room) { connectionMeta.delete(ws); return; }
 
-        // Immediately remove participant from room (no grace period)
-        const participantIndex = room.participants.findIndex(p => p.name === name);
-        if (participantIndex >= 0) {
-            console.log(`[Disconnect] Removing ${name} from room ${roomName} immediately`);
+        // Check if game has started
+        const isGameStarted = !!(room.game && room.game.started);
 
-            // Clear any pending disconnect timer for this name
-            if (room._disconnectTimers && room._disconnectTimers.has(name)) {
-                try { clearTimeout(room._disconnectTimers.get(name)); } catch { /* ignore */ }
-                room._disconnectTimers.delete(name);
+        // Only remove participant if room has NOT started
+        if (!isGameStarted) {
+            const participantIndex = room.participants.findIndex(p => p.name === name);
+            if (participantIndex >= 0) {
+                console.log(`[Disconnect] Removing ${name} from non-started room ${roomName}`);
+
+                // Clear any pending disconnect timer for this name
+                if (room._disconnectTimers && room._disconnectTimers.has(name)) {
+                    try { clearTimeout(room._disconnectTimers.get(name)); } catch { /* ignore */ }
+                    room._disconnectTimers.delete(name);
+                }
+
+                // Remove the participant
+                room.participants.splice(participantIndex, 1);
+
+                // If room is now empty, delete it
+                if (room.participants.length === 0) {
+                    console.log(`[Disconnect] Room ${roomName} is now empty, deleting`);
+                    const oldKey = room.roomKey;
+                    delete rooms[roomName];
+                    if (oldKey) roomKeys.delete(oldKey);
+                } else {
+                    // Notify remaining clients about updated roster
+                    room.participants.forEach(p => {
+                        if (p.ws.readyState === 1) {
+                            sendPayload(p.ws, { type: 'roomupdate', room: roomName, players: room.participants.map(pp => ({ name: pp.name })) });
+                        }
+                    });
+                }
             }
-
-            // Remove the participant
-            room.participants.splice(participantIndex, 1);
-
-            // If room is now empty, delete it
-            if (room.participants.length === 0) {
-                console.log(`[Disconnect] Room ${roomName} is now empty, deleting`);
-                const oldKey = room.roomKey;
-                delete rooms[roomName];
-                if (oldKey) roomKeys.delete(oldKey);
-            } else {
-                // Notify remaining clients about updated roster
-                room.participants.forEach(p => {
-                    if (p.ws.readyState === 1) {
-                        sendPayload(p.ws, { type: 'roomupdate', room: roomName, players: room.participants.map(pp => ({ name: pp.name })) });
-                    }
-                });
+        } else {
+            // Game has started: mark participant as disconnected but keep in room for rejoin
+            const participant = room.participants.find(p => p.name === name);
+            if (participant) {
+                console.log(`[Disconnect] ${name} disconnected from started room ${roomName} (marked for rejoin, not removed)`);
+                participant.connected = false;
+                participant.ws = null;
+                
+                // Check if all participants are now disconnected - if so, schedule room deletion
+                const anyConnected = room.participants.some(p => p.connected);
+                if (!anyConnected && !room._roomDeletionTimer) {
+                    console.log(`[Disconnect] All players disconnected from room ${roomName}, scheduling room deletion`);
+                    room._roomDeletionTimer = setTimeout(() => {
+                        console.log(`[Disconnect] Timeout: Deleting empty room ${roomName}`);
+                        const oldKey = room.roomKey;
+                        delete rooms[roomName];
+                        if (oldKey) roomKeys.delete(oldKey);
+                    }, 30000); // 30 second grace period for all players to rejoin
+                }
             }
         }
 

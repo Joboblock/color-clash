@@ -299,14 +299,14 @@ export class OnlineConnection {
 				!this._sessionRestorationAttempted) {
 				console.log('[Client] Attempting session restoration with stored info:', this._sessionInfo);
 				this._sessionRestorationAttempted = true;
-				this._sendPayload({
+				const restorePacket = {
 					type: 'restore_session',
 					roomKey: this._sessionInfo.roomKey,
 					playerName: this._sessionInfo.playerName,
 					sessionId: this._sessionInfo.sessionId
-				});
-				// Don't request room list - wait for restore_session response
-				this._emit('open');
+				};
+					// Use retry logic for restore_session to handle packet loss
+					this._sendWithRetry('restore_session', restorePacket, 'roomlist');
 				return;
 			}
 

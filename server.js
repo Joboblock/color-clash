@@ -119,8 +119,6 @@ const roomKeys = new Map();
 const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'orange', 'purple'];
 // Track which room a connection belongs to and the player's name (per tab)
 const connectionMeta = new Map(); // ws -> { roomName: string, name: string, sessionId?: string }
-// Allow brief disconnects to reattach by name before freeing the seat
-const GRACE_MS = 300000; // 5 min grace window
 
 /**
  * Sends a JSON payload to a WebSocket client.
@@ -129,13 +127,18 @@ const GRACE_MS = 300000; // 5 min grace window
  * @param {object} payload - The payload object to send (will be JSON-stringified).
  */
 function sendPayload(ws, payload) {
+    // Simulate packet loss
+    const type = payload && typeof payload === 'object' ? payload.type : undefined;
+    if (Math.random() < 0.25) {
+        console.warn('[Server] 🔥 Simulated packet loss:', type, payload);
+        return;
+    }
     try {
         ws.send(JSON.stringify(payload));
     } catch (err) {
         try {
-            const t = payload && typeof payload === 'object' ? payload.type : undefined;
             const state = typeof ws?.readyState === 'number' ? ws.readyState : undefined;
-            console.error('[Server] Failed to send payload', { type: t, readyState: state }, err);
+            console.error('[Server] Failed to send payload', { type, readyState: state }, err);
         } catch { /* ignore meta logging errors */ }
     }
 }
@@ -150,69 +153,142 @@ wss.on('connection', (ws) => {
             try { sendPayload(ws, { type: 'error', error: 'Invalid message format' }); } catch { /* ignore */ }
             return;
         }
+        // --- PACKET VALIDATION ---
+        // Helper: get room info for this ws
+        const meta = connectionMeta.get(ws);
+        const roomName = meta?.roomName;
+        const room = roomName ? rooms[roomName] : undefined;
+        const isInRoom = !!roomName && !!room;
+        const isGameStarted = !!(room && room.game && room.game.started);
+
+        // Define packet type groups
+        const gamePackets = new Set(['move', 'move_ack']);
+        const roomPackets = new Set(['leave', 'start_req', 'start_ack', 'color_ans']);
+        const outOfGamePackets = new Set(['host', 'join', 'join_by_key', 'list', 'roomlist', 'restore_session', 'reconnect']);
+
+        // 1. Game packets from clients not in a started room
+        if (gamePackets.has(msg.type) && !isGameStarted) {
+            sendPayload(ws, {
+                type: 'error',
+                error: `Invalid packet: ${msg.type} packet sent while not in a started room`,
+                packet: msg,
+                room: roomName || null
+            });
+            return;
+        }
+        // 2. Room packets from clients not in a room
+        if (roomPackets.has(msg.type) && !isInRoom) {
+            sendPayload(ws, {
+                type: 'error',
+                error: `Invalid packet: ${msg.type} packet sent while not in a room`,
+                packet: msg,
+                room: null
+            });
+            return;
+        }
+        // 3. Out-of-game/room packets from clients in a started room
+        if (outOfGamePackets.has(msg.type) && isGameStarted) {
+            sendPayload(ws, {
+                type: 'error',
+                error: `Invalid packet: ${msg.type} packet sent while in a started room`,
+                packet: msg,
+                room: roomName
+            });
+            return;
+        }
 
         if (msg.type === 'restore_session' && typeof msg.roomKey === 'string' && typeof msg.playerName === 'string' && typeof msg.sessionId === 'string') {
             // Client is attempting to restore a previous session
             const roomKey = String(msg.roomKey);
-            const playerName = String(msg.playerName);
             const sessionId = String(msg.sessionId);
-            
-            console.log('[Session Restore] Attempt from client:', { roomKey, playerName, sessionId });
-            
+            console.log('[Session Restore] Attempt from client:', { roomKey, sessionId });
             // Find room by key
             const roomName = roomKeys.get(roomKey);
             if (!roomName || !rooms[roomName]) {
                 console.log('[Session Restore] ❌ Room not found for key:', roomKey);
-                // Don't send error - just let normal reconnection flow handle it
                 return;
             }
-            
             const room = rooms[roomName];
-            
-            // Find participant by name and sessionId
-            const participant = room.participants.find(p => p.name === playerName && p.sessionId === sessionId);
+            // Find participant by sessionId only
+            const participant = room.participants.find(p => p.sessionId === sessionId);
             if (!participant) {
-                console.log('[Session Restore] ❌ No matching participant found:', { playerName, sessionId });
-                // Player not in this room or sessionId doesn't match
+                console.log('[Session Restore] ❌ No matching participant found:', { sessionId });
                 return;
             }
-            
             // Clear any pending disconnect timer for this participant
-            if (room._disconnectTimers && room._disconnectTimers.has(playerName)) {
-                try { clearTimeout(room._disconnectTimers.get(playerName)); } catch { /* ignore */ }
-                room._disconnectTimers.delete(playerName);
+            if (room._disconnectTimers && room._disconnectTimers.has(participant.sessionId)) {
+                try { clearTimeout(room._disconnectTimers.get(participant.sessionId)); } catch { /* ignore */ }
+                room._disconnectTimers.delete(participant.sessionId);
             }
-            
             // Close old WebSocket if still open
             if (participant.ws && participant.ws !== ws && participant.ws.readyState === 1) {
                 try { participant.ws.terminate(); } catch { /* ignore */ }
             }
-            
-            // Swap out the old WebSocket with the new one
+            const oldWs = participant.ws;
             participant.ws = ws;
             participant.connected = true;
-            
             // Update connectionMeta for the new WebSocket
-            connectionMeta.set(ws, { roomName, name: playerName, sessionId });
-            
-            console.log('[Session Restore] ✅ Session restored for', playerName, 'in room', roomName);
-            
+            connectionMeta.set(ws, { roomName, name: participant.name, sessionId });
+            // IMPORTANT: Update all pending move acks to map the old WebSocket to the new one
+            if (room.game && room.game._moveAcks) {
+                for (const ackData of room.game._moveAcks.values()) {
+                    // If the old WebSocket was in expectedAcks, replace it with the new one
+                    if (ackData.expectedAcks.has(oldWs)) {
+                        ackData.expectedAcks.delete(oldWs);
+                        ackData.expectedAcks.add(ws);
+                    }
+                    // If the old WebSocket had already acknowledged, keep that acknowledgment
+                    if (ackData.receivedAcks.has(oldWs)) {
+                        ackData.receivedAcks.delete(oldWs);
+                        ackData.receivedAcks.add(ws);
+
+                        // Check if all clients have now acknowledged
+                        const allAcked = [...ackData.expectedAcks].every(expectedWs => ackData.receivedAcks.has(expectedWs));
+                        if (allAcked) {
+                            // All clients acknowledged - commit the move, send echo to sender
+                            ackData.commitMove();
+                            const ackPayload = { ...ackData.payload, type: 'move_ack' };
+                            try { sendPayload(ackData.senderWs, ackPayload); } catch { /* ignore */ }
+                            // Find and delete this ack key
+                            for (const [key, data] of room.game._moveAcks.entries()) {
+                                if (data === ackData) {
+                                    room.game._moveAcks.delete(key);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Re-send pending moves to the reconnected client that they haven't acknowledged yet
+            if (room.game && room.game._moveAcks) {
+                for (const ackData of room.game._moveAcks.values()) {
+                    // If this move expects an ack from this client and we haven't received it yet
+                    if (ackData.expectedAcks.has(ws) && !ackData.receivedAcks.has(ws)) {
+                        try { sendPayload(ws, ackData.payload); } catch { /* ignore */ }
+                    }
+                }
+            }
+
+            console.log('[Session Restore] ✅ Session restored for', participant.name, 'in room', roomName);
+
             // Send enriched roomlist to confirm restoration
             const perClientExtras = new Map();
             perClientExtras.set(ws, {
                 room: roomName,
                 roomKey: room.roomKey,
                 maxPlayers: room.maxPlayers,
-                player: playerName,
+                player: participant.name,
                 players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
                 gridSize: Number.isFinite(room.desiredGridSize) ? room.desiredGridSize : undefined,
                 started: !!(room.game && room.game.started)
             });
             broadcastRoomList(perClientExtras);
-            
+
             // If game is active, send catch-up data
             if (room.game && room.game.started) {
-                const lastSeq = (room._lastSeqByName && room._lastSeqByName.get(playerName)) || 0;
+                const lastSeq = (room._lastSeqByName && room._lastSeqByName.get(participant.name)) || 0;
                 const recentMoves = (room.game && Array.isArray(room.game.recentMoves))
                     ? room.game.recentMoves.filter(m => (m.seq || 0) > lastSeq)
                     : [];
@@ -229,7 +305,8 @@ wss.on('connection', (ws) => {
                 };
                 try { sendPayload(ws, rejoinPayload); } catch { /* ignore */ }
             }
-            
+
+
             return;
         } else if (msg.type === 'host') {
             // If this connection is already in a room, remove it from that room first
@@ -497,7 +574,7 @@ wss.on('connection', (ws) => {
                 return;
             }
             console.log(`[Start] 🎮 Host ${meta.name} initiating start for room ${meta.roomName} with ${playerCount} players`);
-            
+
             // Check if game already started (host is retrying after start_cnf was lost)
             if (room.game && room.game.started) {
                 console.log(`[Start] 🔄 Game already started, resending start_cnf to host ${meta.name}`);
@@ -511,15 +588,15 @@ wss.on('connection', (ws) => {
                 try { sendPayload(ws, colorsPayload); } catch (err) { console.error('[Server] Failed to resend colors to host', err); }
                 return;
             }
-            
+
             // Initiate color collection before starting (similar to move confirmation flow)
             if (room._startAcks && room._startAcks.inProgress) {
                 // Already collecting - this is a retry from host
                 console.log(`[Start] 🔄 Start already in progress for room ${meta.roomName}, retrying...`);
-                
+
                 const otherParticipants = room.participants.filter(p => p.ws !== ws);
                 const players = room.participants.map(p => p.name);
-                
+
                 // Case 1: Not all start_acks received yet - resend start to clients who haven't acked
                 if (!room._startAcks.colorsCollected) {
                     console.log(`[Start] 🔄 Colors not yet collected (${room._startAcks.responses.size}/${room._startAcks.expected}), resending start...`);
@@ -535,7 +612,7 @@ wss.on('connection', (ws) => {
                     console.log(`[Start] 📤 Resent start to ${resentCount} clients`);
                     return;
                 }
-                
+
                 // Case 2: Colors collected but not all colors_acks received - resend start to non-host clients who haven't acked
                 if (room._startAcks.colorsAcksReceived.size < room._startAcks.colorsAcksExpected) {
                     console.log(`[Start] 🔄 Colors collected but acks pending (${room._startAcks.colorsAcksReceived.size}/${room._startAcks.colorsAcksExpected}), resending colors...`);
@@ -551,7 +628,7 @@ wss.on('connection', (ws) => {
                     console.log(`[Start] 📤 Resent colors to ${resentCount} clients`);
                     return;
                 }
-                
+
                 // Case 3: All acks received, just resend start_cnf to host
                 console.log(`[Start] 🔄 All acks collected, resending colors to host`);
                 const colorsPayload = { type: 'start_cnf', room: meta.roomName, players, colors: room._startAcks.assignedColors, gridSize: room._startAcks.gridSize };
@@ -559,10 +636,10 @@ wss.on('connection', (ws) => {
                 return;
             }
             const players = room.participants.map(p => p.name);
-            
+
             // Get other participants (not the host)
             const otherParticipants = room.participants.filter(p => p.ws !== ws);
-            
+
             // If host is alone, start immediately with their color
             if (otherParticipants.length === 0) {
                 console.log(`[Start] 👤 Solo host - starting immediately for ${meta.name}`);
@@ -592,7 +669,7 @@ wss.on('connection', (ws) => {
                 try { sendPayload(ws, colorsPayload); } catch (err) { console.error('[Server] Failed to send start_cnf to host', err); }
                 return;
             }
-            
+
             // Calculate gridSize now so non-host clients can start their games
             function recommendedGridSize(p) {
                 if (p <= 2) return 3;
@@ -603,7 +680,7 @@ wss.on('connection', (ws) => {
             const gridSize = Number.isFinite(room.desiredGridSize)
                 ? Math.max(recommendedGridSize(playerCount), Math.min(16, Math.max(3, room.desiredGridSize)))
                 : Math.max(recommendedGridSize(playerCount), Math.min(16, Math.max(3, playerCount + 3)));
-            
+
             const collect = {
                 inProgress: true,
                 expected: room.participants.length, // expect acks from ALL participants (including host)
@@ -613,7 +690,7 @@ wss.on('connection', (ws) => {
                 gridSize // Store for later use when sending to host
             };
             room._startAcks = collect;
-            
+
             // Send color to ALL participants (including host) - each will respond with color_ans
             const startPayload = JSON.stringify({ type: 'color', room: meta.roomName, players });
             console.log(`[Start] 📤 Sending start request to ${room.participants.length} clients, expecting ${collect.expected} acks`);
@@ -656,6 +733,7 @@ wss.on('connection', (ws) => {
             // This MUST run BEFORE sequence validation to commit pending moves first.
             if (room.game._moveAcks && Number.isInteger(msg.seq)) {
                 const clientSeq = msg.seq;
+                console.log(`[Implicit Ack] Client ${senderName} sending move with seq ${clientSeq}, checking pending acks...`);
                 // Acknowledge all pending moves with seq < clientSeq
                 for (const [ackKey, ackData] of room.game._moveAcks.entries()) {
                     const pendingSeq = parseInt(ackKey.replace('move_', ''));
@@ -664,16 +742,23 @@ wss.on('connection', (ws) => {
                     // 2. The pending move seq is less than the current move seq
                     if (pendingSeq < clientSeq && ackData.expectedAcks.has(ws) && ackData.senderWs !== ws) {
                         // This client should have received this move, implicitly acknowledge it
+                        console.log(`[Implicit Ack] ✓ ${senderName}'s move (seq ${clientSeq}) implicitly acks pending move seq ${pendingSeq}`);
+                        console.log(`[Implicit Ack]   Packet content: type=${msg.type}, row=${msg.row}, col=${msg.col}, fromIndex=${msg.fromIndex}`);
+                        console.log(`[Implicit Ack]   Acking move: row=${ackData.payload.row}, col=${ackData.payload.col}, fromIndex=${ackData.payload.fromIndex}`);
                         ackData.receivedAcks.add(ws);
-                        
+
                         // Check if all clients have now acknowledged
                         const allAcked = [...ackData.expectedAcks].every(expectedWs => ackData.receivedAcks.has(expectedWs));
                         if (allAcked) {
                             // All clients acknowledged - commit the move, send echo to sender
+                            console.log(`[Implicit Ack] 🎉 All clients have acked move seq ${pendingSeq}, committing now`);
                             clearTimeout(ackData.timeout);
                             ackData.commitMove();
                             try { sendPayload(ackData.senderWs, ackData.payload); } catch { /* ignore */ }
                             room.game._moveAcks.delete(ackKey);
+                        } else {
+                            const remaining = [...ackData.expectedAcks].filter(expectedWs => !ackData.receivedAcks.has(expectedWs)).length;
+                            console.log(`[Implicit Ack]   Still waiting for ${remaining} more ack(s) for move seq ${pendingSeq}`);
                         }
                     }
                 }
@@ -683,14 +768,14 @@ wss.on('connection', (ws) => {
             if (Number.isInteger(msg.seq)) {
                 const currentSeq = room.game.moveSeq || 0;
                 const expectedSeq = currentSeq + 1;
-                
+
                 if (msg.seq < expectedSeq) {
                     // Client is retrying an already-committed move (echo was lost)
                     // Check if we have this move in recent moves buffer
-                    const recentMove = (room.game.recentMoves || []).find(m => 
+                    const recentMove = (room.game.recentMoves || []).find(m =>
                         m.seq === msg.seq && m.row === r && m.col === c && m.fromIndex === fromIndex
                     );
-                    
+
                     if (recentMove) {
                         // Resend the echo to this client
                         const echoPayload = {
@@ -707,14 +792,14 @@ wss.on('connection', (ws) => {
                         return;
                     }
                     // Move not in buffer - likely too old, send error
-                    try { 
-                        sendPayload(ws, { 
-                            type: 'error', 
-                            error: 'Sequence too old', 
-                            expectedSeq, 
+                    try {
+                        sendPayload(ws, {
+                            type: 'error',
+                            error: 'Sequence too old',
+                            expectedSeq,
                             receivedSeq: msg.seq,
                             currentSeq
-                        }); 
+                        });
                     } catch { /* ignore */ }
                     return;
                 } else if (msg.seq > expectedSeq) {
@@ -746,7 +831,7 @@ wss.on('connection', (ws) => {
             // Now validate turn (only for NEW moves, not retries)
             if (fromIndex !== currentTurn) {
                 // Silenced - handled correctly by client retry logic
-               return;
+                return;
             }
 
             // Accept move: compute next turn and prepare for broadcast
@@ -755,7 +840,7 @@ wss.on('connection', (ws) => {
             const assignedColor = (room.game && Array.isArray(room.game.colors))
                 ? room.game.colors[fromIndex]
                 : (typeof msg.color === 'string' ? msg.color : undefined);
-            
+
             const payload = {
                 type: 'move',
                 room: meta.roomName,
@@ -767,15 +852,17 @@ wss.on('connection', (ws) => {
                 seq: newMoveSeq
             };
 
-            // Get all other participants (not the sender)
-            const otherParticipants = room.participants.filter(p => p.ws !== ws && p.connected);
-            
+            // Get ALL other participants (not the sender), including disconnected ones
+            // We track ALL participants in expectedAcks so we don't confirm until ALL have acknowledged
+            const allOtherParticipants = room.participants.filter(p => p.ws !== ws);
+            const connectedOtherParticipants = allOtherParticipants.filter(p => p.connected);
+
             // Function to commit the move (increment sequence and update turn)
             const commitMove = () => {
                 // Now commit the sequence increment and buffer the move
                 room.game.moveSeq = newMoveSeq;
                 room.game.turnIndex = nextIndex;
-                
+
                 // Buffer for reconnect catch-up
                 try {
                     const moveRecord = { seq: newMoveSeq, room: meta.roomName, row: r, col: c, fromIndex, nextIndex, color: assignedColor };
@@ -785,29 +872,32 @@ wss.on('connection', (ws) => {
                     if (room.game.recentMoves.length > bufferSize) room.game.recentMoves.shift();
                 } catch { /* ignore buffering errors */ }
             };
-            
+
             // If there are no other participants, immediately confirm to sender
-            if (otherParticipants.length === 0) {
+            if (allOtherParticipants.length === 0) {
                 commitMove();
                 const ackPayload = { ...payload, type: 'move_ack' };
                 try { sendPayload(ws, ackPayload); } catch { /* ignore */ }
             } else {
                 // Initialize move acknowledgment tracking
                 if (!room.game._moveAcks) room.game._moveAcks = new Map();
-                
+
                 const ackKey = `move_${newMoveSeq}`;
                 const ackData = {
                     senderWs: ws,
                     payload,
                     commitMove, // Pass the commit function
-                    expectedAcks: new Set(otherParticipants.map(p => p.ws)), // Track by WebSocket, not name
-                    receivedAcks: new Set()
+                    // Track ALL other participants (including disconnected) to wait for all acks
+                    expectedAcks: new Set(allOtherParticipants.map(p => p.ws)),
+                    receivedAcks: new Set(),
+                    // Store participant list so we can match names to WebSockets on reconnect
+                    participantNames: new Map(allOtherParticipants.map(p => [p.name, p]))
                     // No timeout: wait indefinitely for all acks
                 };
                 room.game._moveAcks.set(ackKey, ackData);
 
-                // Broadcast move to all OTHER participants (not the sender)
-                otherParticipants.forEach(p => {
+                // Broadcast move to ONLY connected participants
+                connectedOtherParticipants.forEach(p => {
                     if (p.ws.readyState === 1) {
                         try { sendPayload(p.ws, payload); } catch { /* ignore */ }
                     }
@@ -819,23 +909,23 @@ wss.on('connection', (ws) => {
             if (!meta || !meta.roomName) return;
             const room = rooms[meta.roomName];
             if (!room || !room.game || !room.game._moveAcks) return;
-            
+
             const moveSeq = Number(msg.seq);
             if (!Number.isInteger(moveSeq)) return;
-            
+
             const ackKey = `move_${moveSeq}`;
             const ackData = room.game._moveAcks.get(ackKey);
             if (!ackData) return; // No pending acknowledgment for this move
-            
+
             // Record this client's acknowledgment by WebSocket, not name
             ackData.receivedAcks.add(ws);
-            
+
             // Check if all expected clients have acknowledged
             const allAcked = [...ackData.expectedAcks].every(expectedWs => ackData.receivedAcks.has(expectedWs));
-            
+
             if (allAcked) {
                 // All clients acknowledged - commit the move, send echo to sender
-                            // No timeout to clear
+                // No timeout to clear
                 ackData.commitMove(); // Commit sequence and turn
                 const ackPayload = { ...ackData.payload, type: 'move_ack' };
                 try { sendPayload(ackData.senderWs, ackPayload); } catch { /* ignore */ }
@@ -856,12 +946,12 @@ wss.on('connection', (ws) => {
             const sanitizedColor = playerColors.includes(color) ? color : 'green';
             room._startAcks.responses.set(ws, { name, color: sanitizedColor });
             console.log(`[Start Ack] ✅ Received ack from ${name} with color ${sanitizedColor} (${room._startAcks.responses.size}/${room._startAcks.expected})`);
-            
+
             // Check if we have all responses from other clients
             if (room._startAcks.responses.size >= room._startAcks.expected) {
                 console.log(`[Start Ack] 🎉 All ${room._startAcks.expected} acks received! Assigning colors...`);
                 room._startAcks.colorsCollected = true;
-                
+
                 // Build preferred list in participant order
                 const players = room.participants.map(p => p.name);
                 const prefs = room.participants.map(p => {
@@ -869,13 +959,13 @@ wss.on('connection', (ws) => {
                     return entry && typeof entry.color === 'string' ? entry.color : 'green';
                 });
                 const assigned = assignColorsDeterministic(players, prefs, playerColors);
-                
+
                 // Store assigned colors
                 room._startAcks.assignedColors = assigned;
-                
+
                 // Use the gridSize calculated when start was initiated
                 const gridSize = room._startAcks.gridSize;
-                
+
                 // Initialize game state (but don't mark as fully started yet)
                 room.game = {
                     started: false, // Will be set to true after host receives colors
@@ -888,12 +978,12 @@ wss.on('connection', (ws) => {
                 };
                 if (!room._lastSeqByName) room._lastSeqByName = new Map();
                 console.log(`[Start Ack] � Colors assigned:`, { players, colors: assigned, gridSize });
-                
+
                 // Now send start to non-host clients and wait for their acks
                 const otherParticipants = room.participants.filter(p => p.name !== room._startAcks.hostName);
                 room._startAcks.colorsAcksExpected = otherParticipants.length;
                 room._startAcks.colorsAcksReceived = new Set(); // Track by WebSocket
-                
+
                 const colorsPayload = JSON.stringify({ type: 'start', room: meta.roomName, players, colors: assigned, gridSize });
                 console.log(`[Start Ack] 📤 Sending colors to ${otherParticipants.length} non-host clients`);
                 otherParticipants.forEach(p => {
@@ -915,14 +1005,14 @@ wss.on('connection', (ws) => {
             const name = meta.name;
             room._startAcks.colorsAcksReceived.add(ws);
             console.log(`[Colors Ack] ✅ Received ack from ${name} (${room._startAcks.colorsAcksReceived.size}/${room._startAcks.colorsAcksExpected})`);
-            
+
             // Check if we have all color acks from non-host clients
             if (room._startAcks.colorsAcksReceived.size >= room._startAcks.colorsAcksExpected) {
                 console.log(`[Colors Ack] 🎉 All color acks received! Sending colors to host...`);
-                
+
                 // Mark game as fully started now
                 if (room.game) room.game.started = true;
-                
+
                 // Send start_cnf to host as final confirmation
                 const players = room.game.players;
                 const colors = room._startAcks.assignedColors;
@@ -930,7 +1020,7 @@ wss.on('connection', (ws) => {
                 const colorsPayload = { type: 'start_cnf', room: meta.roomName, players, colors, gridSize };
                 console.log(`[Colors Ack] 📤 Sending colors confirmation to host ${room._startAcks.hostName}`);
                 try { sendPayload(room._startAcks.hostWs, colorsPayload); } catch (err) { console.error('[Server] Failed to send colors to host', err); }
-                
+
                 // Cleanup
                 delete room._startAcks;
                 console.log(`[Colors Ack] ✨ Start sequence complete for room ${meta.roomName}`);
@@ -955,6 +1045,9 @@ wss.on('connection', (ws) => {
                 if (oldKey) roomKeys.delete(oldKey);
             }
             broadcastRoomList();
+        } else if (msg.type === 'ping') {
+            // Respond to ping with pong
+            try { sendPayload(ws, { type: 'pong' }); } catch { /* ignore */ }
         }
     });
 
@@ -969,54 +1062,37 @@ wss.on('connection', (ws) => {
         const room = rooms[roomName];
         if (!room) { connectionMeta.delete(ws); return; }
 
-        // Mark participant disconnected (reserve seat) and schedule purge
-        const participant = room.participants.find(p => p.name === name);
-        if (participant) {
-            participant.connected = false;
-            // Record last seen sequence for reconnect catch-up
-            try {
-                if (room.game) {
-                    if (!room._lastSeqByName) room._lastSeqByName = new Map();
-                    room._lastSeqByName.set(name, room.game.moveSeq || 0);
-                }
-            } catch { /* ignore */ }
-            if (!room._disconnectTimers) room._disconnectTimers = new Map();
-            // Clear any existing timer for this name
-            if (room._disconnectTimers.has(name)) {
+        // Immediately remove participant from room (no grace period)
+        const participantIndex = room.participants.findIndex(p => p.name === name);
+        if (participantIndex >= 0) {
+            console.log(`[Disconnect] Removing ${name} from room ${roomName} immediately`);
+
+            // Clear any pending disconnect timer for this name
+            if (room._disconnectTimers && room._disconnectTimers.has(name)) {
                 try { clearTimeout(room._disconnectTimers.get(name)); } catch { /* ignore */ }
+                room._disconnectTimers.delete(name);
             }
-            const timer = setTimeout(() => {
-                const rr = rooms[roomName];
-                if (!rr) return;
-                const idx = rr.participants.findIndex(pp => pp.name === name && !pp.connected);
-                if (idx >= 0) {
-                    rr.participants.splice(idx, 1);
-                    if (rr.participants.length === 0) {
-                        const oldKey = rr.roomKey;
-                        delete rooms[roomName];
-                        if (oldKey) roomKeys.delete(oldKey);
-                    } else {
-                        rr.participants.forEach(p => {
-                            if (p.ws.readyState === 1) {
-                                sendPayload(p.ws, { type: 'roomupdate', room: roomName, players: rr.participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
-                            }
-                        });
+
+            // Remove the participant
+            room.participants.splice(participantIndex, 1);
+
+            // If room is now empty, delete it
+            if (room.participants.length === 0) {
+                console.log(`[Disconnect] Room ${roomName} is now empty, deleting`);
+                const oldKey = room.roomKey;
+                delete rooms[roomName];
+                if (oldKey) roomKeys.delete(oldKey);
+            } else {
+                // Notify remaining clients about updated roster
+                room.participants.forEach(p => {
+                    if (p.ws.readyState === 1) {
+                        sendPayload(p.ws, { type: 'roomupdate', room: roomName, players: room.participants.map(pp => ({ name: pp.name })) });
                     }
-                    broadcastRoomList();
-                }
-                if (rr && rr._disconnectTimers) rr._disconnectTimers.delete(name);
-            }, GRACE_MS);
-            room._disconnectTimers.set(name, timer);
+                });
+            }
         }
+
         connectionMeta.delete(ws);
-        // Notify connected clients about updated roster immediately
-        if (rooms[roomName]) {
-            rooms[roomName].participants.forEach(p => {
-                if (p.ws.readyState === 1) {
-                    sendPayload(p.ws, { type: 'roomupdate', room: roomName, players: rooms[roomName].participants.filter(pp => pp.connected).map(pp => ({ name: pp.name })) });
-                }
-            });
-        }
         broadcastRoomList();
     });
 });

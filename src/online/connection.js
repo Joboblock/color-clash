@@ -93,17 +93,81 @@ export class OnlineConnection {
 		this._inActiveGame = false;
 		// Track if session restoration was attempted
 		this._sessionRestorationAttempted = false;
+		// Ping/pong keepalive tracking
+		this._lastMessageTime = Date.now();
+		this._pingTimer = null;
+		this._unansweredPings = 0;
+		this._PING_TIMEOUT_MS = 5000; // Send ping after 5 seconds of inactivity
+		this._MAX_UNANSWERED_PINGS = 3; // Close connection after 3 unanswered pings
 	}	/** @private */
-	_log() { }
+	_log(...args) {
+		if (this._debug) {
+			console.debug('[OnlineConnection]', ...args);
+		}
+	}
 
 	/**
-	 * Load session info from localStorage for reconnection.
+	 * Start the ping keepalive timer.
+	 * @private
+	 */
+	_startPingTimer() {
+		this._stopPingTimer();
+		this._lastMessageTime = Date.now();
+		this._unansweredPings = 0;
+		this._pingTimer = setInterval(() => {
+			const timeSinceLastMessage = Date.now() - this._lastMessageTime;
+			if (timeSinceLastMessage >= this._PING_TIMEOUT_MS) {
+				// Time to send a ping
+				if (this._unansweredPings >= this._MAX_UNANSWERED_PINGS) {
+					// Too many unanswered pings - close connection to trigger reconnect
+					this._log('closing connection due to', this._MAX_UNANSWERED_PINGS, 'unanswered pings');
+					console.warn('[Client] ⚠️ Connection timeout: closing WebSocket after', this._MAX_UNANSWERED_PINGS, 'unanswered pings');
+					this._stopPingTimer();
+					if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+						this._ws.close();
+					}
+					return;
+				}
+				// Send ping
+				this._unansweredPings++;
+				this._log('sending ping (unanswered count:', this._unansweredPings, ')');
+				this._sendPayload({ type: 'ping' });
+				// Reset timer for next check
+				this._lastMessageTime = Date.now();
+			}
+		}, 1000); // Check every second
+	}
+
+	/**
+	 * Stop the ping keepalive timer.
+	 * @private
+	 */
+	_stopPingTimer() {
+		if (this._pingTimer) {
+			clearInterval(this._pingTimer);
+			this._pingTimer = null;
+		}
+		this._unansweredPings = 0;
+	}
+
+	/**
+	 * Reset the ping timer (called when any message is received).
+	 * @private
+	 */
+	_resetPingTimer() {
+		this._lastMessageTime = Date.now();
+		this._unansweredPings = 0;
+	}
+
+
+	/**
+	 * Load session info from sessionStorage for reconnection.
 	 * @private
 	 * @returns {{roomKey?: string, playerName?: string, sessionId?: string}}
 	 */
 	_loadSessionInfo() {
 		try {
-			const stored = localStorage.getItem('ws_session');
+			const stored = sessionStorage.getItem('ws_session');
 			if (stored) {
 				return JSON.parse(stored);
 			}
@@ -112,25 +176,25 @@ export class OnlineConnection {
 	}
 
 	/**
-	 * Save session info to localStorage.
+	 * Save session info to sessionStorage.
 	 * @private
 	 * @param {{roomKey?: string, playerName?: string, sessionId?: string}} info
 	 */
 	_saveSessionInfo(info) {
 		try {
 			this._sessionInfo = { ...this._sessionInfo, ...info };
-			localStorage.setItem('ws_session', JSON.stringify(this._sessionInfo));
+			sessionStorage.setItem('ws_session', JSON.stringify(this._sessionInfo));
 		} catch { /* ignore */ }
 	}
 
 	/**
-	 * Clear session info from localStorage.
+	 * Clear session info from sessionStorage.
 	 * @private
 	 */
 	_clearSessionInfo() {
 		try {
 			this._sessionInfo = {};
-			localStorage.removeItem('ws_session');
+			sessionStorage.removeItem('ws_session');
 		} catch { /* ignore */ }
 	}
 
@@ -219,17 +283,20 @@ export class OnlineConnection {
 			this._everOpened = true;
 			this._backoffMs = this._initialBackoffMs;
 			if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
-			
+
+			// Start ping keepalive timer
+			this._startPingTimer();
+
 			// Only try to restore session if:
 			// 1. We have stored session info
 			// 2. We were in an active game when disconnected
 			// 3. We haven't already attempted restoration this session
-			if (this._inActiveGame && 
-			    this._sessionInfo && 
-			    this._sessionInfo.roomKey && 
-			    this._sessionInfo.playerName && 
-			    this._sessionInfo.sessionId &&
-			    !this._sessionRestorationAttempted) {
+			if (this._inActiveGame &&
+				this._sessionInfo &&
+				this._sessionInfo.roomKey &&
+				this._sessionInfo.playerName &&
+				this._sessionInfo.sessionId &&
+				!this._sessionRestorationAttempted) {
 				console.log('[Client] Attempting session restoration with stored info:', this._sessionInfo);
 				this._sessionRestorationAttempted = true;
 				this._sendPayload({
@@ -242,18 +309,37 @@ export class OnlineConnection {
 				this._emit('open');
 				return;
 			}
-			
+
+			// If we have session info but game isn't active, rejoin the room (non-started room)
+			if (!this._inActiveGame &&
+				this._sessionInfo &&
+				this._sessionInfo.roomKey &&
+				this._sessionInfo.playerName &&
+				!this._sessionRestorationAttempted) {
+				console.log('[Client] Rejoining non-started room with key:', this._sessionInfo.roomKey);
+				this._sessionRestorationAttempted = true;
+				this.joinByKey(this._sessionInfo.roomKey, this._sessionInfo.playerName);
+				this._emit('open');
+				return;
+			}
+
 			this._emit('open');
-			// Only request room list if we're not waiting for a join_by_key response
-			console.log('[Client] WS Opened. Request list:', !this._pendingJoinByKey);
-			if (!this._pendingJoinByKey) {
+			// Don't request room list if:
+			// 1. We're waiting for a join_by_key response
+			// 2. We're in an active game (reconnecting after ping timeout, session already restored or in progress)
+			const shouldRequestList = !this._pendingJoinByKey && !this._inActiveGame;
+			console.log('[Client] WS Opened. Request list:', shouldRequestList, '(pendingJoinByKey:', this._pendingJoinByKey, ', inActiveGame:', this._inActiveGame, ')');
+			if (shouldRequestList) {
 				this.requestRoomList();
 			}
 		};
 		ws.onmessage = (evt) => {
 			let msg; try { msg = JSON.parse(evt.data); } catch { return; }
 			const type = msg.type;
-			
+
+			// Reset ping timer on any message received
+			this._resetPingTimer();
+
 			// Log received packet with additional info for roomlist
 			if (type === 'roomlist') {
 				const rooms = msg.rooms || {};
@@ -265,13 +351,14 @@ export class OnlineConnection {
 					}
 				}
 				console.log('[Client] ⬇️ Received:', type, inRoom ? `(in room: ${inRoom})` : '(not in any room)', msg);
-			} else {
+			} else if (type !== 'pong') {
+				// Don't log pong messages to avoid spam
 				console.log('[Client] ⬇️ Received:', type, msg);
 			}
-			
+
 			// Automatically cancel pending packets based on expectedResponseType
 			this._autoCancelPendingPackets(type, msg);
-			
+
 			switch (type) {
 				// 'hosted' no longer used; ignore if received
 				case 'hosted':
@@ -366,7 +453,7 @@ export class OnlineConnection {
 						// Clear the pending join_by_key flag since the attempt failed
 						this._pendingJoinByKey = false;
 					}
-					
+
 					// Cancel move retries if sequence is too old (game has progressed)
 					if (errStr.includes('Sequence too old') && Number.isInteger(msg.receivedSeq)) {
 						// Cancel all pending move packets with seq <= the rejected sequence
@@ -381,15 +468,22 @@ export class OnlineConnection {
 							}
 						}
 					}
-					
+
 					this._emit('error', msg);
 					break;
 				}
+				case 'pong':
+					// Pong received - timer already reset above
+					break;
 				default: this._log('unhandled message type', type);
 			}
 		};
 		ws.onerror = () => { this._log('socket error'); };
 		ws.onclose = () => {
+			// Stop ping timer
+			this._stopPingTimer();
+			console.warn('[Client] 🔄 WebSocket closed, preparing to reconnect...');
+
 			// Save packets that are still being attempted to be sent
 			this._unsentPackets = [];
 			for (const [packetKey, pending] of this._pendingPackets.entries()) {
@@ -411,6 +505,7 @@ export class OnlineConnection {
 	 * Manually close the socket and cancel any pending reconnect timer.
 	 */
 	disconnect() {
+		this._stopPingTimer();
 		if (this._ws) {
 			try { this._ws.close(); } catch { /* ignore */ }
 		}
@@ -436,10 +531,12 @@ export class OnlineConnection {
 	_scheduleReconnect() {
 		if (this._reconnectTimer) return;
 		const delay = Math.min(this._backoffMs, this._maxBackoffMs);
+		console.warn(`[Client] ⏳ Scheduling reconnect in ${delay} ms (backoff: ${this._backoffMs})`);
 		this._log('schedule reconnect in', delay, 'ms');
 		this._emit('reconnect_scheduled', { delay });
 		this._reconnectTimer = setTimeout(() => {
 			this._reconnectTimer = null;
+			console.warn('[Client] 🔁 Attempting reconnect now...');
 			this.connect();
 			this._backoffMs = Math.min(this._backoffMs * 1.5, this._maxBackoffMs);
 		}, delay);
@@ -452,6 +549,12 @@ export class OnlineConnection {
 	 * @param {object} obj Serializable object payload.
 	 */
 	_sendPayload(obj) {
+		// Simulate packet loss
+		const type = obj && typeof obj === 'object' ? obj.type : undefined;
+		if (Math.random() < 0.25) {
+			console.warn('[Client] 🔥 Simulated packet loss:', type, obj);
+			return;
+		}
 		try {
 			this.ensureConnected();
 			if (this._ws && this._ws.readyState === WebSocket.OPEN) {
@@ -459,16 +562,16 @@ export class OnlineConnection {
 					// Log sent packet
 					const type = obj && typeof obj === 'object' ? obj.type : undefined;
 					console.log('[Client] ⬆️ Sending:', type, obj);
-					
-					// Debug: Simulate 0% forced disconnect before move packets only
+
+					/*/ Debug: Simulate 0% forced disconnect before move packets only
 					if (type === 'move' && Math.random() < 0.00) {
 						console.warn('[Client] 🔌 SIMULATED DISCONNECT:', type, obj);
 						if (this._ws && this._ws.readyState === WebSocket.OPEN) {
 							this._ws.close();
 						}
 						return;
-					}
-					
+					}*/
+
 					this._ws.send(JSON.stringify(obj));
 				} catch (err) {
 					const t = obj && typeof obj === 'object' ? obj.type : undefined;
@@ -491,24 +594,24 @@ export class OnlineConnection {
 	/** Host a new room.
 	 * @param {{roomName:string, maxPlayers:number, gridSize?:number, debugName?:string}} p
 	 */
-	host({ roomName, maxPlayers, gridSize, debugName }) { 
+	host({ roomName, maxPlayers, gridSize, debugName }) {
 		// Generate sessionId if not already present
 		if (!this._sessionInfo.sessionId) {
 			this._sessionInfo.sessionId = this._generateSessionId();
 		}
-		this._sendPayload({ type: 'host', roomName, maxPlayers, gridSize, debugName, sessionId: this._sessionInfo.sessionId }); 
+		this._sendPayload({ type: 'host', roomName, maxPlayers, gridSize, debugName, sessionId: this._sessionInfo.sessionId });
 	}
 
 	/** Join an existing room by name.
 	 * @param {string} roomName
 	 * @param {string} debugName Client name (display/debug only)
 	 */
-	join(roomName, debugName) { 
+	join(roomName, debugName) {
 		// Generate sessionId if not already present
 		if (!this._sessionInfo.sessionId) {
 			this._sessionInfo.sessionId = this._generateSessionId();
 		}
-		this._sendPayload({ type: 'join', roomName, debugName, sessionId: this._sessionInfo.sessionId }); 
+		this._sendPayload({ type: 'join', roomName, debugName, sessionId: this._sessionInfo.sessionId });
 	}
 
 	/** Join a room using its key.
@@ -530,9 +633,9 @@ export class OnlineConnection {
 	/** Leave a room (roomName optional if server infers current room).
 	 * @param {string} [roomName]
 	 */
-	leave(roomName) { 
+	leave(roomName) {
 		this._clearSessionInfo(); // Clear session on explicit leave
-		this._sendPayload({ type: 'leave', roomName }); 
+		this._sendPayload({ type: 'leave', roomName });
 	}
 
 	/**
@@ -594,12 +697,12 @@ export class OnlineConnection {
 	/** Broadcast a move.
 	 * @param {{row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} move
 	 */
-	sendMove({ row, col, fromIndex, nextIndex, color, seq }) {
-		const moveKey = `move:${fromIndex}:${row}:${col}`;
-		const packet = { type: 'move', row, col, fromIndex, nextIndex, color };
-		if (Number.isInteger(seq)) packet.seq = seq;
-		this._sendWithRetry(moveKey, packet, 'move');
-	}
+	   sendMove({ row, col, fromIndex, nextIndex, color, seq }) {
+		   const moveKey = `move:${fromIndex}:${row}:${col}`;
+		   const packet = { type: 'move', row, col, fromIndex, nextIndex, color };
+		   if (Number.isInteger(seq)) packet.seq = seq;
+		   this._sendWithRetry(moveKey, packet, 'move');
+	   }
 
 	/** Send acknowledgment for received move.
 	 * @param {number} seq - The sequence number of the move being acknowledged
@@ -677,7 +780,7 @@ export class OnlineConnection {
 				return;
 			}
 		}
-		
+
 		// Special logic for 'join_by_key' packet: only resend if we haven't already joined a room
 		if (packetKey.startsWith('join_by_key:')) {
 			// If we successfully joined, myJoinedRoom will be set and we should stop retrying
@@ -706,13 +809,13 @@ export class OnlineConnection {
 		for (const [packetKey, pending] of this._pendingPackets.entries()) {
 			// Skip packets without expected response type
 			if (!pending.expectedResponseType) continue;
-			
+
 			// Check if message type matches expected response
 			if (pending.expectedResponseType !== msgType) continue;
-			
+
 			// Type matches - now check if content conditions are met
 			let shouldCancel = false;
-			
+
 			switch (pending.expectedResponseType) {
 				case 'roomlist': {
 					// For join_by_key packets, verify we actually joined a room
@@ -739,8 +842,8 @@ export class OnlineConnection {
 						const parts = packetKey.split(':');
 						if (parts.length === 4) {
 							const [, fromIndex, row, col] = parts;
-							if (String(msg.fromIndex) === fromIndex && 
-								String(msg.row) === row && 
+							if (String(msg.fromIndex) === fromIndex &&
+								String(msg.row) === row &&
 								String(msg.col) === col) {
 								shouldCancel = true;
 							}
@@ -754,8 +857,8 @@ export class OnlineConnection {
 						const parts = packetKey.split(':');
 						if (parts.length === 4) {
 							const [, fromIndex, row, col] = parts;
-							if (String(msg.fromIndex) === fromIndex && 
-								String(msg.row) === row && 
+							if (String(msg.fromIndex) === fromIndex &&
+								String(msg.row) === row &&
 								String(msg.col) === col) {
 								shouldCancel = true;
 							}
@@ -783,7 +886,7 @@ export class OnlineConnection {
 					// Unknown response type - cancel to be safe
 					shouldCancel = true;
 			}
-			
+
 			if (shouldCancel) {
 				this._cancelPendingPacket(packetKey);
 			}

@@ -45,7 +45,7 @@ export const { DOUBLE_TAP_THRESHOLD_MS, STARTING_COLOR_KEY, HOST_DEFAULT_GRID_OF
 // 3. Online / Network Parameters -------------------------------------------
 export const OnlineParams = Object.freeze({
     WS_INITIAL_BACKOFF_MS: 500,      // initial reconnect backoff
-    WS_MAX_BACKOFF_MS: 500,         // cap for exponential backoff
+    WS_MAX_BACKOFF_MS: 1000,         // cap for exponential backoff
     SHOW_CONN_BANNER_ONLY_IN_ONLINE: true, // gating flag for connection banner visibility
     WS_PROD_BASE_URL: 'wss://color-clash-192172087961.europe-west1.run.app/ws' // production service endpoint
 });

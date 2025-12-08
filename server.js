@@ -864,9 +864,11 @@ wss.on('connection', (ws) => {
 
             // Get ALL other participants (not the sender), including disconnected ones
             // We track ALL participants in expectedAcks so we don't confirm until ALL have acknowledged
-            const allOtherParticipants = room.participants.filter(p => p.ws !== ws);
+            // Use sessionId to uniquely identify the sender (handles reconnects and duplicate names)
+            const senderSessionId = meta.sessionId;
+            const allOtherParticipants = room.participants.filter(p => p.sessionId !== senderSessionId);
             const connectedOtherParticipants = allOtherParticipants.filter(p => p.connected);
-            console.log(`[Move Setup] Sender: ${senderName}, All participants: [${room.participants.map(p => p.name).join(', ')}]`);
+            console.log(`[Move Setup] Sender: ${senderName} (session: ${senderSessionId}), All participants: [${room.participants.map(p => `${p.name}(${p.sessionId})`).join(', ')}]`);
             console.log(`[Move Setup] Other participants (expected to ack): [${allOtherParticipants.map(p => p.name).join(', ')}]`);
             console.log(`[Move Setup] Connected other participants: [${connectedOtherParticipants.map(p => p.name).join(', ')}]`);
 

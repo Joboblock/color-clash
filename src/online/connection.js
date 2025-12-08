@@ -133,7 +133,14 @@ export class OnlineConnection {
 					console.warn('[Client] ⚠️ Connection timeout: closing WebSocket after', this._MAX_UNANSWERED_PINGS, 'unanswered pings');
 					this._stopPingTimer();
 					if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-						this._ws.close();
+						try {
+							this._ws.close();
+						} catch (e) {
+							console.warn('[Client] Failed to close WebSocket:', e);
+							// Force cleanup if close fails
+							this._ws = null;
+							this._scheduleReconnect();
+						}
 					}
 					return;
 				}

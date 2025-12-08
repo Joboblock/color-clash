@@ -162,7 +162,7 @@ wss.on('connection', (ws) => {
         const isGameStarted = !!(room && room.game && room.game.started);
 
         // Define packet type groups
-        const gamePackets = new Set(['move', 'move_ack']);
+        const gamePackets = new Set(['move', 'move_ack', 'ping']);
         const roomPackets = new Set(['leave', 'start_req', 'start_ack', 'color_ans']);
     const outOfGamePackets = new Set(['host', 'join', 'join_by_key', 'list', 'roomlist']);
         // restore_session is allowed at any time (it's specifically for reconnecting to started games)
@@ -1121,6 +1121,14 @@ wss.on('connection', (ws) => {
             // Game has started: mark participant as disconnected but keep in room for rejoin
             const participant = room.participants.find(p => p.name === name);
             if (participant) {
+                // Only mark as disconnected if this WebSocket is the current one for this participant
+                // (ignore stale close events from old WebSockets after reconnection)
+                if (participant.ws !== ws) {
+                    console.log(`[Disconnect] Ignoring stale disconnect event for ${name} (closing ws is not current: old=${ws.readyState}, current=${participant.ws ? participant.ws.readyState : 'null'})`);
+                    connectionMeta.delete(ws);
+                    return;
+                }
+                
                 console.log(`[Disconnect] ${name} disconnected from started room ${roomName} (marked for rejoin, not removed)`);
                 participant.connected = false;
                 participant.ws = null;

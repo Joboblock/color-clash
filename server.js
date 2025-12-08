@@ -283,10 +283,16 @@ wss.on('connection', (ws) => {
 
             // Re-send pending moves to the reconnected client that they haven't acknowledged yet
             if (room.game && room.game._moveAcks) {
-                for (const ackData of room.game._moveAcks.values()) {
+                console.log(`[Session Restore] Checking ${room.game._moveAcks.size} pending move(s) for ${participant.name}`);
+                console.log(`[Session Restore] Pending move keys:`, Array.from(room.game._moveAcks.keys()));
+                for (const [ackKey, ackData] of room.game._moveAcks.entries()) {
+                    console.log(`[Session Restore]   - ${ackKey}: expectedAcks=[${Array.from(ackData.expectedAcks).join(', ')}], receivedAcks=[${Array.from(ackData.receivedAcks).join(', ')}]`);
                     // If this move expects an ack from this client and we haven't received it yet (by participant name)
                     if (ackData.expectedAcks.has(participant.name) && !ackData.receivedAcks.has(participant.name)) {
+                        console.log(`[Session Restore] 📤 Resending pending move ${ackKey} (seq ${ackData.payload.seq}) to ${participant.name}`);
                         try { sendPayload(ws, ackData.payload); } catch { /* ignore */ }
+                    } else {
+                        console.log(`[Session Restore] ⏭️ Skipping ${ackKey} for ${participant.name} (expected: ${ackData.expectedAcks.has(participant.name)}, received: ${ackData.receivedAcks.has(participant.name)})`);
                     }
                 }
             }
@@ -860,6 +866,9 @@ wss.on('connection', (ws) => {
             // We track ALL participants in expectedAcks so we don't confirm until ALL have acknowledged
             const allOtherParticipants = room.participants.filter(p => p.ws !== ws);
             const connectedOtherParticipants = allOtherParticipants.filter(p => p.connected);
+            console.log(`[Move Setup] Sender: ${senderName}, All participants: [${room.participants.map(p => p.name).join(', ')}]`);
+            console.log(`[Move Setup] Other participants (expected to ack): [${allOtherParticipants.map(p => p.name).join(', ')}]`);
+            console.log(`[Move Setup] Connected other participants: [${connectedOtherParticipants.map(p => p.name).join(', ')}]`);
 
             // Function to commit the move (increment sequence and update turn)
             const commitMove = () => {
@@ -903,9 +912,13 @@ wss.on('connection', (ws) => {
                 room.game._moveAcks.set(ackKey, ackData);
 
                 // Broadcast move to ONLY connected participants
+                console.log(`[Move Broadcast] Sending move seq ${newMoveSeq} to ${connectedOtherParticipants.length} connected participant(s)`);
                 connectedOtherParticipants.forEach(p => {
                     if (p.ws.readyState === 1) {
+                        console.log(`[Move Broadcast]   → Sending to ${p.name} (readyState: ${p.ws.readyState})`);
                         try { sendPayload(p.ws, payload); } catch { /* ignore */ }
+                    } else {
+                        console.log(`[Move Broadcast]   ⚠️ Skipping ${p.name} (readyState: ${p.ws.readyState}, connected: ${p.connected})`);
                     }
                 });
             }

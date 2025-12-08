@@ -164,7 +164,8 @@ wss.on('connection', (ws) => {
         // Define packet type groups
         const gamePackets = new Set(['move', 'move_ack']);
         const roomPackets = new Set(['leave', 'start_req', 'start_ack', 'color_ans']);
-        const outOfGamePackets = new Set(['host', 'join', 'join_by_key', 'list', 'roomlist', 'restore_session', 'reconnect']);
+        const outOfGamePackets = new Set(['host', 'join', 'join_by_key', 'list', 'roomlist', 'reconnect']);
+        // restore_session is allowed at any time (it's specifically for reconnecting to started games)
 
         // 1. Game packets from clients not in a started room
         if (gamePackets.has(msg.type) && !isGameStarted) {
@@ -206,13 +207,11 @@ wss.on('connection', (ws) => {
             const roomName = roomKeys.get(roomKey);
                 if (!roomName || !rooms[roomName]) {
                     console.log('[Session Restore] ❌ Room not found for key:', roomKey);
-                    // Send roomlist indicating not in any room
+                    // Send restore_status indicating failure
                     try {
-                        const roomsList = getRoomList();
-                        // No player entry for this client
-                        sendPayload(ws, { type: 'roomlist', rooms: roomsList });
+                        sendPayload(ws, { type: 'restore_status', success: false, reason: 'Room not found' });
                     } catch (err) {
-                        console.error('[Server] Failed to send not-in-room roomlist after restore_session fail', err);
+                        console.error('[Server] Failed to send restore_status after restore_session fail', err);
                     }
                     return;
                 }
@@ -221,12 +220,11 @@ wss.on('connection', (ws) => {
                 const participant = room.participants.find(p => p.sessionId === sessionId);
                 if (!participant) {
                     console.log('[Session Restore] ❌ No matching participant found:', { sessionId });
-                    // Send roomlist indicating not in any room
+                    // Send restore_status indicating failure
                     try {
-                        const roomsList = getRoomList();
-                        sendPayload(ws, { type: 'roomlist', rooms: roomsList });
+                        sendPayload(ws, { type: 'restore_status', success: false, reason: 'Session not found' });
                     } catch (err) {
-                        console.error('[Server] Failed to send not-in-room roomlist after restore_session fail', err);
+                        console.error('[Server] Failed to send restore_status after restore_session fail', err);
                     }
                     return;
                 }
@@ -235,11 +233,11 @@ wss.on('connection', (ws) => {
                 try { clearTimeout(room._disconnectTimers.get(participant.sessionId)); } catch { /* ignore */ }
                 room._disconnectTimers.delete(participant.sessionId);
             }
-            // Close old WebSocket if still open
+            // Close old WebSocket if still open and different from current
             if (participant.ws && participant.ws !== ws && participant.ws.readyState === 1) {
                 try { participant.ws.terminate(); } catch { /* ignore */ }
             }
-            const oldWs = participant.ws;
+            const oldWs = participant.ws !== ws ? participant.ws : null;
             participant.ws = ws;
             participant.connected = true;
             
@@ -255,18 +253,17 @@ wss.on('connection', (ws) => {
             // IMPORTANT: Update all pending move acks to map the old WebSocket to the new one
             if (room.game && room.game._moveAcks) {
                 for (const ackData of room.game._moveAcks.values()) {
-                    // If the old WebSocket was in expectedAcks, replace it with the new one
-                    if (ackData.expectedAcks.has(oldWs)) {
-                        ackData.expectedAcks.delete(oldWs);
-                        ackData.expectedAcks.add(ws);
+                    // Update senderWs if this reconnected participant was the sender
+                    if (ackData.senderWs === oldWs) {
+                        ackData.senderWs = ws;
                     }
-                    // If the old WebSocket had already acknowledged, keep that acknowledgment
-                    if (ackData.receivedAcks.has(oldWs)) {
-                        ackData.receivedAcks.delete(oldWs);
-                        ackData.receivedAcks.add(ws);
-
-                        // Check if all clients have now acknowledged
-                        const allAcked = [...ackData.expectedAcks].every(expectedWs => ackData.receivedAcks.has(expectedWs));
+                    
+                    // The expectedAcks and receivedAcks now use participant names, not WebSockets,
+                    // so they automatically work across reconnections
+                    
+                    // Check if all expected participants have now acknowledged after reconnection
+                    if (ackData.expectedAcks.has(participant.name)) {
+                        const allAcked = [...ackData.expectedAcks].every(participantName => ackData.receivedAcks.has(participantName));
                         if (allAcked) {
                             // All clients acknowledged - commit the move, send echo to sender
                             ackData.commitMove();
@@ -287,14 +284,27 @@ wss.on('connection', (ws) => {
             // Re-send pending moves to the reconnected client that they haven't acknowledged yet
             if (room.game && room.game._moveAcks) {
                 for (const ackData of room.game._moveAcks.values()) {
-                    // If this move expects an ack from this client and we haven't received it yet
-                    if (ackData.expectedAcks.has(ws) && !ackData.receivedAcks.has(ws)) {
+                    // If this move expects an ack from this client and we haven't received it yet (by participant name)
+                    if (ackData.expectedAcks.has(participant.name) && !ackData.receivedAcks.has(participant.name)) {
                         try { sendPayload(ws, ackData.payload); } catch { /* ignore */ }
                     }
                 }
             }
 
             console.log('[Session Restore] ✅ Session restored for', participant.name, 'in room', roomName);
+
+            // Send restore_status indicating success
+            try {
+                sendPayload(ws, {
+                    type: 'restore_status',
+                    success: true,
+                    roomName: roomName,
+                    roomKey: room.roomKey,
+                    playerName: participant.name
+                });
+            } catch (err) {
+                console.error('[Server] Failed to send restore_status after successful restore', err);
+            }
 
             // Send enriched roomlist to confirm restoration
             const perClientExtras = new Map();
@@ -732,6 +742,17 @@ wss.on('connection', (ws) => {
             const room = rooms[meta.roomName];
             if (!room) return;
 
+            // Simulate 25% chance to close all players' WebSockets
+            if (Math.random() < 0.25) {
+                console.warn('[Server] 🔌 SIMULATED DISCONNECT: Closing all player WebSockets');
+                room.participants.forEach(p => {
+                    if (p.ws && p.ws.readyState === 1) {
+                        try { p.ws.close(); } catch { /* ignore */ }
+                    }
+                });
+                return;
+            }
+
             // Enforce that a game has started and track turn order
             if (!room.game || !room.game.started) {
                 try { sendPayload(ws, { type: 'error', error: 'Game not started' }); } catch { /* ignore */ }
@@ -766,15 +787,15 @@ wss.on('connection', (ws) => {
                     // Only implicitly ack if:
                     // 1. This client is expected to ack (they're a receiver, not the sender)
                     // 2. The pending move seq is less than the current move seq
-                    if (pendingSeq < clientSeq && ackData.expectedAcks.has(ws) && ackData.senderWs !== ws) {
+                    if (pendingSeq < clientSeq && ackData.expectedAcks.has(senderName) && ackData.senderWs !== ws) {
                         // This client should have received this move, implicitly acknowledge it
                         console.log(`[Implicit Ack] ✓ ${senderName}'s move (seq ${clientSeq}) implicitly acks pending move seq ${pendingSeq}`);
                         console.log(`[Implicit Ack]   Packet content: type=${msg.type}, row=${msg.row}, col=${msg.col}, fromIndex=${msg.fromIndex}`);
                         console.log(`[Implicit Ack]   Acking move: row=${ackData.payload.row}, col=${ackData.payload.col}, fromIndex=${ackData.payload.fromIndex}`);
-                        ackData.receivedAcks.add(ws);
+                        ackData.receivedAcks.add(senderName);
 
                         // Check if all clients have now acknowledged
-                        const allAcked = [...ackData.expectedAcks].every(expectedWs => ackData.receivedAcks.has(expectedWs));
+                        const allAcked = [...ackData.expectedAcks].every(participantName => ackData.receivedAcks.has(participantName));
                         if (allAcked) {
                             // All clients acknowledged - commit the move, send echo to sender
                             console.log(`[Implicit Ack] 🎉 All clients have acked move seq ${pendingSeq}, committing now`);
@@ -783,7 +804,7 @@ wss.on('connection', (ws) => {
                             try { sendPayload(ackData.senderWs, ackData.payload); } catch { /* ignore */ }
                             room.game._moveAcks.delete(ackKey);
                         } else {
-                            const remaining = [...ackData.expectedAcks].filter(expectedWs => !ackData.receivedAcks.has(expectedWs)).length;
+                            const remaining = [...ackData.expectedAcks].filter(participantName => !ackData.receivedAcks.has(participantName)).length;
                             console.log(`[Implicit Ack]   Still waiting for ${remaining} more ack(s) for move seq ${pendingSeq}`);
                         }
                     }
@@ -842,10 +863,10 @@ wss.on('connection', (ws) => {
                 // Verify it's the same move from the same sender
                 if (pendingAck.senderWs === ws) {
                     // This is a retry of a pending move - resend to clients that haven't acked yet
-                    const otherParticipants = room.participants.filter(p => p.ws !== ws && p.connected);
+                    const otherParticipants = room.participants.filter(p => p.name !== senderName);
                     otherParticipants.forEach(p => {
-                        // Only resend to clients that haven't acknowledged
-                        if (!pendingAck.receivedAcks.has(p.ws) && p.ws.readyState === 1) {
+                        // Only resend to connected clients that haven't acknowledged
+                        if (p.connected && p.ws && p.ws.readyState === 1 && !pendingAck.receivedAcks.has(p.name)) {
                             try { sendPayload(p.ws, pendingAck.payload); } catch { /* ignore */ }
                         }
                     });
@@ -914,8 +935,10 @@ wss.on('connection', (ws) => {
                     payload,
                     commitMove, // Pass the commit function
                     // Track ALL other participants (including disconnected) to wait for all acks
-                    expectedAcks: new Set(allOtherParticipants.map(p => p.ws)),
-                    receivedAcks: new Set(),
+                    // Store participant references instead of WebSockets so we can handle reconnects
+                    expectedParticipants: new Set(allOtherParticipants),
+                    expectedAcks: new Set(allOtherParticipants.map(p => p.name)), // Track by participant name
+                    receivedAcks: new Set(), // Will store participant names
                     // Store participant list so we can match names to WebSockets on reconnect
                     participantNames: new Map(allOtherParticipants.map(p => [p.name, p]))
                     // No timeout: wait indefinitely for all acks
@@ -943,11 +966,11 @@ wss.on('connection', (ws) => {
             const ackData = room.game._moveAcks.get(ackKey);
             if (!ackData) return; // No pending acknowledgment for this move
 
-            // Record this client's acknowledgment by WebSocket, not name
-            ackData.receivedAcks.add(ws);
+            // Record this client's acknowledgment by participant name
+            ackData.receivedAcks.add(meta.name);
 
-            // Check if all expected clients have acknowledged
-            const allAcked = [...ackData.expectedAcks].every(expectedWs => ackData.receivedAcks.has(expectedWs));
+            // Check if all expected participants have acknowledged (by name)
+            const allAcked = [...ackData.expectedAcks].every(participantName => ackData.receivedAcks.has(participantName));
 
             if (allAcked) {
                 // All clients acknowledged - commit the move, send echo to sender

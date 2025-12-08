@@ -93,6 +93,10 @@ export class OnlineConnection {
 		this._inActiveGame = false;
 		// Track if session restoration was attempted
 		this._sessionRestorationAttempted = false;
+		// Track if we're currently restoring a session (blocks moves)
+		this._isRestoringSession = false;
+		// Queue for moves blocked during restoration
+		this._blockedMoves = [];
 		// Ping/pong keepalive tracking
 		this._lastMessageTime = Date.now();
 		this._pingTimer = null;
@@ -263,6 +267,12 @@ export class OnlineConnection {
 	isConnected() { return !!(this._ws && this._ws.readyState === WebSocket.OPEN); }
 
 	/**
+	 * Whether session restoration is currently in progress.
+	 * @returns {boolean}
+	 */
+	isRestoringSession() { return this._isRestoringSession; }
+
+	/**
 	 * Indicates if the socket has reached OPEN state at least once in its lifetime.
 	 * @returns {boolean}
 	 */
@@ -299,6 +309,8 @@ export class OnlineConnection {
 				!this._sessionRestorationAttempted) {
 				console.log('[Client] Attempting session restoration with stored info:', this._sessionInfo);
 				this._sessionRestorationAttempted = true;
+				this._isRestoringSession = true;
+				this._emit('restoring_session', { restoring: true });
 				const restorePacket = {
 					type: 'restore_session',
 					roomKey: this._sessionInfo.roomKey,
@@ -306,7 +318,7 @@ export class OnlineConnection {
 					sessionId: this._sessionInfo.sessionId
 				};
 					// Use retry logic for restore_session to handle packet loss
-					this._sendWithRetry('restore_session', restorePacket, 'roomlist');
+					this._sendWithRetry('restore_session', restorePacket, 'restore_status');
 				return;
 			}
 
@@ -363,17 +375,57 @@ export class OnlineConnection {
 				// 'hosted' no longer used; ignore if received
 				case 'hosted':
 					break;
-				case 'roomlist': {
-					const rooms = msg.rooms || {};
-					// Check if we successfully restored session (we're in a room with our stored info)
-					for (const [roomName, info] of Object.entries(rooms)) {
-						if (info && info.player && info.roomKey === this._sessionInfo?.roomKey) {
-							console.log('[Client] ✅ Session restored! Rejoined room:', roomName);
-							// Reset restoration attempt flag so we can restore again on next disconnect
-							this._sessionRestorationAttempted = false;
-							break;
+				case 'restore_status': {
+					// Server's response to restore_session attempt
+					if (msg.success) {
+						console.log('[Client] ✅ Session restored successfully!', msg);
+						// Reset restoration attempt flag so we can restore again on next disconnect
+						this._sessionRestorationAttempted = false;
+						
+						// Clear restoring flag first
+						if (this._isRestoringSession) {
+							this._isRestoringSession = false;
+							this._emit('restoring_session', { restoring: false });
+						}
+						
+						// Resend any blocked moves that were queued during restoration
+						if (this._blockedMoves.length > 0) {
+							console.log('[Client] 📤 Resending', this._blockedMoves.length, 'blocked move(s)');
+							const movesToSend = [...this._blockedMoves];
+							this._blockedMoves = [];
+							movesToSend.forEach(move => this.sendMove(move));
+						}
+					} else {
+						console.log('[Client] ❌ Session restoration failed:', msg.reason);
+						// Clear session info since restoration failed
+						this._inActiveGame = false;
+						this._sessionInfo = {
+							roomKey: null,
+							playerName: null,
+							sessionId: this._sessionInfo?.sessionId || this._generateSessionId()
+						};
+						
+						// Clear restoring flag
+						if (this._isRestoringSession) {
+							this._isRestoringSession = false;
+							this._emit('restoring_session', { restoring: false });
+						}
+						
+						// Clear blocked moves since we're not in a game anymore
+						if (this._blockedMoves.length > 0) {
+							console.log('[Client] 🗑️ Discarding', this._blockedMoves.length, 'blocked move(s) due to failed restoration');
+							this._blockedMoves = [];
 						}
 					}
+					break;
+				}
+				case 'roomlist': {
+					// Ignore roomlist packets while trying to restore session
+					if (this._isRestoringSession) {
+						console.log('[Client] ⏭️ Ignoring roomlist while restoring session');
+						break;
+					}
+					const rooms = msg.rooms || {};
 					this._emit('roomlist', rooms);
 					break;
 				}
@@ -563,8 +615,8 @@ export class OnlineConnection {
 					const type = obj && typeof obj === 'object' ? obj.type : undefined;
 					console.log('[Client] ⬆️ Sending:', type, obj);
 
-					/*/ Debug: Simulate 0% forced disconnect before move packets only
-					if (type === 'move' && Math.random() < 0.00) {
+					/*/ Debug: Simulate forced disconnect before move packets only
+					if (type === 'move' && Math.random() < 0.25) {
 						console.warn('[Client] 🔌 SIMULATED DISCONNECT:', type, obj);
 						if (this._ws && this._ws.readyState === WebSocket.OPEN) {
 							this._ws.close();
@@ -698,6 +750,12 @@ export class OnlineConnection {
 	 * @param {{row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} move
 	 */
 	   sendMove({ row, col, fromIndex, nextIndex, color, seq }) {
+		   // Block moves while restoring session - queue them for later
+		   if (this._isRestoringSession) {
+			   console.log('[Client] 🚫 Move blocked: session restoration in progress, queueing move');
+			   this._blockedMoves.push({ row, col, fromIndex, nextIndex, color, seq });
+			   return;
+		   }
 		   const moveKey = `move:${fromIndex}:${row}:${col}`;
 		   const packet = { type: 'move', row, col, fromIndex, nextIndex, color };
 		   if (Number.isInteger(seq)) packet.seq = seq;
@@ -791,6 +849,17 @@ export class OnlineConnection {
 			}
 			// Continue retrying - the server will send an error if room doesn't exist or is full
 		}
+		
+		// Block move retries while restoring session
+		if (packetKey.startsWith('move:') && this._isRestoringSession) {
+			this._log('Pausing move retry: session restoration in progress');
+			// Reschedule for later
+			pending.retryTimer = setTimeout(() => {
+				this._retryPacket(packetKey);
+			}, nextBackoff);
+			return;
+		}
+		
 		this._log(`Retrying packet ${packetKey} (attempt ${pending.retryCount})`);
 		this._sendPayload(pending.packet);
 		// Schedule next retry
@@ -817,6 +886,13 @@ export class OnlineConnection {
 			let shouldCancel = false;
 
 			switch (pending.expectedResponseType) {
+				case 'restore_status': {
+					// For restore_session packets, always cancel on restore_status (success or failure)
+					if (packetKey === 'restore_session') {
+						shouldCancel = true;
+					}
+					break;
+				}
 				case 'roomlist': {
 					// For join_by_key packets, verify we actually joined a room
 					if (packetKey.startsWith('join_by_key:')) {

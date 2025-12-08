@@ -96,8 +96,9 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
     }
 
     function showConnBanner(message, kind = 'info') {
-        // Respect UI context: suppress banner unless Online/Host menus are visible
-        if (!isOnlineMenusOpen()) return;
+        // Respect UI context: suppress banner unless Online/Host menus are visible or restoring session during game
+        const isRestoringDuringGame = kind === 'error' && message.includes('Restoring Session');
+        if (!isOnlineMenusOpen() && !isRestoringDuringGame) return;
         let bar = document.getElementById('connStatus');
         if (!bar) {
             bar = document.createElement('div');
@@ -144,6 +145,13 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
     onlineConnection.on('packet_confirmed', () => {
         // Only hide banner if no other packets are being retried
         if (!onlineConnection.hasRetryingPackets()) {
+            hideConnBanner();
+        }
+    });
+    onlineConnection.on('restoring_session', ({ restoring }) => {
+        if (restoring) {
+            showConnBanner('Restoring Session…', 'error');
+        } else {
             hideConnBanner();
         }
     });

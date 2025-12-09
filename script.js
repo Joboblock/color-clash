@@ -1742,7 +1742,9 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
         isProcessing = false;
         performanceMode = false;
         // When creating a new level, start with the selected cycler color within the active palette
-        currentPlayer = computeStartPlayerIndex();
+        // For local games, gameColors is already rotated to start with the selected color, so currentPlayer should be 0
+        // For online games, computeStartPlayerIndex uses the server-assigned gameColors
+        currentPlayer = computeStartPlayerIndex(gameColors);
 
         // recompute invalid initial positions for new size
         invalidInitialPositions = computeInvalidInitialPositions(gridSize);

@@ -164,7 +164,11 @@ export function createEdgeCircles(playerCount, state = {}) {
     const count = Math.min(ac.length || 0, Math.max(2, (typeof playerCount === 'number' ? playerCount : ac.length || 2)));
     const restrict = getRestrictionType();
 
-    const positions = computeEdgePositions(count, restrict);
+    let positions = computeEdgePositions(count, restrict);
+    // Always assign colors in clockwise order: reverse positions in portrait mode
+    if (restrict === 'side') {
+        positions = positions.slice().reverse();
+    }
     positions.forEach((posClass, idx) => {
         const d = document.createElement('div');
         d.className = 'edge-circle ' + posClass;

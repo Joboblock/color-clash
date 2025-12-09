@@ -1909,6 +1909,10 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
                 checkWinCondition();
             }
             if (!gameWon) switchPlayer();
+            // Process any buffered online moves that were waiting for UI to finish
+            if (onlineGameActive && typeof tryApplyBufferedMoves === 'function') {
+                tryApplyBufferedMoves();
+            }
             return;
         }
 

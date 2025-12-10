@@ -123,7 +123,7 @@ export class OnlineConnection {
 			if (!this._inActiveGame) {
 				return;
 			}
-			
+
 			const timeSinceLastMessage = Date.now() - this._lastMessageTime;
 			if (timeSinceLastMessage >= this._PING_TIMEOUT_MS) {
 				// Time to send a ping
@@ -329,8 +329,8 @@ export class OnlineConnection {
 					playerName: this._sessionInfo.playerName,
 					sessionId: this._sessionInfo.sessionId
 				};
-					// Use retry logic for restore_session to handle packet loss
-					this._sendWithRetry('restore_session', restorePacket, 'restore_status');
+				// Use retry logic for restore_session to handle packet loss
+				this._sendWithRetry('restore_session', restorePacket, 'restore_status');
 				return;
 			}
 
@@ -393,13 +393,13 @@ export class OnlineConnection {
 						console.log('[Client] ✅ Session restored successfully!', msg);
 						// Reset restoration attempt flag so we can restore again on next disconnect
 						this._sessionRestorationAttempted = false;
-						
+
 						// Clear restoring flag first
 						if (this._isRestoringSession) {
 							this._isRestoringSession = false;
 							this._emit('restoring_session', { restoring: false });
 						}
-						
+
 						// Resend any blocked moves that were queued during restoration
 						if (this._blockedMoves.length > 0) {
 							console.log('[Client] 📤 Resending', this._blockedMoves.length, 'blocked move(s)');
@@ -416,13 +416,13 @@ export class OnlineConnection {
 							playerName: null,
 							sessionId: this._sessionInfo?.sessionId || this._generateSessionId()
 						};
-						
+
 						// Clear restoring flag
 						if (this._isRestoringSession) {
 							this._isRestoringSession = false;
 							this._emit('restoring_session', { restoring: false });
 						}
-						
+
 						// Clear blocked moves since we're not in a game anymore
 						if (this._blockedMoves.length > 0) {
 							console.log('[Client] 🗑️ Discarding', this._blockedMoves.length, 'blocked move(s) due to failed restoration');
@@ -761,18 +761,18 @@ export class OnlineConnection {
 	/** Broadcast a move.
 	 * @param {{row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} move
 	 */
-	   sendMove({ row, col, fromIndex, nextIndex, color, seq }) {
-		   // Block moves while restoring session - queue them for later
-		   if (this._isRestoringSession) {
-			   console.log('[Client] 🚫 Move blocked: session restoration in progress, queueing move');
-			   this._blockedMoves.push({ row, col, fromIndex, nextIndex, color, seq });
-			   return;
-		   }
-		   const moveKey = `move:${fromIndex}:${row}:${col}`;
-		   const packet = { type: 'move', row, col, fromIndex, nextIndex, color };
-		   if (Number.isInteger(seq)) packet.seq = seq;
-		   this._sendWithRetry(moveKey, packet, 'move');
-	   }
+	sendMove({ row, col, fromIndex, nextIndex, color, seq }) {
+		// Block moves while restoring session - queue them for later
+		if (this._isRestoringSession) {
+			console.log('[Client] 🚫 Move blocked: session restoration in progress, queueing move');
+			this._blockedMoves.push({ row, col, fromIndex, nextIndex, color, seq });
+			return;
+		}
+		const moveKey = `move:${fromIndex}:${row}:${col}`;
+		const packet = { type: 'move', row, col, fromIndex, nextIndex, color };
+		if (Number.isInteger(seq)) packet.seq = seq;
+		this._sendWithRetry(moveKey, packet, 'move');
+	}
 
 	/** Send acknowledgment for received move.
 	 * @param {number} seq - The sequence number of the move being acknowledged
@@ -861,7 +861,7 @@ export class OnlineConnection {
 			}
 			// Continue retrying - the server will send an error if room doesn't exist or is full
 		}
-		
+
 		// Block move retries while restoring session
 		if (packetKey.startsWith('move:') && this._isRestoringSession) {
 			this._log('Pausing move retry: session restoration in progress');
@@ -871,7 +871,7 @@ export class OnlineConnection {
 			}, nextBackoff);
 			return;
 		}
-		
+
 		this._log(`Retrying packet ${packetKey} (attempt ${pending.retryCount})`);
 		this._sendPayload(pending.packet);
 		// Schedule next retry

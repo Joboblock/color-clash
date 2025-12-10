@@ -20,7 +20,7 @@ export const firstPage = {
 				setMenuParam: (menu, push) => ctx.setMenuParam && ctx.setMenuParam(menu, push),
 				menuHistoryStack: ctx.menuHistoryStack || []
 			});
-		} catch {/* ignore */}
+		} catch {/* ignore */ }
 		this.components = { closeButtons };
 	},
 	show(ctx) {
@@ -29,7 +29,7 @@ export const firstPage = {
 			if (Array.isArray(playerColors) && typeof startingColorIndex === 'number') {
 				document.body.className = playerColors[startingColorIndex] || 'green';
 			}
-		} catch {/* ignore */}
+		} catch {/* ignore */ }
 	},
 	hide() { /* no-op */ }
 };

@@ -84,7 +84,7 @@ export function removeMenuParam() {
     try {
         const params = new URLSearchParams(window.location.search);
         params.delete('menu');
-        const url = params.toString() 
+        const url = params.toString()
             ? `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`
             : `${window.location.pathname}${window.location.hash || ''}`;
         window.history.replaceState({ ...(window.history.state || {}) }, '', url);
@@ -129,7 +129,7 @@ export function applyStateFromUrl(ctx) {
         const currentRoom = ctx.getMyJoinedRoom && ctx.getMyJoinedRoom();
         const params = new URLSearchParams(window.location.search);
         const urlKey = params.get('key');
-        
+
         if (currentRoom && ctx.getRoomKeyForRoom) {
             // User is in a room: ensure key is in URL
             const roomKey = ctx.getRoomKeyForRoom(currentRoom);
@@ -178,8 +178,8 @@ export function applyStateFromUrl(ctx) {
     }
     const ad = parseInt(params.get('ai_depth') || '', 10);
     if (!Number.isNaN(ad) && ad >= 1) {
-        try { 
-            if (ctx.setAiDepth) ctx.setAiDepth(Math.max(1, ad)); 
+        try {
+            if (ctx.setAiDepth) ctx.setAiDepth(Math.max(1, ad));
         } catch { /* ignore */ }
     }
     if (ctx.setGameColors) {

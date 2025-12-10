@@ -79,7 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let lastAppliedSeq = 0;
     // Track if we're waiting for an echo after sending our own move
     let pendingEchoSeq = null;
-console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
+    console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
 
     // Connection banner helpers stay in UI layer; OnlineConnection just emits events.
 
@@ -224,21 +224,21 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
         // All clients (host and non-host): server requesting color_ans with our color preference
         console.log('[Color Request] Server requesting color preference');
         if (!clientFullyInitialized) return;
-        
+
         // Send our color preference and wait for start/start_cnf
-        try { 
+        try {
             const color = playerColors[getStartingColorIndex()] || 'green';
             onlineConnection.sendColorAns(color);
             console.log('[Color] Sent color_ans, waiting for start confirmation...');
         } catch { /* ignore */ }
     });
-    
+
     // Handler for non-host clients receiving 'start' with assigned colors
     onlineConnection.on('start', (msg) => {
         // Non-host receives assigned colors from server - this is when we start the game
         console.log('[Start] Server sent start with colors:', msg.colors);
         if (!clientFullyInitialized) return;
-        
+
         try {
             // Initialize game state for non-host clients
             lastAppliedSeq = 0;
@@ -247,24 +247,24 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
             onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
             myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
             console.log(`[Colors] myPlayerName="${myPlayerName}", onlinePlayers=`, onlinePlayers, `myOnlineIndex=${myOnlineIndex}`);
-            
+
             const p = Math.max(2, Math.min(playerColors.length, onlinePlayers.length || 2));
             // Get gridSize from msg (server always sends it in colors packet)
-            const s = Number.isInteger(msg.gridSize) 
-                ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10))) 
+            const s = Number.isInteger(msg.gridSize)
+                ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10)))
                 : recommendedGridSize(p);
-            
+
             // Use server-provided colors
             if (msg.colors && Array.isArray(msg.colors) && msg.colors.length >= p) {
                 gameColors = msg.colors.slice(0, p);
             } else {
                 gameColors = playerColors.slice(0, p);
             }
-            
+
             playerCount = p;
             gridSize = s;
             document.documentElement.style.setProperty('--grid-size', gridSize);
-            
+
             // Hide menus and start game UI
             const firstMenu = document.getElementById('firstMenu');
             const mainMenu = document.getElementById('mainMenu');
@@ -272,35 +272,35 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
             if (firstMenu) setHidden(firstMenu, true);
             if (mainMenu) setHidden(mainMenu, true);
             if (onlineMenu) setHidden(onlineMenu, true);
-            
+
             practiceMode = false;
             recreateGrid(s, p);
             currentPlayer = 0;
             document.body.className = activeColors()[currentPlayer];
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
-            
+
             // Remove menu parameter from URL when game starts
             removeMenuParam();
-            
+
             // Enable session restoration during active game
             onlineConnection.setGameActive();
-            
+
             console.log(`[Start] Game started for non-host`);
-            
+
             // Non-host sends acknowledgment
             onlineConnection.sendStartAck();
         } catch (err) {
             console.error('[Start] Failed to start game:', err);
         }
     });
-    
+
     // Handler for host receiving 'start_cnf' as final confirmation
     onlineConnection.on('start_cnf', (msg) => {
         // Host receives final confirmation with assigned colors
         console.log('[Start Cnf] Server sent start confirmation with colors:', msg.colors);
         if (!clientFullyInitialized) return;
-        
+
         try {
             // Initialize game state for host
             lastAppliedSeq = 0;
@@ -309,24 +309,24 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
             onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
             myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
             console.log(`[Start Cnf] myPlayerName="${myPlayerName}", onlinePlayers=`, onlinePlayers, `myOnlineIndex=${myOnlineIndex}`);
-            
+
             const p = Math.max(2, Math.min(playerColors.length, onlinePlayers.length || 2));
             // Get gridSize from msg (server always sends it)
-            const s = Number.isInteger(msg.gridSize) 
-                ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10))) 
+            const s = Number.isInteger(msg.gridSize)
+                ? Math.max(3, Math.min(16, parseInt(msg.gridSize, 10)))
                 : recommendedGridSize(p);
-            
+
             // Use server-provided colors
             if (msg.colors && Array.isArray(msg.colors) && msg.colors.length >= p) {
                 gameColors = msg.colors.slice(0, p);
             } else {
                 gameColors = playerColors.slice(0, p);
             }
-            
+
             playerCount = p;
             gridSize = s;
             document.documentElement.style.setProperty('--grid-size', gridSize);
-            
+
             // Hide menus and start game UI
             const firstMenu = document.getElementById('firstMenu');
             const mainMenu = document.getElementById('mainMenu');
@@ -334,20 +334,20 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
             if (firstMenu) setHidden(firstMenu, true);
             if (mainMenu) setHidden(mainMenu, true);
             if (onlineMenu) setHidden(onlineMenu, true);
-            
+
             practiceMode = false;
             recreateGrid(s, p);
             currentPlayer = 0;
             document.body.className = activeColors()[currentPlayer];
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
-            
+
             // Remove menu parameter from URL when game starts
             removeMenuParam();
-            
+
             // Enable session restoration during active game
             onlineConnection.setGameActive();
-            
+
             console.log(`[Start Cnf] Game started for host`);
         } catch (err) {
             console.error('[Start Cnf] Failed to start game:', err);
@@ -411,7 +411,7 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
                 console.warn(`[Move] Received move without sequence number. Ignoring. (myOnlineIndex=${myOnlineIndex})`);
                 return;
             }
-            
+
             // Handle implicit echo confirmation: if we sent a move but haven't received our echo,
             // and we receive the opponent's next move, treat it as if our echo arrived
             if (pendingEchoSeq !== null && seq === pendingEchoSeq + 1) {
@@ -421,7 +421,7 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
                 pendingEchoSeq = null;
                 // Now proceed to apply the opponent's move normally
             }
-            
+
             const expectedNext = (Number(lastAppliedSeq) || 0) + 1;
             if (seq === expectedNext) {
                 // Apply immediately, or buffer if UI is currently processing
@@ -450,11 +450,11 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
                     doApply();
                 }
             } else if (seq > expectedNext) {
-                console.warn(`[Move] Future move seq ${seq}, expected ${expectedNext}. Buffering. (pending: ${Array.from(pendingMoves.keys()).sort((a,b)=>a-b).join(', ')}) (myOnlineIndex=${myOnlineIndex})`);
+                console.warn(`[Move] Future move seq ${seq}, expected ${expectedNext}. Buffering. (pending: ${Array.from(pendingMoves.keys()).sort((a, b) => a - b).join(', ')}) (myOnlineIndex=${myOnlineIndex})`);
                 // Future move: store and wait for earlier moves
                 pendingMoves.set(seq, { r, c, fromIdx });
             }
-        } catch (err) { 
+        } catch (err) {
             console.error('[Move] Error handling move:', err);
         }
     });
@@ -467,13 +467,13 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
             }
             const seq = Number(msg.seq);
             const fromIdx = Number(msg.fromIndex);
-            
+
             // This should be our own move confirmation
             if (fromIdx !== myOnlineIndex) {
                 console.warn(`[Move Ack] Received ack for wrong player: fromIdx=${fromIdx}, myOnlineIndex=${myOnlineIndex}`);
                 return;
             }
-            
+
             if (Number.isInteger(seq)) {
                 console.log(`[Move Ack] Received echo for seq=${seq}, current lastAppliedSeq=${lastAppliedSeq}, pendingEchoSeq=${pendingEchoSeq}, myOnlineIndex=${myOnlineIndex}`);
                 if (seq === lastAppliedSeq) {
@@ -488,7 +488,7 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
                     console.warn(`[Move Ack] Future echo seq ${seq}, currently at ${lastAppliedSeq}. Server ahead? (myOnlineIndex=${myOnlineIndex})`);
                 }
             }
-        } catch (err) { 
+        } catch (err) {
             console.error('[Move Ack] Error handling move ack:', err);
         }
     });
@@ -509,17 +509,17 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
                     const m = missed[idx]; const r = Number(m.row), c = Number(m.col), fromIdx = Number(m.fromIndex); const seq = Number(m.seq);
                     if (Number.isInteger(seq) && seq <= lastAppliedSeq) { idx++; applyNext(); return; }
                     if (!Number.isInteger(r) || !Number.isInteger(c) || !Number.isInteger(fromIdx)) { idx++; applyNext(); return; }
-                    const doApply = () => { 
-                        if (!onlineGameActive) { idx++; applyNext(); return; } 
-                        currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx)); 
-                        const applied = handleClick(r, c); 
+                    const doApply = () => {
+                        if (!onlineGameActive) { idx++; applyNext(); return; }
+                        currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
+                        const applied = handleClick(r, c);
                         console.log(`[Rejoined] handleClick returned ${applied} for seq=${seq}, lastAppliedSeq before=${lastAppliedSeq}`);
                         if (applied && Number.isInteger(seq)) {
                             lastAppliedSeq = Math.max(lastAppliedSeq, seq);
                             console.log(`[Rejoined] Updated lastAppliedSeq to ${lastAppliedSeq}`);
                         }
-                        idx++; 
-                        setTimeout(applyNext, 0); 
+                        idx++;
+                        setTimeout(applyNext, 0);
                     };
                     if (isProcessing) { setTimeout(applyNext, 100); } else { doApply(); }
                 }; applyNext();
@@ -541,7 +541,7 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
     let myRoomCurrentPlayers = 0; // current players in my room
     let myRoomPlayers = []; // last known players (first is host)
     let myPlayerName = null; // this client's player name used to join/host
-    
+
     // Expose to window for connection retry logic
     window.myJoinedRoom = myJoinedRoom;
     window.myRoomMaxPlayers = myRoomMaxPlayers;
@@ -657,7 +657,7 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
         const doLeaveOnce = () => { doLeave(); onlineConnection.off('open', doLeaveOnce); };
         onlineConnection.ensureConnected();
         if (onlineConnection.isConnected()) doLeave(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doLeaveOnce); }
-    // Defer URL key removal until server confirms via roomlist update.
+        // Defer URL key removal until server confirms via roomlist update.
     }
 
     // Wire Host Custom / Start Game button behavior in the online menu
@@ -733,29 +733,29 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
         if (isProcessing) return; // Prevent sending moves while processing
         if (currentPlayer !== myOnlineIndex) return;
         if (!isValidLocalMove(row, col, myOnlineIndex)) return;
-        
+
         // Only act when connected; avoid local desync while offline
         if (!onlineConnection.isConnected()) {
             showConnBanner('You are offline. Reconnecting…', 'error');
             onlineConnection.ensureConnected();
             return;
         }
-        
+
         // Apply move locally first
         const moveApplied = handleClick(row, col);
         console.log(`[Online Move/${source}] handleClick returned ${moveApplied}, lastAppliedSeq before increment: ${lastAppliedSeq}`);
-        
+
         if (moveApplied) {
             lastAppliedSeq++;
             pendingEchoSeq = lastAppliedSeq;
             console.log(`[Online Move/${source}] Applied and incremented seq to ${lastAppliedSeq}, waiting for echo (myOnlineIndex=${myOnlineIndex})`);
-            onlineConnection.sendMove({ 
-                row, 
-                col, 
-                fromIndex: myOnlineIndex, 
-                nextIndex: (myOnlineIndex + 1) % playerCount, 
-                color: activeColors()[myOnlineIndex], 
-                seq: lastAppliedSeq 
+            onlineConnection.sendMove({
+                row,
+                col,
+                fromIndex: myOnlineIndex,
+                nextIndex: (myOnlineIndex + 1) % playerCount,
+                color: activeColors()[myOnlineIndex],
+                seq: lastAppliedSeq
             });
         }
     }
@@ -1054,16 +1054,16 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
             menuHistoryStack
         });
     } catch { /* ignore */ }
-    
+
     // Mark client as fully initialized
     clientFullyInitialized = true;
-    
+
     // Process pending auto-join if any
     if (pendingAutoJoinKey) {
         const key = pendingAutoJoinKey;
         pendingAutoJoinKey = null;
-        const sendJoinKey = () => { 
-            onlineConnection.joinByKey(key, (localStorage.getItem('playerName') || 'Player')); 
+        const sendJoinKey = () => {
+            onlineConnection.joinByKey(key, (localStorage.getItem('playerName') || 'Player'));
             // Remove this handler after it's called once to prevent re-joining on reconnect
             onlineConnection.off('open', sendJoinKey);
         };
@@ -1541,10 +1541,10 @@ console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
     function scheduleGameEnd() {
         if (gameWon) return;
         gameWon = true;
-        
+
         // Disable session restoration when game ends
         onlineConnection.setGameInactive();
-        
+
         if (menuShownAfterWin) return; // schedule only once
         menuShownAfterWin = true;
         setTimeout(() => {

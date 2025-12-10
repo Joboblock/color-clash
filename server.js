@@ -164,7 +164,7 @@ wss.on('connection', (ws) => {
         // Define packet type groups
         const gamePackets = new Set(['move', 'move_ack', 'ping']);
         const roomPackets = new Set(['leave', 'start_req', 'start_ack', 'color_ans']);
-    const outOfGamePackets = new Set(['host', 'join', 'join_by_key', 'list', 'roomlist']);
+        const outOfGamePackets = new Set(['host', 'join', 'join_by_key', 'list', 'roomlist']);
         // restore_session is allowed at any time (it's specifically for reconnecting to started games)
 
         // 1. Game packets from clients not in a started room
@@ -205,29 +205,29 @@ wss.on('connection', (ws) => {
             console.log('[Session Restore] Attempt from client:', { roomKey, sessionId });
             // Find room by key
             const roomName = roomKeys.get(roomKey);
-                if (!roomName || !rooms[roomName]) {
-                    console.log('[Session Restore] ❌ Room not found for key:', roomKey);
-                    // Send restore_status indicating failure
-                    try {
-                        sendPayload(ws, { type: 'restore_status', success: false, reason: 'Room not found' });
-                    } catch (err) {
-                        console.error('[Server] Failed to send restore_status after restore_session fail', err);
-                    }
-                    return;
+            if (!roomName || !rooms[roomName]) {
+                console.log('[Session Restore] ❌ Room not found for key:', roomKey);
+                // Send restore_status indicating failure
+                try {
+                    sendPayload(ws, { type: 'restore_status', success: false, reason: 'Room not found' });
+                } catch (err) {
+                    console.error('[Server] Failed to send restore_status after restore_session fail', err);
                 }
-                const room = rooms[roomName];
-                // Find participant by sessionId only
-                const participant = room.participants.find(p => p.sessionId === sessionId);
-                if (!participant) {
-                    console.log('[Session Restore] ❌ No matching participant found:', { sessionId });
-                    // Send restore_status indicating failure
-                    try {
-                        sendPayload(ws, { type: 'restore_status', success: false, reason: 'Session not found' });
-                    } catch (err) {
-                        console.error('[Server] Failed to send restore_status after restore_session fail', err);
-                    }
-                    return;
+                return;
+            }
+            const room = rooms[roomName];
+            // Find participant by sessionId only
+            const participant = room.participants.find(p => p.sessionId === sessionId);
+            if (!participant) {
+                console.log('[Session Restore] ❌ No matching participant found:', { sessionId });
+                // Send restore_status indicating failure
+                try {
+                    sendPayload(ws, { type: 'restore_status', success: false, reason: 'Session not found' });
+                } catch (err) {
+                    console.error('[Server] Failed to send restore_status after restore_session fail', err);
                 }
+                return;
+            }
             // Clear any pending disconnect timer for this participant
             if (room._disconnectTimers && room._disconnectTimers.has(participant.sessionId)) {
                 try { clearTimeout(room._disconnectTimers.get(participant.sessionId)); } catch { /* ignore */ }
@@ -240,14 +240,14 @@ wss.on('connection', (ws) => {
             const oldWs = participant.ws !== ws ? participant.ws : null;
             participant.ws = ws;
             participant.connected = true;
-            
+
             // Clear room deletion timer now that a player has rejoined
             if (room._roomDeletionTimer) {
                 try { clearTimeout(room._roomDeletionTimer); } catch { /* ignore */ }
                 room._roomDeletionTimer = null;
                 console.log(`[Session Restore] Cancelled room deletion timer for ${roomName}`);
             }
-            
+
             // Update connectionMeta for the new WebSocket
             connectionMeta.set(ws, { roomName, name: participant.name, sessionId });
             // IMPORTANT: Update all pending move acks to map the old WebSocket to the new one
@@ -257,10 +257,10 @@ wss.on('connection', (ws) => {
                     if (ackData.senderWs === oldWs) {
                         ackData.senderWs = ws;
                     }
-                    
+
                     // The expectedAcks and receivedAcks now use participant names, not WebSockets,
                     // so they automatically work across reconnections
-                    
+
                     // Check if all expected participants have now acknowledged after reconnection
                     if (ackData.expectedAcks.has(participant.name)) {
                         const allAcked = [...ackData.expectedAcks].every(participantName => ackData.receivedAcks.has(participantName));
@@ -540,7 +540,7 @@ wss.on('connection', (ws) => {
                 });
                 broadcastRoomList(perClientExtras);
             }
-        // ...existing code...
+            // ...existing code...
         } else if (msg.type === 'list') {
             sendPayload(ws, { type: 'roomlist', rooms: getRoomList() });
         } else if (msg.type === 'start_req') {
@@ -1128,11 +1128,11 @@ wss.on('connection', (ws) => {
                     connectionMeta.delete(ws);
                     return;
                 }
-                
+
                 console.log(`[Disconnect] ${name} disconnected from started room ${roomName} (marked for rejoin, not removed)`);
                 participant.connected = false;
                 participant.ws = null;
-                
+
                 // Check if all participants are now disconnected - if so, schedule room deletion
                 const anyConnected = room.participants.some(p => p.connected);
                 if (!anyConnected && !room._roomDeletionTimer) {

@@ -16,8 +16,8 @@ export class MenuCloseButton {
     constructor(opts) {
         this.buttons = Array.isArray(opts.buttons) ? opts.buttons.filter(Boolean) : (opts.buttons ? [opts.buttons] : []);
         this.getCurrentMenu = typeof opts.getCurrentMenu === 'function' ? opts.getCurrentMenu : () => null;
-        this.navigateToMenu = typeof opts.navigateToMenu === 'function' ? opts.navigateToMenu : () => {};
-        this.setMenuParam = typeof opts.setMenuParam === 'function' ? opts.setMenuParam : () => {};
+        this.navigateToMenu = typeof opts.navigateToMenu === 'function' ? opts.navigateToMenu : () => { };
+        this.setMenuParam = typeof opts.setMenuParam === 'function' ? opts.setMenuParam : () => { };
         this.menuHistoryStack = Array.isArray(opts.menuHistoryStack) ? opts.menuHistoryStack : [];
         this._onClick = this._onClick.bind(this);
         this._wire();

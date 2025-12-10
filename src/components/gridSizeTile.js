@@ -26,7 +26,7 @@ export class GridSizeTile {
         this.getPlayerCount = typeof opts.getPlayerCount === 'function' ? opts.getPlayerCount : () => 2;
         this.getRecommendedSize = typeof opts.getRecommendedSize === 'function' ? opts.getRecommendedSize : (p) => Math.max(3, p + 3);
         this.getGameGridSize = typeof opts.getGameGridSize === 'function' ? opts.getGameGridSize : () => this.size;
-        this.onSizeChange = typeof opts.onSizeChange === 'function' ? opts.onSizeChange : () => {};
+        this.onSizeChange = typeof opts.onSizeChange === 'function' ? opts.onSizeChange : () => { };
         this.minSize = Number.isInteger(opts.minSize) ? opts.minSize : 3;
         this.maxSize = Number.isInteger(opts.maxSize) ? opts.maxSize : 16;
         const initialRaw = Number.isInteger(opts.initialSize) ? opts.initialSize : this.getRecommendedSize(this.getPlayerCount());

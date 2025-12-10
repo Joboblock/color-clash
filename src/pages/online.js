@@ -17,12 +17,12 @@ export const onlinePage = {
 				onJoin: (roomName) => ctx.joinRoom && ctx.joinRoom(roomName),
 				onLeave: (roomName) => ctx.leaveRoom && ctx.leaveRoom(roomName)
 			});
-		} catch {/* ignore */}
+		} catch {/* ignore */ }
 		this.components = { roomListView };
 	},
 	show(ctx) {
 		const { onlineConnection, updateStartButtonState, showConnBanner, hideConnBanner } = ctx || {};
-		try { updateStartButtonState && updateStartButtonState(); } catch {/* ignore */}
+		try { updateStartButtonState && updateStartButtonState(); } catch {/* ignore */ }
 		try {
 			if (onlineConnection && !onlineConnection.isConnected()) {
 				showConnBanner && showConnBanner('Reconnecting…', 'info');
@@ -30,11 +30,11 @@ export const onlinePage = {
 			} else {
 				hideConnBanner && hideConnBanner();
 			}
-		} catch {/* ignore */}
+		} catch {/* ignore */ }
 	},
 	hide(ctx) {
 		const { hideConnBanner, leaveRoom, getMyJoinedRoom, removeUrlRoomKey } = ctx || {};
-		try { hideConnBanner && hideConnBanner(); } catch {/* ignore */}
+		try { hideConnBanner && hideConnBanner(); } catch {/* ignore */ }
 		// Leave the room when exiting the online menu
 		try {
 			const currentRoom = getMyJoinedRoom && getMyJoinedRoom();
@@ -45,7 +45,7 @@ export const onlinePage = {
 			if (removeUrlRoomKey) {
 				removeUrlRoomKey();
 			}
-		} catch {/* ignore */}
+		} catch {/* ignore */ }
 	}
 };
 

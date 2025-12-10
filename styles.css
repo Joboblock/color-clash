@@ -2,7 +2,7 @@
 @font-face {
     font-family: 'Nunito';
     src: url('fonts/Nunito-VariableFont_wght.woff2') format('woff2-variations'),
-         url('fonts/Nunito-VariableFont_wght.woff2') format('woff2');
+        url('fonts/Nunito-VariableFont_wght.woff2') format('woff2');
     font-weight: 200 1000;
     font-style: normal;
     font-display: swap;
@@ -18,50 +18,123 @@
     user-select: none;
     -webkit-user-select: none;
 }
+
 /* Circle diameter: just under 1/3 of the shorter viewport side, minus margin */
 .edge-circle {
     position: absolute;
     aspect-ratio: 1/1;
     border-radius: 50%;
-    box-shadow: 0 0 0 3px rgba(255,255,255,0.65), 0 4px 12px rgba(0,0,0,0.35);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.65), 0 4px 12px rgba(0, 0, 0, 0.35);
     background: var(--circle-color, #fff);
-    opacity: 1; /* keep 100% opacity; fade using color */
+    opacity: 1;
+    /* keep 100% opacity; fade using color */
     width: var(--edge-circle-size, 44px);
     --circle-color: #fff;
-    --circle-color-dim: #333; /* fallback dim */
+    --circle-color-dim: #333;
+    /* fallback dim */
     transform: translate(-50%, -50%) scale(0.5);
     transition: transform 220ms ease, background-color 180ms ease;
     user-select: none;
     -webkit-user-select: none;
 }
+
 /* remove keyframes: use transitions instead */
 
 /* Active/inactive sizing states */
-.edge-circle.is-inactive { background-color: var(--circle-color-dim, #333); transform: translate(-50%, -50%) scale(0.5); }
-.edge-circle.is-active { background-color: var(--circle-color, #fff); transform: translate(-50%, -50%) scale(1); }
+.edge-circle.is-inactive {
+    background-color: var(--circle-color-dim, #333);
+    transform: translate(-50%, -50%) scale(0.5);
+}
+
+.edge-circle.is-active {
+    background-color: var(--circle-color, #fff);
+    transform: translate(-50%, -50%) scale(1);
+}
 
 /* Positioning for 8 circles: 0-3 corners, 4-7 edge-mids. Use restriction class for layout. */
 /* Corner positions (independent of restriction) */
-.edge-circle.pos-corner-tl { left: 0%; top: 0%; }
-.edge-circle.pos-corner-tr { left: 100%; top: 0%; }
-.edge-circle.pos-corner-bl { left: 0%; top: 100%; }
-.edge-circle.pos-corner-br { left: 100%; top: 100%; }
+.edge-circle.pos-corner-tl {
+    left: 0%;
+    top: 0%;
+}
+
+.edge-circle.pos-corner-tr {
+    left: 100%;
+    top: 0%;
+}
+
+.edge-circle.pos-corner-bl {
+    left: 0%;
+    top: 100%;
+}
+
+.edge-circle.pos-corner-br {
+    left: 100%;
+    top: 100%;
+}
 
 /* When sides restrict (width < height), top/bottom are the free edges */
-.edge-circles-container[data-restrict="side"] .edge-circle.pos-top-center { left: 50%; top: 0%; }
-.edge-circles-container[data-restrict="side"] .edge-circle.pos-bottom-center { left: 50%; top: 100%; }
-.edge-circles-container[data-restrict="side"] .edge-circle.pos-top-mid1 { left: 33.33%; top: 0%; }
-.edge-circles-container[data-restrict="side"] .edge-circle.pos-top-mid2 { left: 66.66%; top: 0%; }
-.edge-circles-container[data-restrict="side"] .edge-circle.pos-bottom-mid1 { left: 33.33%; top: 100%; }
-.edge-circles-container[data-restrict="side"] .edge-circle.pos-bottom-mid2 { left: 66.66%; top: 100%; }
+.edge-circles-container[data-restrict="side"] .edge-circle.pos-top-center {
+    left: 50%;
+    top: 0%;
+}
+
+.edge-circles-container[data-restrict="side"] .edge-circle.pos-bottom-center {
+    left: 50%;
+    top: 100%;
+}
+
+.edge-circles-container[data-restrict="side"] .edge-circle.pos-top-mid1 {
+    left: 33.33%;
+    top: 0%;
+}
+
+.edge-circles-container[data-restrict="side"] .edge-circle.pos-top-mid2 {
+    left: 66.66%;
+    top: 0%;
+}
+
+.edge-circles-container[data-restrict="side"] .edge-circle.pos-bottom-mid1 {
+    left: 33.33%;
+    top: 100%;
+}
+
+.edge-circles-container[data-restrict="side"] .edge-circle.pos-bottom-mid2 {
+    left: 66.66%;
+    top: 100%;
+}
 
 /* When top/bottom restrict, left/right are the free edges */
-.edge-circles-container[data-restrict="top"] .edge-circle.pos-left-center { left: 0%; top: 50%; }
-.edge-circles-container[data-restrict="top"] .edge-circle.pos-right-center { left: 100%; top: 50%; }
-.edge-circles-container[data-restrict="top"] .edge-circle.pos-left-mid1 { left: 0%; top: 33.33%; }
-.edge-circles-container[data-restrict="top"] .edge-circle.pos-left-mid2 { left: 0%; top: 66.66%; }
-.edge-circles-container[data-restrict="top"] .edge-circle.pos-right-mid1 { left: 100%; top: 33.33%; }
-.edge-circles-container[data-restrict="top"] .edge-circle.pos-right-mid2 { left: 100%; top: 66.66%; }
+.edge-circles-container[data-restrict="top"] .edge-circle.pos-left-center {
+    left: 0%;
+    top: 50%;
+}
+
+.edge-circles-container[data-restrict="top"] .edge-circle.pos-right-center {
+    left: 100%;
+    top: 50%;
+}
+
+.edge-circles-container[data-restrict="top"] .edge-circle.pos-left-mid1 {
+    left: 0%;
+    top: 33.33%;
+}
+
+.edge-circles-container[data-restrict="top"] .edge-circle.pos-left-mid2 {
+    left: 0%;
+    top: 66.66%;
+}
+
+.edge-circles-container[data-restrict="top"] .edge-circle.pos-right-mid1 {
+    left: 100%;
+    top: 33.33%;
+}
+
+.edge-circles-container[data-restrict="top"] .edge-circle.pos-right-mid2 {
+    left: 100%;
+    top: 66.66%;
+}
+
 /* Center Host Custom button vertically in online menu */
 .host-custom-btn-wrapper {
     display: flex;
@@ -69,51 +142,60 @@
     justify-content: center;
     grid-column: 1 / -1;
 }
+
 #hostCustomGameBtn {
     margin-top: 0;
 }
+
 /* Extra button types for room actions */
 .room-btn {
     /* Inherit join-btn formatting, but allow color override */
     margin-right: auto;
     background: #e3e8f0;
     color: #333;
-    border: 1px solid rgba(0,0,0,0.08);
+    border: 1px solid rgba(0, 0, 0, 0.08);
     font-weight: 700;
     padding: 10px 18px;
     border-radius: 12px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
     cursor: pointer;
     transition: background 0.15s;
 }
+
 .room-btn.leave {
     background: #e74c3c;
     color: #fff;
 }
+
 .room-btn.full {
     background: #444;
     color: #ccc;
 }
+
 /* Scrollable room list for online menu */
 .scrollable-room-list {
-    max-height: min(40vh, 420px); /* responsive: up to 40% of viewport height, max 420px */
+    max-height: min(40vh, 420px);
+    /* responsive: up to 40% of viewport height, max 420px */
     overflow-y: auto;
     list-style: none;
     padding: 0;
     margin: 0;
     border-radius: 12px;
-    background: rgba(255,255,255,0.12);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
+
 .room-list-item {
     padding: 10px 18px;
     display: flex;
     align-items: center;
     gap: 12px;
 }
+
 .join-btn {
     margin-right: auto;
 }
+
 .room-name {
     margin-left: 0;
     margin-right: 18px;
@@ -121,6 +203,7 @@
     color: #222;
     white-space: nowrap;
 }
+
 .room-player-count {
     margin-left: 8px;
     margin-right: 8px;
@@ -129,29 +212,35 @@
     white-space: nowrap;
 
 }
+
 .room-list-item:last-child {
     border-bottom: none;
 }
+
 .room-list-item:hover {
-    background: rgba(95,149,213,0.08);
+    background: rgba(95, 149, 213, 0.08);
 }
+
 /* General style for player name input fields */
 .player-name-input {
     width: 100%;
     padding: 10px 12px;
     border-radius: 12px;
-    border: 1px solid rgba(0,0,0,0.12);
+    border: 1px solid rgba(0, 0, 0, 0.12);
     background: #fff;
     box-sizing: border-box;
     font: inherit;
 }
+
 .player-name-input::placeholder {
-    color: rgba(0,0,0,0.45);
+    color: rgba(0, 0, 0, 0.45);
 }
+
 /* Utility class to hide menus */
 .hidden {
     display: none !important;
 }
+
 /* Main menu big buttons */
 .menu-main-btn {
     width: 260px;
@@ -161,7 +250,7 @@
     font-size: 1.4rem;
     padding: 18px 0;
     border-radius: 18px;
-    box-shadow: 0 4px 18px rgba(0,0,0,0.13);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.13);
     letter-spacing: 0.04em;
     font-weight: 800;
     background: #5f95d5;
@@ -169,20 +258,25 @@
     transition: background 0.18s, color 0.18s;
     white-space: nowrap;
 }
+
 .menu-main-btn:active {
     background: #3a6ca8;
 }
+
 .menu-main-btn:disabled {
     background: #9aa9bf;
     color: #eef1f6;
     cursor: not-allowed;
     opacity: 0.75;
 }
+
 .menu-main-btn:focus-visible {
     outline: var(--focus-ring-width) solid var(--focus-ring-color);
     outline-offset: var(--focus-ring-offset);
 }
-html, body {
+
+html,
+body {
     height: 100%;
     margin: 0;
 }
@@ -193,10 +287,12 @@ html, body {
     /* Invalid/limit color used for buttons at bounds and invalid cells */
     --invalid-color: #b8beac;
     /* Responsive spacing for player controls */
-    --player-gap: clamp(2px, 1.2vmin, 8px);       /* gap between player boxes (columns) */
-    --player-row-gap: 12px;  /* vertical gap between cycler row and slider row */
+    --player-gap: clamp(2px, 1.2vmin, 8px);
+    /* gap between player boxes (columns) */
+    --player-row-gap: 12px;
+    /* vertical gap between cycler row and slider row */
     /* Focus ring styling for keyboard navigation */
-    --focus-ring-color: rgba(0,0,0,0.28);
+    --focus-ring-color: rgba(0, 0, 0, 0.28);
     --focus-ring-width: 3px;
     --focus-ring-offset: 2px;
 }
@@ -217,11 +313,12 @@ body {
     position: fixed;
     inset: 0;
     width: 100vw;
-    height: 100dvh; /* dynamic viewport height for modern browsers (Doesn't actualy work :c ) */
+    height: 100dvh;
+    /* dynamic viewport height for modern browsers (Doesn't actualy work :c ) */
     display: flex;
     justify-content: center;
     align-items: center;
-    background: rgba(0,0,0,0.45);
+    background: rgba(0, 0, 0, 0.45);
     z-index: 100;
 }
 
@@ -231,7 +328,8 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 32px; /* distance between header and menu */
+    gap: 32px;
+    /* distance between header and menu */
 }
 
 /* Header above the menu */
@@ -239,26 +337,30 @@ body {
     background: rgba(231, 237, 219, 0.5);
     border-radius: 16px;
     padding: 10px 22px;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
     font-weight: 800;
     color: #222;
-    font-size: clamp(1.25rem, 6.5vw, 2.5rem); /* scale down on smaller screens, cap at 2.5rem */
-    white-space: nowrap; /* never wrap; shrink instead */
+    font-size: clamp(1.25rem, 6.5vw, 2.5rem);
+    /* scale down on smaller screens, cap at 2.5rem */
+    white-space: nowrap;
+    /* never wrap; shrink instead */
     max-width: 100%;
     backdrop-filter: blur(4px);
 }
 
 .menu-panel {
     width: min(680px, 90vmin);
-    background: rgba(231, 237, 219, 0.5); /* add same transparency */
+    background: rgba(231, 237, 219, 0.5);
+    /* add same transparency */
     border-radius: 22px;
     padding: 24px;
-    box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
     display: flex;
     flex-direction: column;
     gap: 12px;
     align-items: stretch;
-    backdrop-filter: blur(4px); /* optional: smooths underlying content */
+    backdrop-filter: blur(4px);
+    /* optional: smooths underlying content */
 }
 
 .menu-title {
@@ -288,7 +390,7 @@ body {
     width: 72px;
     padding: 6px 8px;
     border-radius: 8px;
-    border: 1px solid rgba(0,0,0,0.12);
+    border: 1px solid rgba(0, 0, 0, 0.12);
     background: white;
 }
 
@@ -298,8 +400,10 @@ body {
     grid-template-columns: repeat(8, 1fr);
     grid-auto-rows: auto;
     gap: 8px;
-    padding: 8px;                 /* match slider padding for alignment */
-    border: 1px solid transparent;/* match slider border thickness for left offset */
+    padding: 8px;
+    /* match slider padding for alignment */
+    border: 1px solid transparent;
+    /* match slider border thickness for left offset */
     align-items: center;
 }
 
@@ -321,19 +425,31 @@ body {
 /* Grid handles alignment; no extra margin needed for the color cycler */
 
 .menu-color-box {
-    width: 100%; /* fill grid column */
-    aspect-ratio: 1 / 1; /* always square */
+    width: 100%;
+    /* fill grid column */
+    aspect-ratio: 1 / 1;
+    /* always square */
     border-radius: 25%;
-    border: 2px solid rgba(255,255,255,0.6);
-    box-shadow: 0 4px 10px rgba(0,0,0,0.12);
-    background-color: var(--menu-outer-color, var(--cell-green)); /* default (green) */
+    border: 2px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+    background-color: var(--menu-outer-color, var(--cell-green));
+    /* default (green) */
     transition: background-color var(--delay-animation);
     cursor: pointer;
     position: relative;
     box-sizing: border-box;
 }
+
 /* Prevent mobile tap highlight and text selection for all non-text interactive elements */
-button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlineMenuColorCycle, #aiPreviewCell, .inner-circle {
+button,
+[role="button"],
+.cell,
+.box,
+.slider-cells>*,
+#menuColorCycle,
+#onlineMenuColorCycle,
+#aiPreviewCell,
+.inner-circle {
     -webkit-tap-highlight-color: transparent;
     -webkit-touch-callout: none;
     user-select: none;
@@ -347,16 +463,15 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
 
 /* Generic focus-visible ring for interactive controls when navigating via keyboard */
 :where(.cell,
-             button,
-             [role="button"],
-             [role="slider"],
-             a[href],
-             input:not([type="hidden"]),
-             select,
-             textarea
-            ):focus-visible {
-        outline: var(--focus-ring-width) solid var(--focus-ring-color);
-        outline-offset: var(--focus-ring-offset);
+    button,
+    [role="button"],
+    [role="slider"],
+    a[href],
+    input:not([type="hidden"]),
+    select,
+    textarea):focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
 }
 
 /* When inside the slider, the color cycler visually matches a player box */
@@ -369,9 +484,11 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     content: '';
     position: absolute;
     /* Inner circle inset proportional to box size to keep ring thickness consistent */
-    inset: 12.5%; /* 75% inner circle (matches .inner-circle width/height) */
+    inset: 12.5%;
+    /* 75% inner circle (matches .inner-circle width/height) */
     border-radius: 50%;
-    background: var(--menu-inner-color, var(--inner-green)); /* updated from JS */
+    background: var(--menu-inner-color, var(--inner-green));
+    /* updated from JS */
     transition: transform var(--delay-animation), background-color var(--delay-animation);
 }
 
@@ -382,17 +499,20 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     column-gap: var(--player-gap);
     row-gap: var(--player-row-gap);
     padding: var(--player-gap);
-    border: 1px solid transparent; /* match grid-size-row left offset */
-    align-self: center; /* center within control row */
+    border: 1px solid transparent;
+    /* match grid-size-row left offset */
+    align-self: center;
+    /* center within control row */
     width: 100%;
     box-sizing: border-box;
     /* keep wrapper visually transparent */
 }
 
 /* Prevent grid children (like inputs) from imposing a min-content width on columns */
-.menu-grid > * {
+.menu-grid>* {
     min-width: 0;
-    min-height: 0; /* allow rows to shrink; prevent content from forcing height */
+    min-height: 0;
+    /* allow rows to shrink; prevent content from forcing height */
     max-width: 100%;
 }
 
@@ -406,21 +526,30 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
 .menu-grid .menu-color-box {
     grid-column: 1;
     grid-row: 1;
-    align-self: end;       /* sit at the bottom of its grid area */
-    justify-self: center;  /* center horizontally within the column */
+    align-self: end;
+    /* sit at the bottom of its grid area */
+    justify-self: center;
+    /* center horizontally within the column */
 }
 
 /* Grid Size tile in row 3, columns 1-2 */
 .menu-grid .grid-size-tile {
-    grid-column: 1 / span 3; /* exactly 3 columns wide */
-    grid-row: 3; /* header and cells within same wrapper row */
+    grid-column: 1 / span 3;
+    /* exactly 3 columns wide */
+    grid-row: 3;
+    /* header and cells within same wrapper row */
     display: grid;
-    grid-template-columns: subgrid; /* adopt parent columns for perfect box sizing */
-    grid-template-rows: auto 1fr; /* header on row 1, cells on row 2 */
+    grid-template-columns: subgrid;
+    /* adopt parent columns for perfect box sizing */
+    grid-template-rows: auto 1fr;
+    /* header on row 1, cells on row 2 */
     column-gap: var(--player-gap);
-    align-items: center; /* vertically center the cells within row */
-    position: relative; /* for background pseudo-element */
+    align-items: center;
+    /* vertically center the cells within row */
+    position: relative;
+    /* for background pseudo-element */
 }
+
 /* Label inside the tile (header) */
 .menu-grid .grid-size-tile .grid-size-label {
     grid-column: 1 / -1;
@@ -429,16 +558,22 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     font-weight: 800;
     font-size: clamp(0.8rem, 2.4vmin, 1rem);
     color: #222;
-    margin-bottom: var(--player-gap); /* scale with screen size */
-    white-space: nowrap;      /* never wrap, shrink instead */
+    margin-bottom: var(--player-gap);
+    /* scale with screen size */
+    white-space: nowrap;
+    /* never wrap, shrink instead */
     max-width: 100%;
-    overflow: hidden;         /* guard against overflow on ultra-small screens */
-    text-overflow: ellipsis;  /* final fallback if text still doesn't fit */
+    overflow: hidden;
+    /* guard against overflow on ultra-small screens */
+    text-overflow: ellipsis;
+    /* final fallback if text still doesn't fit */
 }
 
 /* Fallback if subgrid isn't supported for the tile */
 @supports not (grid-template-columns: subgrid) {
-    .menu-grid .grid-size-tile { grid-template-columns: repeat(3, 1fr); }
+    .menu-grid .grid-size-tile {
+        grid-template-columns: repeat(3, 1fr);
+    }
 }
 
 /* Slider-like background behind the three cells */
@@ -448,57 +583,85 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     grid-template-columns: subgrid;
     column-gap: var(--player-gap);
     grid-column: 1 / -1;
-    grid-row: 2; /* sit below the header */
-    position: relative; /* create containing block for ::before */
+    grid-row: 2;
+    /* sit below the header */
+    position: relative;
+    /* create containing block for ::before */
 }
+
 @supports not (grid-template-columns: subgrid) {
-    .menu-grid .grid-size-cells { grid-template-columns: repeat(3, 1fr); }
+    .menu-grid .grid-size-cells {
+        grid-template-columns: repeat(3, 1fr);
+    }
 }
+
 .menu-grid .grid-size-cells::before {
     content: '';
     position: absolute;
     inset: calc(var(--player-gap) * -1);
     background: var(--cell-bg);
     border-radius: 12px;
-    border: 1px solid rgba(0,0,0,0.06);
+    border: 1px solid rgba(0, 0, 0, 0.06);
     z-index: 0;
     pointer-events: none;
 }
+
 /* Ensure children (the three squares) don't impose min-content widths */
-.menu-grid .grid-size-cells > * { min-width: 0; }
+.menu-grid .grid-size-cells>* {
+    min-width: 0;
+}
 
 /* Ensure tile children sit above background */
-.menu-grid .grid-size-tile > * {
+.menu-grid .grid-size-tile>* {
     position: relative;
     z-index: 1;
-    min-width: 0; /* prevent min-content from widening parent columns */
+    min-width: 0;
+    /* prevent min-content from widening parent columns */
 }
+
 /* Also ensure cells render above their background */
-.menu-grid .grid-size-cells > * { position: relative; z-index: 1; }
+.menu-grid .grid-size-cells>* {
+    position: relative;
+    z-index: 1;
+}
 
 /* Subtle 'pop' animation when value changes */
 @keyframes value-bump {
-    0% { transform: scale(1); }
-    35% { transform: scale(1.14); }
-    100% { transform: scale(1); }
+    0% {
+        transform: scale(1);
+    }
+
+    35% {
+        transform: scale(1.14);
+    }
+
+    100% {
+        transform: scale(1);
+    }
 }
+
 /* Apply bump animation to the big number when its value changes */
-.menu-grid .grid-size-number.bump { animation: value-bump 160ms ease; }
+.menu-grid .grid-size-number.bump {
+    animation: value-bump 160ms ease;
+}
 
 /* New three-cell tile elements */
 .menu-grid .size-cell {
     width: 100%;
-    aspect-ratio: 1 / 1; /* squares matching player boxes */
+    aspect-ratio: 1 / 1;
+    /* squares matching player boxes */
     border-radius: 25%;
-    border: 2px solid rgba(255,255,255,0.6);
-    box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+    border: 2px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
     background: var(--cell-bg);
     display: flex;
     align-items: center;
     justify-content: center;
     box-sizing: border-box;
-    overflow: hidden; /* prevent content from expanding height beyond square */
-    min-height: 0;    /* ignore min-content height from children */
+    overflow: hidden;
+    /* prevent content from expanding height beyond square */
+    min-height: 0;
+    /* ignore min-content height from children */
 }
 
 .menu-grid .btn-cell {
@@ -511,7 +674,8 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     line-height: 1;
     white-space: nowrap;
     min-inline-size: 0;
-    padding: 0; /* avoid default button padding affecting layout */
+    padding: 0;
+    /* avoid default button padding affecting layout */
     -webkit-tap-highlight-color: transparent;
     -webkit-touch-callout: none;
     user-select: none;
@@ -519,11 +683,15 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     transition: transform .08s ease, box-shadow .12s ease, background-color .12s ease;
 }
 
-.menu-grid .btn-cell:active { transform: translateY(1px) scale(0.98); }
+.menu-grid .btn-cell:active {
+    transform: translateY(1px) scale(0.98);
+}
+
 .menu-grid .btn-cell:disabled {
     background: var(--invalid-color);
     cursor: not-allowed;
 }
+
 /* Keep +/- buttons focusable at bounds: mirror disabled look via aria-disabled */
 .menu-grid .btn-cell[aria-disabled="true"] {
     background: var(--invalid-color);
@@ -533,7 +701,8 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
 .menu-grid .grid-size-center {
     display: grid;
     place-items: center;
-    padding: 6%; /* breathable padding inside the square */
+    padding: 6%;
+    /* breathable padding inside the square */
 }
 
 /* Place the three squares on the second row under the header */
@@ -552,18 +721,21 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     color: #111;
     white-space: nowrap;
     max-width: 100%;
-    overflow: hidden; /* avoid pushing the cell if digits grow */
+    overflow: hidden;
+    /* avoid pushing the cell if digits grow */
 }
 
 /* AI Strength preview tile: place at far right of row 3 */
 .menu-grid .ai-preview-tile {
     user-select: none;
     -webkit-user-select: none;
-    grid-column: 8; /* rightmost column */
+    grid-column: 8;
+    /* rightmost column */
     grid-row: 3;
     display: grid;
     grid-template-columns: subgrid;
-    grid-template-rows: auto 1fr; /* header + single square */
+    grid-template-rows: auto 1fr;
+    /* header + single square */
     align-items: start;
 }
 
@@ -574,14 +746,17 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     justify-self: end;
     align-self: start;
     position: relative;
-    z-index: 2; /* render above adjacent tiles when overflowing */
+    z-index: 2;
+    /* render above adjacent tiles when overflowing */
     font-weight: 800;
     font-size: clamp(0.8rem, 2.4vmin, 1rem);
     color: #222;
     margin-bottom: var(--player-gap);
     white-space: nowrap;
-    max-width: none; /* allow label to be wider than its grid column */
-    overflow: visible; /* let it extend beyond the grid towards the left */
+    max-width: none;
+    /* allow label to be wider than its grid column */
+    overflow: visible;
+    /* let it extend beyond the grid towards the left */
 }
 
 .menu-grid .grid-preview-cells {
@@ -591,29 +766,43 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     align-items: center;
     position: relative;
 }
+
 @supports not (grid-template-columns: subgrid) {
-    .menu-grid .ai-preview-tile { grid-template-columns: 1fr; }
-    .menu-grid .grid-preview-cells { grid-template-columns: 1fr; }
+    .menu-grid .ai-preview-tile {
+        grid-template-columns: 1fr;
+    }
+
+    .menu-grid .grid-preview-cells {
+        grid-template-columns: 1fr;
+    }
 }
+
 .menu-grid .grid-preview-cells::before {
     content: '';
     position: absolute;
     inset: calc(var(--player-gap) * -1);
     background: var(--cell-bg);
     border-radius: 12px;
-    border: 1px solid rgba(0,0,0,0.06);
+    border: 1px solid rgba(0, 0, 0, 0.06);
     z-index: 0;
     pointer-events: none;
 }
-.menu-grid .grid-preview-cells > * { position: relative; z-index: 1; }
+
+.menu-grid .grid-preview-cells>* {
+    position: relative;
+    z-index: 1;
+}
 
 /* Make the in-game cell behave as a square and use the same color rules */
 .menu-grid .ai-preview-tile #aiPreviewCell.cell {
     width: 100%;
-    height: auto;           /* override global .cell height calc */
-    aspect-ratio: 1 / 1;    /* keep a perfect square */
+    height: auto;
+    /* override global .cell height calc */
+    aspect-ratio: 1 / 1;
+    /* keep a perfect square */
     border-radius: 25%;
-    overflow: hidden;       /* keep inner-circle within rounded corners */
+    overflow: hidden;
+    /* keep inner-circle within rounded corners */
     box-sizing: border-box;
 }
 
@@ -632,19 +821,20 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     width: 100%;
     padding: 10px 12px;
     border-radius: 12px;
-    border: 1px solid rgba(0,0,0,0.12);
+    border: 1px solid rgba(0, 0, 0, 0.12);
     background: #fff;
     box-sizing: border-box;
     font: inherit;
 }
 
 .menu-grid .player-name-input::placeholder {
-    color: rgba(0,0,0,0.45);
+    color: rgba(0, 0, 0, 0.45);
 }
 
 /* Invalid state highlight for too-short names */
 .menu-grid .player-name-input.invalid {
-    border-color: rgba(220, 38, 38, 0.85); /* red-600-ish */
+    border-color: rgba(220, 38, 38, 0.85);
+    /* red-600-ish */
     box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15);
 }
 
@@ -663,40 +853,51 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     border-radius: 12px;
     font-weight: 700;
     cursor: pointer;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
 }
 
 .btn.secondary {
     background: transparent;
     color: #333;
-    border: 1px solid rgba(0,0,0,0.08);
+    border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .menu-hint {
     font-size: 0.8rem;
-    color: rgba(0,0,0,0.6);
+    color: rgba(0, 0, 0, 0.6);
     text-align: center;
-    margin: 0; /* remove all margins */
+    margin: 0;
+    /* remove all margins */
 }
 
 /* Player box slider (visual) */
 .player-box-slider {
-    display: grid; /* align children to wrapper columns via subgrid */
+    display: grid;
+    /* align children to wrapper columns via subgrid */
     grid-template-columns: subgrid;
     gap: var(--player-gap);
     align-items: center;
     width: 100%;
     position: relative;
-    box-sizing: border-box; /* ensure padding stays inside width */
+    box-sizing: border-box;
+    /* ensure padding stays inside width */
     /* Make it clear the slider is horizontal */
     cursor: ew-resize;
 }
 
 /* Fallback for browsers without subgrid support */
 @supports not (grid-template-columns: subgrid) {
-    .menu-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); }
-    .player-box-slider { grid-template-columns: repeat(8, 1fr); }
-    .player-box-slider .slider-cells { grid-template-columns: repeat(8, 1fr); }
+    .menu-grid {
+        grid-template-columns: repeat(8, minmax(0, 1fr));
+    }
+
+    .player-box-slider {
+        grid-template-columns: repeat(8, 1fr);
+    }
+
+    .player-box-slider .slider-cells {
+        grid-template-columns: repeat(8, 1fr);
+    }
 }
 
 /* Background only behind the cells, not the header */
@@ -705,21 +906,28 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     grid-template-columns: subgrid;
     gap: var(--player-gap);
     align-items: center;
-    position: relative; /* for background pseudo-element */
-    grid-column: 1 / -1; /* span all slider columns so items lay out horizontally */
+    position: relative;
+    /* for background pseudo-element */
+    grid-column: 1 / -1;
+    /* span all slider columns so items lay out horizontally */
 }
+
 .player-box-slider .slider-cells::before {
     content: '';
     position: absolute;
     inset: calc(var(--player-gap) * -1);
     background: var(--cell-bg);
     border-radius: 12px;
-    border: 1px solid rgba(0,0,0,0.06);
+    border: 1px solid rgba(0, 0, 0, 0.06);
     z-index: 0;
     pointer-events: none;
 }
+
 /* Ensure slider cells render above background */
-.player-box-slider .slider-cells > * { position: relative; z-index: 1; }
+.player-box-slider .slider-cells>* {
+    position: relative;
+    z-index: 1;
+}
 
 /* Header styling inside the slider */
 .player-box-slider .player-slider-label {
@@ -729,7 +937,8 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     font-weight: 800;
     font-size: clamp(0.8rem, 2.4vmin, 1rem);
     color: #222;
-    margin-bottom: var(--player-gap); /* scale with screen size */
+    margin-bottom: var(--player-gap);
+    /* scale with screen size */
     white-space: nowrap;
     max-width: 100%;
     overflow: hidden;
@@ -739,20 +948,26 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
 /* cycler is no longer a child of .player-box-slider; placed by wrapper */
 
 .player-box-slider .box {
-    width: 100%; /* fill its grid column */
-    aspect-ratio: 1 / 1; /* keep squares */
-    border-radius: 25%; /* proportional rounding that scales with box size */
-    box-sizing: border-box; /* include the 2px border in the grid column width */
-    box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+    width: 100%;
+    /* fill its grid column */
+    aspect-ratio: 1 / 1;
+    /* keep squares */
+    border-radius: 25%;
+    /* proportional rounding that scales with box size */
+    box-sizing: border-box;
+    /* include the 2px border in the grid column width */
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
     /* default background is the lighter 'cell' color for this box */
     background: var(--box-cell, #ccc);
-        /* Remove box-shadow from CSS transitions to avoid fighting WAAPI shadow animation */
-        transition: transform .12s ease, opacity .12s ease;
-    border: 2px solid rgba(255,255,255,0.6);
+    /* Remove box-shadow from CSS transitions to avoid fighting WAAPI shadow animation */
+    transition: transform .12s ease, opacity .12s ease;
+    border: 2px solid rgba(255, 255, 255, 0.6);
     -webkit-user-drag: none;
     user-select: none;
-    touch-action: none; /* allow pointer events without default gestures */
+    touch-action: none;
+    /* allow pointer events without default gestures */
 }
+
 /* Ensure the color cycler and AI preview show pointer, not ew-resize, when hovered */
 #playerBoxSlider #menuColorCycle,
 .player-box-slider #menuColorCycle,
@@ -762,18 +977,22 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
 }
 
 .player-box-slider .box.active {
-    transform: translateY(-18%) scale(1.06); /* lift proportional to height */
+    transform: translateY(-18%) scale(1.06);
+    /* lift proportional to height */
     transform-origin: center center;
     /* active boxes use the inner circle (strong) color */
     background: var(--box-inner, #999);
-    box-shadow: 0 8px 20px rgba(0,0,0,0.18);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
 }
+
 /* #endregion */
 
 
 /* #region Game Styles */
 /* grid-size slider track coloring using CSS variable */
-.grid-size { display: none; }
+.grid-size {
+    display: none;
+}
 
 
 .grid {
@@ -806,8 +1025,8 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     z-index: 1;
     /* Match color-change speed/easing with .cell and the color cycler */
     transition: transform var(--delay-animation) ease-in-out,
-                background-color var(--delay-animation) ease,
-                opacity var(--delay-explosion) ease-out;
+        background-color var(--delay-animation) ease,
+        opacity var(--delay-explosion) ease-out;
 }
 
 .inner-circle.fade-out {
@@ -815,12 +1034,18 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
 }
 
 .inner-circle.animated {
-    transition: transform var(--delay-explosion) ease-out, opacity var(--delay-explosion) ease-out; /* Add opacity transition */
+    transition: transform var(--delay-explosion) ease-out, opacity var(--delay-explosion) ease-out;
+    /* Add opacity transition */
 }
 
 @keyframes moveAnimation {
-    0% { transform: translate(0, 0); }
-    100% { /* Final position is set in JS */ }
+    0% {
+        transform: translate(0, 0);
+    }
+
+    100% {
+        /* Final position is set in JS */
+    }
 }
 
 .value-circle {
@@ -829,7 +1054,8 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
     height: 20%;
     background-color: #fff;
     border-radius: 50%;
-    z-index: 3; /* Above inner circles */
+    z-index: 3;
+    /* Above inner circles */
     /* Use CSS variables for proportional translation */
     transform: translate(calc(var(--tx, 0) * 1%), calc(var(--ty, 0) * 1%));
     transition:
@@ -841,37 +1067,112 @@ button, [role="button"], .cell, .box, .slider-cells > *, #menuColorCycle, #onlin
 }
 
 /* Player Colors for Cells (Pastel) (use JS-set CSS variables) */
-.cell.red { background-color: var(--cell-red) !important; }
-.cell.orange { background-color: var(--cell-orange) !important; }
-.cell.yellow { background-color: var(--cell-yellow) !important; }
-.cell.green { background-color: var(--cell-green) !important; }
-.cell.cyan { background-color: var(--cell-cyan) !important; }
-.cell.blue { background-color: var(--cell-blue) !important; }
-.cell.purple { background-color: var(--cell-purple) !important; }
-.cell.magenta { background-color: var(--cell-magenta) !important; }
+.cell.red {
+    background-color: var(--cell-red) !important;
+}
 
-.cell.invalid { background-color: var(--invalid-color); }
-.cell.inactive { background-color: var(--cell-bg) !important;}
+.cell.orange {
+    background-color: var(--cell-orange) !important;
+}
+
+.cell.yellow {
+    background-color: var(--cell-yellow) !important;
+}
+
+.cell.green {
+    background-color: var(--cell-green) !important;
+}
+
+.cell.cyan {
+    background-color: var(--cell-cyan) !important;
+}
+
+.cell.blue {
+    background-color: var(--cell-blue) !important;
+}
+
+.cell.purple {
+    background-color: var(--cell-purple) !important;
+}
+
+.cell.magenta {
+    background-color: var(--cell-magenta) !important;
+}
+
+.cell.invalid {
+    background-color: var(--invalid-color);
+}
+
+.cell.inactive {
+    background-color: var(--cell-bg) !important;
+}
 
 /* Player Colors for Inner Circles (Strong) (use JS-set CSS variables) */
-.inner-circle.red { background-color: var(--inner-red); }
-.inner-circle.orange { background-color: var(--inner-orange); }
-.inner-circle.yellow { background-color: var(--inner-yellow); }
-.inner-circle.green { background-color: var(--inner-green); }
-.inner-circle.cyan { background-color: var(--inner-cyan); }
-.inner-circle.blue { background-color: var(--inner-blue); }
-.inner-circle.purple { background-color: var(--inner-purple); }
-.inner-circle.magenta { background-color: var(--inner-magenta); }
+.inner-circle.red {
+    background-color: var(--inner-red);
+}
+
+.inner-circle.orange {
+    background-color: var(--inner-orange);
+}
+
+.inner-circle.yellow {
+    background-color: var(--inner-yellow);
+}
+
+.inner-circle.green {
+    background-color: var(--inner-green);
+}
+
+.inner-circle.cyan {
+    background-color: var(--inner-cyan);
+}
+
+.inner-circle.blue {
+    background-color: var(--inner-blue);
+}
+
+.inner-circle.purple {
+    background-color: var(--inner-purple);
+}
+
+.inner-circle.magenta {
+    background-color: var(--inner-magenta);
+}
 
 /* Body Colors (Strong) (use JS-set CSS variables) */
-body.red { background-color: var(--body-red); }
-body.orange { background-color: var(--body-orange); }
-body.yellow { background-color: var(--body-yellow); }
-body.green { background-color: var(--body-green); }
-body.cyan { background-color: var(--body-cyan); }
-body.blue { background-color: var(--body-blue); }
-body.purple { background-color: var(--body-purple); }
-body.magenta { background-color: var(--body-magenta); }
+body.red {
+    background-color: var(--body-red);
+}
+
+body.orange {
+    background-color: var(--body-orange);
+}
+
+body.yellow {
+    background-color: var(--body-yellow);
+}
+
+body.green {
+    background-color: var(--body-green);
+}
+
+body.cyan {
+    background-color: var(--body-cyan);
+}
+
+body.blue {
+    background-color: var(--body-blue);
+}
+
+body.purple {
+    background-color: var(--body-purple);
+}
+
+body.magenta {
+    background-color: var(--body-magenta);
+}
+
 /* #endregion */
 
 /* Edge circles overlay (corner + side indicator dots) */
@@ -881,17 +1182,20 @@ body.magenta { background-color: var(--body-magenta); }
     width: 100vw;
     height: 100vh;
     pointer-events: none;
-    z-index: 1; /* Below menus (z=100) but above page background */
+    z-index: 1;
+    /* Below menus (z=100) but above page background */
 }
+
 .edge-circle {
     position: absolute;
     width: var(--edge-circle-size, 44px);
     height: var(--edge-circle-size, 44px);
     border-radius: 50%;
     transform: translate(-50%, -50%) scale(0.5);
-    box-shadow: 0 0 0 3px rgba(255,255,255,0.65), 0 4px 12px rgba(0,0,0,0.35);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.65), 0 4px 12px rgba(0, 0, 0, 0.35);
     background: var(--circle-color, #fff);
-    opacity: 1; /* keep 100% opacity; fade using color */
+    opacity: 1;
+    /* keep 100% opacity; fade using color */
     /* no animation; rely on transitions */
     transition: transform 220ms ease, background-color 180ms ease;
 }
@@ -899,14 +1203,22 @@ body.magenta { background-color: var(--body-magenta); }
 /* remove keyframes: use transitions instead */
 
 /* Active/inactive states (duplicate to ensure cascade at this location) */
-.edge-circle.is-inactive { background-color: var(--circle-color-dim, #333); transform: translate(-50%, -50%) scale(0.5); }
-.edge-circle.is-active { background-color: var(--circle-color, #fff); transform: translate(-50%, -50%) scale(1); }
+.edge-circle.is-inactive {
+    background-color: var(--circle-color-dim, #333);
+    transform: translate(-50%, -50%) scale(0.5);
+}
+
+.edge-circle.is-active {
+    background-color: var(--circle-color, #fff);
+    transform: translate(-50%, -50%) scale(1);
+}
 
 /* Top-right menu close button style */
 .menu-color-box.menu-close-btn {
     background-color: var(--cell-bg);
     position: relative;
 }
+
 .menu-color-box.menu-close-btn::before {
     content: '';
     position: absolute;
@@ -918,6 +1230,7 @@ body.magenta { background-color: var(--body-magenta); }
     border-radius: 2px;
     transform: translate(-50%, -50%) rotate(45deg);
 }
+
 .menu-color-box.menu-close-btn::after {
     content: '';
     position: absolute;

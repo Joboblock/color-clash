@@ -56,10 +56,10 @@ export const mainPage = {
                 onSizeChange: (newSize) => {
                     setMenuGridSizeVal(newSize);
                     // Rebuild grid only if different from current logical grid size used by game
-                    try { recreateGrid(newSize, clampPlayers(getMenuPlayerCount())); } catch {/* ignore */}
+                    try { recreateGrid(newSize, clampPlayers(getMenuPlayerCount())); } catch {/* ignore */ }
                 }
             });
-        } catch {/* ignore */}
+        } catch {/* ignore */ }
 
         // AI Strength tile
         let aiStrengthTile = null;
@@ -74,7 +74,7 @@ export const mainPage = {
                 },
                 updateValueCircles: undefined
             });
-        } catch {/* ignore */}
+        } catch {/* ignore */ }
 
         // Player name fields sync
         let playerNameFields = null;
@@ -84,7 +84,7 @@ export const mainPage = {
                 onlineInputEl: onlinePlayerName,
                 onNameChange: () => { /* optional hook */ }
             });
-        } catch {/* ignore */}
+        } catch {/* ignore */ }
 
         // Player box slider
         let slider = null;
@@ -103,7 +103,7 @@ export const mainPage = {
                 }
             });
             slider.setCount(clampPlayers(getMenuPlayerCount()), { silent: true });
-        } catch {/* ignore */}
+        } catch {/* ignore */ }
 
         // Color cycler spanning main + online menus
         let colorCycler = null;
@@ -128,21 +128,21 @@ export const mainPage = {
                                 slider.updateColorsForIndex(idx);
                             }
                         }
-                    } catch {/* ignore */}
-                    try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch {/* ignore */}
+                    } catch {/* ignore */ }
+                    try { aiStrengthTile && aiStrengthTile.updatePreview(); } catch {/* ignore */ }
                 }
             });
             colorCycler && colorCycler.updateColorsForIndex(getStartingColorIndex());
-        } catch {/* ignore */}
+        } catch {/* ignore */ }
 
         // Store references
         this.components = { gridSizeTile, aiStrengthTile, slider, colorCycler, playerNameFields };
     },
     show(ctx) {
         const { subMode } = ctx || {};
-        try { ctx.setMainMenuMode && ctx.setMainMenuMode(subMode || 'local'); } catch {/* ignore */}
+        try { ctx.setMainMenuMode && ctx.setMainMenuMode(subMode || 'local'); } catch {/* ignore */ }
         if (subMode === 'practice') {
-            try { this.components.aiStrengthTile && this.components.aiStrengthTile.updatePreview(); } catch {/* ignore */}
+            try { this.components.aiStrengthTile && this.components.aiStrengthTile.updatePreview(); } catch {/* ignore */ }
         }
     },
     hide() { /* no-op */ }

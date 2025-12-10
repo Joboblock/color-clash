@@ -102,7 +102,7 @@ server.listen(PORT, '0.0.0.0', () => {
 // rooms = {
 //   [roomName]: {
 //     maxPlayers: number,
-//     participants: Array<{ ws: WebSocket, name: string, isHost: boolean, connected: boolean, sessionId?: string }>,
+//     participants: Array<{ ws: WebSocket, name: string, isHost: boolean, connected: boolean, sessionId: string }>,
 //     _disconnectTimers?: Map<string, NodeJS.Timeout>,
 //     game?: {
 //       started: boolean,
@@ -117,8 +117,9 @@ const rooms = {};
 const roomKeys = new Map();
 // Keep server-authoritative list of available player colors (must match client order)
 const playerColors = ['green', 'red', 'blue', 'yellow', 'magenta', 'cyan', 'orange', 'purple'];
-// Track which room a connection belongs to and the player's name (per tab)
-const connectionMeta = new Map(); // ws -> { roomName: string, name: string, sessionId?: string }
+// Track which room a connection belongs to and the player's sessionId (per tab)
+// Map of sessionId -> { roomName: string, name: string, participantRef: participant }
+const connectionMeta = new Map();
 
 /**
  * Sends a JSON payload to a WebSocket client.
@@ -155,7 +156,8 @@ wss.on('connection', (ws) => {
         }
         // --- PACKET VALIDATION ---
         // Helper: get room info for this ws
-        const meta = connectionMeta.get(ws);
+        // First, find the sessionId for this ws by searching through connectionMeta
+        const { meta } = findSessionByWs(ws);
         const roomName = meta?.roomName;
         const room = roomName ? rooms[roomName] : undefined;
         const isInRoom = !!roomName && !!room;
@@ -201,8 +203,8 @@ wss.on('connection', (ws) => {
         if (msg.type === 'restore_session' && typeof msg.roomKey === 'string' && typeof msg.playerName === 'string' && typeof msg.sessionId === 'string') {
             // Client is attempting to restore a previous session
             const roomKey = String(msg.roomKey);
-            const sessionId = String(msg.sessionId);
-            console.log('[Session Restore] Attempt from client:', { roomKey, sessionId });
+            const clientSessionId = String(msg.sessionId);
+            console.log('[Session Restore] Attempt from client:', { roomKey, sessionId: clientSessionId });
             // Find room by key
             const roomName = roomKeys.get(roomKey);
             if (!roomName || !rooms[roomName]) {
@@ -217,9 +219,9 @@ wss.on('connection', (ws) => {
             }
             const room = rooms[roomName];
             // Find participant by sessionId only
-            const participant = room.participants.find(p => p.sessionId === sessionId);
+            const participant = room.participants.find(p => p.sessionId === clientSessionId);
             if (!participant) {
-                console.log('[Session Restore] ❌ No matching participant found:', { sessionId });
+                console.log('[Session Restore] ❌ No matching participant found:', { sessionId: clientSessionId });
                 // Send restore_status indicating failure
                 try {
                     sendPayload(ws, { type: 'restore_status', success: false, reason: 'Session not found' });
@@ -229,9 +231,9 @@ wss.on('connection', (ws) => {
                 return;
             }
             // Clear any pending disconnect timer for this participant
-            if (room._disconnectTimers && room._disconnectTimers.has(participant.sessionId)) {
-                try { clearTimeout(room._disconnectTimers.get(participant.sessionId)); } catch { /* ignore */ }
-                room._disconnectTimers.delete(participant.sessionId);
+            if (room._disconnectTimers && room._disconnectTimers.has(clientSessionId)) {
+                try { clearTimeout(room._disconnectTimers.get(clientSessionId)); } catch { /* ignore */ }
+                room._disconnectTimers.delete(clientSessionId);
             }
             // Close old WebSocket if still open and different from current
             if (participant.ws && participant.ws !== ws && participant.ws.readyState === 1) {
@@ -248,22 +250,28 @@ wss.on('connection', (ws) => {
                 console.log(`[Session Restore] Cancelled room deletion timer for ${roomName}`);
             }
 
-            // Update connectionMeta for the new WebSocket
-            connectionMeta.set(ws, { roomName, name: participant.name, sessionId });
+            // Update connectionMeta to use sessionId as key
+            // First remove any old mapping for this ws if it exists
+            const result = findSessionByWs(oldWs);
+            if (result.sessionId) {
+                connectionMeta.delete(result.sessionId);
+            }
+            connectionMeta.set(clientSessionId, { roomName, name: participant.name, participantRef: participant });
+
             // IMPORTANT: Update all pending move acks to map the old WebSocket to the new one
             if (room.game && room.game._moveAcks) {
                 for (const ackData of room.game._moveAcks.values()) {
-                    // Update senderWs if this reconnected participant was the sender
-                    if (ackData.senderWs === oldWs) {
+                    // Update senderSessionId if this reconnected participant was the sender
+                    if (ackData.senderSessionId === clientSessionId) {
                         ackData.senderWs = ws;
                     }
 
-                    // The expectedAcks and receivedAcks now use participant names, not WebSockets,
+                    // The expectedAcks and receivedAcks now use participant sessionIds,
                     // so they automatically work across reconnections
 
                     // Check if all expected participants have now acknowledged after reconnection
-                    if (ackData.expectedAcks.has(participant.name)) {
-                        const allAcked = [...ackData.expectedAcks].every(participantName => ackData.receivedAcks.has(participantName));
+                    if (ackData.expectedAcks.has(clientSessionId)) {
+                        const allAcked = [...ackData.expectedAcks].every(participantSessionId => ackData.receivedAcks.has(participantSessionId));
                         if (allAcked) {
                             // All clients acknowledged - commit the move, send echo to sender
                             ackData.commitMove();
@@ -287,12 +295,12 @@ wss.on('connection', (ws) => {
                 console.log(`[Session Restore] Pending move keys:`, Array.from(room.game._moveAcks.keys()));
                 for (const [ackKey, ackData] of room.game._moveAcks.entries()) {
                     console.log(`[Session Restore]   - ${ackKey}: expectedAcks=[${Array.from(ackData.expectedAcks).join(', ')}], receivedAcks=[${Array.from(ackData.receivedAcks).join(', ')}]`);
-                    // If this move expects an ack from this client and we haven't received it yet (by participant name)
-                    if (ackData.expectedAcks.has(participant.name) && !ackData.receivedAcks.has(participant.name)) {
+                    // If this move expects an ack from this client and we haven't received it yet (by sessionId)
+                    if (ackData.expectedAcks.has(clientSessionId) && !ackData.receivedAcks.has(clientSessionId)) {
                         console.log(`[Session Restore] 📤 Resending pending move ${ackKey} (seq ${ackData.payload.seq}) to ${participant.name}`);
                         try { sendPayload(ws, ackData.payload); } catch { /* ignore */ }
                     } else {
-                        console.log(`[Session Restore] ⏭️ Skipping ${ackKey} for ${participant.name} (expected: ${ackData.expectedAcks.has(participant.name)}, received: ${ackData.receivedAcks.has(participant.name)})`);
+                        console.log(`[Session Restore] ⏭️ Skipping ${ackKey} for ${participant.name} (expected: ${ackData.expectedAcks.has(clientSessionId)}, received: ${ackData.receivedAcks.has(clientSessionId)})`);
                     }
                 }
             }
@@ -306,20 +314,22 @@ wss.on('connection', (ws) => {
                     success: true,
                     roomName: roomName,
                     roomKey: room.roomKey,
-                    playerName: participant.name
+                    playerName: participant.name,
+                    sessionId: clientSessionId
                 });
             } catch (err) {
                 console.error('[Server] Failed to send restore_status after successful restore', err);
             }
 
-            // Send enriched roomlist to confirm restoration
+            // Send enriched roomlist to confirm restoration using sessionId
             const perClientExtras = new Map();
             perClientExtras.set(ws, {
                 room: roomName,
                 roomKey: room.roomKey,
                 maxPlayers: room.maxPlayers,
                 player: participant.name,
-                players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
+                sessionId: clientSessionId,
+                players: room.participants.filter(p => p.connected).map(p => ({ name: p.name, sessionId: p.sessionId })),
                 gridSize: Number.isFinite(room.desiredGridSize) ? room.desiredGridSize : undefined,
                 started: !!(room.game && room.game.started)
             });
@@ -327,7 +337,7 @@ wss.on('connection', (ws) => {
 
             // If game is active, send catch-up data
             if (room.game && room.game.started) {
-                const lastSeq = (room._lastSeqByName && room._lastSeqByName.get(participant.name)) || 0;
+                const lastSeq = (room._lastSeqBySessionId && room._lastSeqBySessionId.get(clientSessionId)) || 0;
                 const recentMoves = (room.game && Array.isArray(room.game.recentMoves))
                     ? room.game.recentMoves.filter(m => (m.seq || 0) > lastSeq)
                     : [];
@@ -336,7 +346,7 @@ wss.on('connection', (ws) => {
                     room: roomName,
                     roomKey: room.roomKey,
                     maxPlayers: room.maxPlayers,
-                    players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
+                    players: room.participants.filter(p => p.connected).map(p => ({ name: p.name, sessionId: p.sessionId })),
                     started: true,
                     turnIndex: room.game && Number.isInteger(room.game.turnIndex) ? room.game.turnIndex : 0,
                     colors: room.game && Array.isArray(room.game.colors) ? room.game.colors : undefined,
@@ -349,10 +359,12 @@ wss.on('connection', (ws) => {
             return;
         } else if (msg.type === 'host') {
             // If this connection is already in a room, remove it from that room first
-            const metaExisting = connectionMeta.get(ws);
+            // Find existing meta for this ws
+            const { sessionId: existingSessionId, meta: metaExisting } = findSessionByWs(ws);
+
             if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
                 const prevRoom = rooms[metaExisting.roomName];
-                prevRoom.participants = prevRoom.participants.filter(p => p.ws !== ws);
+                prevRoom.participants = prevRoom.participants.filter(p => p.sessionId !== existingSessionId);
                 if (prevRoom.participants.length === 0) {
                     const oldKey = prevRoom.roomKey;
                     console.log(`[Room Delete] Room '${metaExisting.roomName}' deleted because last participant left/disconnected.`);
@@ -361,7 +373,7 @@ wss.on('connection', (ws) => {
                 } else {
                     // notify previous room (no roomupdate, just rely on roomlist)
                 }
-                connectionMeta.delete(ws);
+                connectionMeta.delete(existingSessionId);
             }
             // Compute a unique room name using the same pattern as player names
             const roomBaseRaw = (typeof msg.roomName === 'string' && msg.roomName)
@@ -397,16 +409,20 @@ wss.on('connection', (ws) => {
             // Generate unique join key for this room
             const roomKey = generateRoomKey();
             // Accept sessionId from client if provided, otherwise generate one
-            const sessionId = (typeof msg.sessionId === 'string' && msg.sessionId) ? String(msg.sessionId) : generateSessionId();
+            const newSessionId = (typeof msg.sessionId === 'string' && msg.sessionId) ? String(msg.sessionId) : generateSessionId();
+
+            // Create participant with sessionId
+            const participant = { ws, name: playerName, isHost: true, connected: true, sessionId: newSessionId };
             rooms[uniqueRoomName] = {
                 maxPlayers: clamped,
-                participants: [{ ws, name: playerName, isHost: true, connected: true, sessionId }],
+                participants: [participant],
                 _disconnectTimers: new Map(),
                 desiredGridSize: requestedGrid, // null means use dynamic playerCount+3
                 roomKey
             };
             roomKeys.set(roomKey, uniqueRoomName);
-            connectionMeta.set(ws, { roomName: uniqueRoomName, name: playerName, sessionId });
+            connectionMeta.set(newSessionId, { roomName: uniqueRoomName, name: playerName, participantRef: participant });
+
             // Compute a planned grid size for the lobby background for the host as well.
             // Use host's desiredGridSize if provided; otherwise default to (playerTarget + 3)
             // No direct roomupdate confirmation; rely on enriched roomlist
@@ -417,7 +433,8 @@ wss.on('connection', (ws) => {
                 roomKey,
                 maxPlayers: clamped,
                 player: playerName,
-                players: [{ name: playerName }],
+                sessionId: newSessionId,
+                players: [{ name: playerName, sessionId: newSessionId }],
                 gridSize: requestedGrid !== null ? requestedGrid : undefined,
                 started: false
             });
@@ -433,10 +450,11 @@ wss.on('connection', (ws) => {
                 return;
             }
             // If this connection is already in a room, remove it from that room first
-            const metaExisting = connectionMeta.get(ws);
+            const { sessionId: existingSessionId, meta: metaExisting } = findSessionByWs(ws);
+
             if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
                 const prevRoom = rooms[metaExisting.roomName];
-                prevRoom.participants = prevRoom.participants.filter(p => p.ws !== ws);
+                prevRoom.participants = prevRoom.participants.filter(p => p.sessionId !== existingSessionId);
                 if (prevRoom.participants.length === 0) {
                     const oldKey = prevRoom.roomKey;
                     console.log(`[Room Delete] Room '${metaExisting.roomName}' deleted because last participant left/disconnected.`);
@@ -445,7 +463,7 @@ wss.on('connection', (ws) => {
                 } else {
                     // notify previous room (no roomupdate, just rely on roomlist)
                 }
-                connectionMeta.delete(ws);
+                connectionMeta.delete(existingSessionId);
             }
             const count = room.participants?.length || 0;
             if (count >= room.maxPlayers) {
@@ -460,9 +478,12 @@ wss.on('connection', (ws) => {
                 return;
             }
             // Accept sessionId from client if provided, otherwise generate one
-            const sessionId = (typeof msg.sessionId === 'string' && msg.sessionId) ? String(msg.sessionId) : generateSessionId();
-            room.participants.push({ ws, name: playerName, isHost: false, connected: true, sessionId });
-            connectionMeta.set(ws, { roomName: msg.roomName, name: playerName, sessionId });
+            const newSessionId = (typeof msg.sessionId === 'string' && msg.sessionId) ? String(msg.sessionId) : generateSessionId();
+
+            // Create participant with sessionId
+            const participant = { ws, name: playerName, isHost: false, connected: true, sessionId: newSessionId };
+            room.participants.push(participant);
+            connectionMeta.set(newSessionId, { roomName: msg.roomName, name: playerName, participantRef: participant });
 
             // No direct roomupdate confirmation; rely on enriched roomlist
             // Enrich roomlist for the joiner so their room entry includes player/roomKey confirmation
@@ -473,7 +494,8 @@ wss.on('connection', (ws) => {
                     roomKey: room.roomKey,
                     maxPlayers: room.maxPlayers,
                     player: playerName,
-                    players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
+                    sessionId: newSessionId,
+                    players: room.participants.filter(p => p.connected).map(p => ({ name: p.name, sessionId: p.sessionId })),
                     gridSize: Number.isFinite(room.desiredGridSize) ? room.desiredGridSize : undefined,
                     started: !!(room.game && room.game.started)
                 });
@@ -496,10 +518,11 @@ wss.on('connection', (ws) => {
                 return;
             }
             // Remove from existing room if any
-            const metaExisting = connectionMeta.get(ws);
+            const { sessionId: existingSessionId, meta: metaExisting } = findSessionByWs(ws);
+
             if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
                 const prevRoom = rooms[metaExisting.roomName];
-                prevRoom.participants = prevRoom.participants.filter(p => p.ws !== ws);
+                prevRoom.participants = prevRoom.participants.filter(p => p.sessionId !== existingSessionId);
                 if (prevRoom.participants.length === 0) {
                     const oldKey = prevRoom.roomKey;
                     console.log(`[Room Delete] Room '${metaExisting.roomName}' deleted because last participant left/disconnected.`);
@@ -508,7 +531,7 @@ wss.on('connection', (ws) => {
                 } else {
                     // notify previous room (no roomupdate, just rely on roomlist)
                 }
-                connectionMeta.delete(ws);
+                connectionMeta.delete(existingSessionId);
             }
             const count = room.participants?.length || 0;
             if (count >= room.maxPlayers) {
@@ -522,9 +545,13 @@ wss.on('connection', (ws) => {
                 return;
             }
             // Accept sessionId from client if provided, otherwise generate one
-            const sessionId = (typeof msg.sessionId === 'string' && msg.sessionId) ? String(msg.sessionId) : generateSessionId();
-            room.participants.push({ ws, name: playerName, isHost: false, connected: true, sessionId });
-            connectionMeta.set(ws, { roomName, name: playerName, sessionId });
+            const newSessionId = (typeof msg.sessionId === 'string' && msg.sessionId) ? String(msg.sessionId) : generateSessionId();
+
+            // Create participant with sessionId
+            const participant = { ws, name: playerName, isHost: false, connected: true, sessionId: newSessionId };
+            room.participants.push(participant);
+            connectionMeta.set(newSessionId, { roomName, name: playerName, participantRef: participant });
+
             // No direct roomupdate confirmation; rely on enriched roomlist
             // Enrich roomlist for the joiner so their room entry includes player/roomKey confirmation
             {
@@ -534,7 +561,8 @@ wss.on('connection', (ws) => {
                     roomKey: room.roomKey,
                     maxPlayers: room.maxPlayers,
                     player: playerName,
-                    players: room.participants.filter(p => p.connected).map(p => ({ name: p.name })),
+                    sessionId: newSessionId,
+                    players: room.participants.filter(p => p.connected).map(p => ({ name: p.name, sessionId: p.sessionId })),
                     gridSize: Number.isFinite(room.desiredGridSize) ? room.desiredGridSize : undefined,
                     started: !!(room.game && room.game.started)
                 });
@@ -544,8 +572,10 @@ wss.on('connection', (ws) => {
         } else if (msg.type === 'list') {
             sendPayload(ws, { type: 'roomlist', rooms: getRoomList() });
         } else if (msg.type === 'start_req') {
-            // Only the host can start; use their current room from connectionMeta
-            const meta = connectionMeta.get(ws);
+            // Only the host can start; use their current room from sessionId in meta
+            // Find meta by looking for this ws in connectionMeta
+            const { sessionId: senderSessionId, meta } = findSessionByWs(ws);
+
             if (!meta || !meta.roomName) {
                 console.log(`[Start] ❌ Client not in a room`);
                 sendPayload(ws, { type: 'error', error: 'Not in a room' });
@@ -557,8 +587,8 @@ wss.on('connection', (ws) => {
                 sendPayload(ws, { type: 'error', error: 'Room not found' });
                 return;
             }
-            // Verify host
-            const isHost = room.participants.length && room.participants[0].ws === ws;
+            // Verify host by checking if this is the first participant and sessionId matches
+            const isHost = room.participants.length && room.participants[0].sessionId === senderSessionId;
             if (!isHost) {
                 console.log(`[Start] ❌ ${meta.name} is not the host of ${meta.roomName}`);
                 sendPayload(ws, { type: 'error', error: 'Only the host can start the game' });
@@ -683,8 +713,9 @@ wss.on('connection', (ws) => {
             const collect = {
                 inProgress: true,
                 expected: room.participants.length, // expect acks from ALL participants (including host)
-                responses: new Map(), // ws -> { name, color }
+                responses: new Map(), // sessionId -> { name, color, sessionId }
                 hostWs: ws,
+                hostSessionId: senderSessionId,
                 hostName: meta.name,
                 gridSize // Store for later use when sending to host
             };
@@ -700,7 +731,9 @@ wss.on('connection', (ws) => {
                 }
             });
         } else if (msg.type === 'move') {
-            const meta = connectionMeta.get(ws);
+            // Find meta by looking for this ws in connectionMeta
+            const { sessionId: senderSessionId, meta } = findSessionByWs(ws);
+
             if (!meta || !meta.roomName) return;
             const room = rooms[meta.roomName];
             if (!room) return;
@@ -743,22 +776,22 @@ wss.on('connection', (ws) => {
             // This MUST run BEFORE sequence validation to commit pending moves first.
             if (room.game._moveAcks && Number.isInteger(msg.seq)) {
                 const clientSeq = msg.seq;
-                console.log(`[Implicit Ack] Client ${senderName} sending move with seq ${clientSeq}, checking pending acks...`);
+                console.log(`[Implicit Ack] Client ${senderName} (sessionId: ${senderSessionId}) sending move with seq ${clientSeq}, checking pending acks...`);
                 // Acknowledge all pending moves with seq < clientSeq
                 for (const [ackKey, ackData] of room.game._moveAcks.entries()) {
                     const pendingSeq = parseInt(ackKey.replace('move_', ''));
                     // Only implicitly ack if:
                     // 1. This client is expected to ack (they're a receiver, not the sender)
                     // 2. The pending move seq is less than the current move seq
-                    if (pendingSeq < clientSeq && ackData.expectedAcks.has(senderName) && ackData.senderWs !== ws) {
+                    if (pendingSeq < clientSeq && ackData.expectedAcks.has(senderSessionId) && ackData.senderSessionId !== senderSessionId) {
                         // This client should have received this move, implicitly acknowledge it
                         console.log(`[Implicit Ack] ✓ ${senderName}'s move (seq ${clientSeq}) implicitly acks pending move seq ${pendingSeq}`);
                         console.log(`[Implicit Ack]   Packet content: type=${msg.type}, row=${msg.row}, col=${msg.col}, fromIndex=${msg.fromIndex}`);
                         console.log(`[Implicit Ack]   Acking move: row=${ackData.payload.row}, col=${ackData.payload.col}, fromIndex=${ackData.payload.fromIndex}`);
-                        ackData.receivedAcks.add(senderName);
+                        ackData.receivedAcks.add(senderSessionId);
 
                         // Check if all clients have now acknowledged
-                        const allAcked = [...ackData.expectedAcks].every(participantName => ackData.receivedAcks.has(participantName));
+                        const allAcked = [...ackData.expectedAcks].every(participantSessionId => ackData.receivedAcks.has(participantSessionId));
                         if (allAcked) {
                             // All clients acknowledged - commit the move, send echo to sender
                             console.log(`[Implicit Ack] 🎉 All clients have acked move seq ${pendingSeq}, committing now`);
@@ -767,7 +800,7 @@ wss.on('connection', (ws) => {
                             try { sendPayload(ackData.senderWs, ackData.payload); } catch { /* ignore */ }
                             room.game._moveAcks.delete(ackKey);
                         } else {
-                            const remaining = [...ackData.expectedAcks].filter(participantName => !ackData.receivedAcks.has(participantName)).length;
+                            const remaining = [...ackData.expectedAcks].filter(participantSessionId => !ackData.receivedAcks.has(participantSessionId)).length;
                             console.log(`[Implicit Ack]   Still waiting for ${remaining} more ack(s) for move seq ${pendingSeq}`);
                         }
                     }
@@ -826,10 +859,10 @@ wss.on('connection', (ws) => {
                 // Verify it's the same move from the same sender
                 if (pendingAck.senderWs === ws) {
                     // This is a retry of a pending move - resend to clients that haven't acked yet
-                    const otherParticipants = room.participants.filter(p => p.name !== senderName);
+                    const otherParticipants = room.participants.filter(p => p.sessionId !== senderSessionId);
                     otherParticipants.forEach(p => {
                         // Only resend to connected clients that haven't acknowledged
-                        if (p.connected && p.ws && p.ws.readyState === 1 && !pendingAck.receivedAcks.has(p.name)) {
+                        if (p.connected && p.ws && p.ws.readyState === 1 && !pendingAck.receivedAcks.has(p.sessionId)) {
                             try { sendPayload(p.ws, pendingAck.payload); } catch { /* ignore */ }
                         }
                     });
@@ -865,7 +898,6 @@ wss.on('connection', (ws) => {
             // Get ALL other participants (not the sender), including disconnected ones
             // We track ALL participants in expectedAcks so we don't confirm until ALL have acknowledged
             // Use sessionId to uniquely identify the sender (handles reconnects and duplicate names)
-            const senderSessionId = meta.sessionId;
             const allOtherParticipants = room.participants.filter(p => p.sessionId !== senderSessionId);
             const connectedOtherParticipants = allOtherParticipants.filter(p => p.connected);
             console.log(`[Move Setup] Sender: ${senderName} (session: ${senderSessionId}), All participants: [${room.participants.map(p => `${p.name}(${p.sessionId})`).join(', ')}]`);
@@ -900,15 +932,16 @@ wss.on('connection', (ws) => {
                 const ackKey = `move_${newMoveSeq}`;
                 const ackData = {
                     senderWs: ws,
+                    senderSessionId: senderSessionId,
                     payload,
                     commitMove, // Pass the commit function
                     // Track ALL other participants (including disconnected) to wait for all acks
                     // Store participant references instead of WebSockets so we can handle reconnects
                     expectedParticipants: new Set(allOtherParticipants),
-                    expectedAcks: new Set(allOtherParticipants.map(p => p.name)), // Track by participant name
-                    receivedAcks: new Set(), // Will store participant names
-                    // Store participant list so we can match names to WebSockets on reconnect
-                    participantNames: new Map(allOtherParticipants.map(p => [p.name, p]))
+                    expectedAcks: new Set(allOtherParticipants.map(p => p.sessionId)), // Track by sessionId
+                    receivedAcks: new Set(), // Will store sessionIds
+                    // Store participant list so we can match sessionIds to participant objects on reconnect
+                    participantsBySessionId: new Map(allOtherParticipants.map(p => [p.sessionId, p]))
                     // No timeout: wait indefinitely for all acks
                 };
                 room.game._moveAcks.set(ackKey, ackData);
@@ -917,16 +950,18 @@ wss.on('connection', (ws) => {
                 console.log(`[Move Broadcast] Sending move seq ${newMoveSeq} to ${connectedOtherParticipants.length} connected participant(s)`);
                 connectedOtherParticipants.forEach(p => {
                     if (p.ws.readyState === 1) {
-                        console.log(`[Move Broadcast]   → Sending to ${p.name} (readyState: ${p.ws.readyState})`);
+                        console.log(`[Move Broadcast]   → Sending to ${p.name} (sessionId: ${p.sessionId}, readyState: ${p.ws.readyState})`);
                         try { sendPayload(p.ws, payload); } catch { /* ignore */ }
                     } else {
-                        console.log(`[Move Broadcast]   ⚠️ Skipping ${p.name} (readyState: ${p.ws.readyState}, connected: ${p.connected})`);
+                        console.log(`[Move Broadcast]   ⚠️ Skipping ${p.name} (sessionId: ${p.sessionId}, readyState: ${p.ws.readyState}, connected: ${p.connected})`);
                     }
                 });
             }
         } else if (msg.type === 'move_ack') {
             // Client acknowledged receipt of a move
-            const meta = connectionMeta.get(ws);
+            // Find the sender's sessionId
+            const { sessionId: senderSessionId, meta } = findSessionByWs(ws);
+
             if (!meta || !meta.roomName) return;
             const room = rooms[meta.roomName];
             if (!room || !room.game || !room.game._moveAcks) return;
@@ -938,11 +973,11 @@ wss.on('connection', (ws) => {
             const ackData = room.game._moveAcks.get(ackKey);
             if (!ackData) return; // No pending acknowledgment for this move
 
-            // Record this client's acknowledgment by participant name
-            ackData.receivedAcks.add(meta.name);
+            // Record this client's acknowledgment by sessionId
+            ackData.receivedAcks.add(senderSessionId);
 
-            // Check if all expected participants have acknowledged (by name)
-            const allAcked = [...ackData.expectedAcks].every(participantName => ackData.receivedAcks.has(participantName));
+            // Check if all expected participants have acknowledged (by sessionId)
+            const allAcked = [...ackData.expectedAcks].every(participantSessionId => ackData.receivedAcks.has(participantSessionId));
 
             if (allAcked) {
                 // All clients acknowledged - commit the move, send echo to sender
@@ -954,7 +989,9 @@ wss.on('connection', (ws) => {
             }
         } else if (msg.type === 'color_ans') {
             // A client acknowledged start and sent their preferred color
-            const meta = connectionMeta.get(ws);
+            // Find the sender's sessionId
+            const { sessionId: senderSessionId, meta } = findSessionByWs(ws);
+
             if (!meta || !meta.roomName) return;
             const room = rooms[meta.roomName];
             if (!room || !room._startAcks || !room._startAcks.inProgress) {
@@ -965,8 +1002,8 @@ wss.on('connection', (ws) => {
             const color = typeof msg.color === 'string' ? String(msg.color) : '';
             // Sanitize color to known palette, else use default
             const sanitizedColor = playerColors.includes(color) ? color : 'green';
-            room._startAcks.responses.set(ws, { name, color: sanitizedColor });
-            console.log(`[Start Ack] ✅ Received ack from ${name} with color ${sanitizedColor} (${room._startAcks.responses.size}/${room._startAcks.expected})`);
+            room._startAcks.responses.set(senderSessionId, { name, color: sanitizedColor, sessionId: senderSessionId });
+            console.log(`[Start Ack] ✅ Received ack from ${name} (sessionId: ${senderSessionId}) with color ${sanitizedColor} (${room._startAcks.responses.size}/${room._startAcks.expected})`);
 
             // Check if we have all responses from other clients
             if (room._startAcks.responses.size >= room._startAcks.expected) {
@@ -976,7 +1013,7 @@ wss.on('connection', (ws) => {
                 // Build preferred list in participant order
                 const players = room.participants.map(p => p.name);
                 const prefs = room.participants.map(p => {
-                    const entry = room._startAcks.responses.get(p.ws);
+                    const entry = room._startAcks.responses.get(p.sessionId);
                     return entry && typeof entry.color === 'string' ? entry.color : 'green';
                 });
                 const assigned = assignColorsDeterministic(players, prefs, playerColors);
@@ -998,25 +1035,27 @@ wss.on('connection', (ws) => {
                     recentMoves: []
                 };
                 if (!room._lastSeqByName) room._lastSeqByName = new Map();
-                console.log(`[Start Ack] � Colors assigned:`, { players, colors: assigned, gridSize });
+                console.log(`[Start Ack] 🎨 Colors assigned:`, { players, colors: assigned, gridSize });
 
                 // Now send start to non-host clients and wait for their acks
-                const otherParticipants = room.participants.filter(p => p.name !== room._startAcks.hostName);
+                const otherParticipants = room.participants.filter(p => p.sessionId !== room._startAcks.hostSessionId);
                 room._startAcks.colorsAcksExpected = otherParticipants.length;
-                room._startAcks.colorsAcksReceived = new Set(); // Track by WebSocket
+                room._startAcks.colorsAcksReceived = new Set(); // Track by sessionId
 
                 const colorsPayload = JSON.stringify({ type: 'start', room: meta.roomName, players, colors: assigned, gridSize });
                 console.log(`[Start Ack] 📤 Sending colors to ${otherParticipants.length} non-host clients`);
                 otherParticipants.forEach(p => {
                     if (p.ws.readyState === 1) {
-                        console.log(`[Start Ack]   → Sending colors to ${p.name}`);
+                        console.log(`[Start Ack]   → Sending colors to ${p.name} (sessionId: ${p.sessionId})`);
                         try { p.ws.send(colorsPayload); } catch (err) { console.error('[Server] Failed to send colors to participant', p.name, err); }
                     }
                 });
             }
         } else if (msg.type === 'start_ack') {
             // A client acknowledged receiving the colors
-            const meta = connectionMeta.get(ws);
+            // Find the sender's sessionId
+            const { sessionId: senderSessionId, meta } = findSessionByWs(ws);
+
             if (!meta || !meta.roomName) return;
             const room = rooms[meta.roomName];
             if (!room || !room._startAcks || !room._startAcks.colorsCollected) {
@@ -1024,8 +1063,8 @@ wss.on('connection', (ws) => {
                 return;
             }
             const name = meta.name;
-            room._startAcks.colorsAcksReceived.add(ws);
-            console.log(`[Colors Ack] ✅ Received ack from ${name} (${room._startAcks.colorsAcksReceived.size}/${room._startAcks.colorsAcksExpected})`);
+            room._startAcks.colorsAcksReceived.add(senderSessionId);
+            console.log(`[Colors Ack] ✅ Received ack from ${name} (sessionId: ${senderSessionId}) (${room._startAcks.colorsAcksReceived.size}/${room._startAcks.colorsAcksExpected})`);
 
             // Check if we have all color acks from non-host clients
             if (room._startAcks.colorsAcksReceived.size >= room._startAcks.colorsAcksExpected) {
@@ -1039,7 +1078,7 @@ wss.on('connection', (ws) => {
                 const colors = room._startAcks.assignedColors;
                 const gridSize = room._startAcks.gridSize;
                 const colorsPayload = { type: 'start_cnf', room: meta.roomName, players, colors, gridSize };
-                console.log(`[Colors Ack] 📤 Sending colors confirmation to host ${room._startAcks.hostName}`);
+                console.log(`[Colors Ack] 📤 Sending colors confirmation to host...`);
                 try { sendPayload(room._startAcks.hostWs, colorsPayload); } catch (err) { console.error('[Server] Failed to send colors to host', err); }
 
                 // Cleanup
@@ -1047,19 +1086,21 @@ wss.on('connection', (ws) => {
                 console.log(`[Colors Ack] ✨ Start sequence complete for room ${meta.roomName}`);
             }
         } else if (msg.type === 'leave') {
-            const meta = connectionMeta.get(ws);
+            // Find the sender's sessionId
+            const { sessionId: senderSessionId, meta } = findSessionByWs(ws);
+
             if (!meta) {
                 return;
             }
             const { roomName } = meta;
             const room = rooms[roomName];
             if (!room) {
-                connectionMeta.delete(ws);
+                connectionMeta.delete(senderSessionId);
                 broadcastRoomList();
                 return;
             }
-            room.participants = room.participants.filter(p => p.ws !== ws);
-            connectionMeta.delete(ws);
+            room.participants = room.participants.filter(p => p.sessionId !== senderSessionId);
+            connectionMeta.delete(senderSessionId);
             if (room.participants.length === 0) {
                 const oldKey = room.roomKey;
                 console.log(`[Room Delete] Room '${roomName}' deleted because last participant left/disconnected.`);
@@ -1078,25 +1119,27 @@ wss.on('connection', (ws) => {
 
     ws.on('close', () => {
         console.error('[Client] 🔌 Disconnected');
-        const meta = connectionMeta.get(ws);
+        // Find the sessionId for this ws
+        const { sessionId: senderSessionId, meta } = findSessionByWs(ws);
+
         if (!meta) return;
         const { roomName, name } = meta;
         const room = rooms[roomName];
-        if (!room) { connectionMeta.delete(ws); return; }
+        if (!room) { connectionMeta.delete(senderSessionId); return; }
 
         // Check if game has started
         const isGameStarted = !!(room.game && room.game.started);
 
         // Only remove participant if room has NOT started
         if (!isGameStarted) {
-            const participantIndex = room.participants.findIndex(p => p.name === name);
+            const participantIndex = room.participants.findIndex(p => p.sessionId === senderSessionId);
             if (participantIndex >= 0) {
-                console.log(`[Disconnect] Removing ${name} from non-started room ${roomName}`);
+                console.log(`[Disconnect] Removing ${name} (sessionId: ${senderSessionId}) from non-started room ${roomName}`);
 
-                // Clear any pending disconnect timer for this name
-                if (room._disconnectTimers && room._disconnectTimers.has(name)) {
-                    try { clearTimeout(room._disconnectTimers.get(name)); } catch { /* ignore */ }
-                    room._disconnectTimers.delete(name);
+                // Clear any pending disconnect timer for this sessionId
+                if (room._disconnectTimers && room._disconnectTimers.has(senderSessionId)) {
+                    try { clearTimeout(room._disconnectTimers.get(senderSessionId)); } catch { /* ignore */ }
+                    room._disconnectTimers.delete(senderSessionId);
                 }
 
                 // Remove the participant
@@ -1112,24 +1155,24 @@ wss.on('connection', (ws) => {
                     // Notify remaining clients about updated roster
                     room.participants.forEach(p => {
                         if (p.ws.readyState === 1) {
-                            sendPayload(p.ws, { type: 'roomupdate', room: roomName, players: room.participants.map(pp => ({ name: pp.name })) });
+                            sendPayload(p.ws, { type: 'roomupdate', room: roomName, players: room.participants.map(pp => ({ name: pp.name, sessionId: pp.sessionId })) });
                         }
                     });
                 }
             }
         } else {
             // Game has started: mark participant as disconnected but keep in room for rejoin
-            const participant = room.participants.find(p => p.name === name);
+            const participant = room.participants.find(p => p.sessionId === senderSessionId);
             if (participant) {
                 // Only mark as disconnected if this WebSocket is the current one for this participant
                 // (ignore stale close events from old WebSockets after reconnection)
                 if (participant.ws !== ws) {
                     console.log(`[Disconnect] Ignoring stale disconnect event for ${name} (closing ws is not current: old=${ws.readyState}, current=${participant.ws ? participant.ws.readyState : 'null'})`);
-                    connectionMeta.delete(ws);
+                    connectionMeta.delete(senderSessionId);
                     return;
                 }
 
-                console.log(`[Disconnect] ${name} disconnected from started room ${roomName} (marked for rejoin, not removed)`);
+                console.log(`[Disconnect] ${name} (sessionId: ${senderSessionId}) disconnected from started room ${roomName} (marked for rejoin, not removed)`);
                 participant.connected = false;
                 participant.ws = null;
 
@@ -1147,7 +1190,7 @@ wss.on('connection', (ws) => {
             }
         }
 
-        connectionMeta.delete(ws);
+        connectionMeta.delete(senderSessionId);
         broadcastRoomList();
     });
 });
@@ -1224,11 +1267,12 @@ function broadcastRoomList(perClientExtras) {
         if (client.readyState !== 1) return;
         let rooms = baseRooms;
         // Check if this client is in any room via connectionMeta
-        const meta = connectionMeta.get(client);
+        const { sessionId: clientSessionId, meta } = findSessionByWs(client);
+
         if (meta && meta.roomName && baseRooms[meta.roomName]) {
             // Clone rooms and enrich with client's player info
             rooms = { ...baseRooms };
-            rooms[meta.roomName] = { ...baseRooms[meta.roomName], player: meta.name };
+            rooms[meta.roomName] = { ...baseRooms[meta.roomName], player: meta.name, sessionId: clientSessionId };
         }
         // If this client has extra info (e.g. host/join confirmation), merge it into their room entry
         if (perClientExtras && perClientExtras.has(client)) {
@@ -1241,6 +1285,20 @@ function broadcastRoomList(perClientExtras) {
         const list = JSON.stringify({ type: 'roomlist', rooms });
         try { client.send(list); } catch (err) { console.error('[Server] Failed to broadcast roomlist to client', err); }
     });
+}
+
+/**
+ * Find the sessionId and metadata for a given WebSocket connection.
+ * @param {WebSocket} ws - the WebSocket connection to look up
+ * @returns {{sessionId: string, meta: object} | {sessionId: null, meta: null}} - sessionId and meta, or null if not found
+ */
+function findSessionByWs(ws) {
+    for (const [sid, m] of connectionMeta.entries()) {
+        if (m && m.participantRef && m.participantRef.ws === ws) {
+            return { sessionId: sid, meta: m };
+        }
+    }
+    return { sessionId: null, meta: null };
 }
 
 /**

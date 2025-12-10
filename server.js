@@ -128,18 +128,41 @@ const connectionMeta = new Map();
  * @param {object} payload - The payload object to send (will be JSON-stringified).
  */
 function sendPayload(ws, payload) {
-    /*// Simulate packet loss
+    // Simulate packet loss
     const type = payload && typeof payload === 'object' ? payload.type : undefined;
     if (Math.random() < 0.25) {
         console.warn('[Server] 🔥 Simulated packet loss:', type, payload);
         return;
-    }*/
+    }
+    if (Math.random() < 0.25) {
+        console.warn('[Server] 🕒 Simulated packet delay (5s):', type, payload);
+        setTimeout(() => {
+            sendPayloadDelayed(ws, payload);
+        }, 5000);
+        return;
+    }
     try {
         ws.send(JSON.stringify(payload));
     } catch (err) {
         try {
             const state = typeof ws?.readyState === 'number' ? ws.readyState : undefined;
             console.error('[Server] Failed to send payload', { readyState: state }, err);
+        } catch { /* ignore meta logging errors */ }
+    }
+}
+
+/**
+ * Helper for delayed packet send (used for simulated delay).
+ */
+function sendPayloadDelayed(ws, payload) {
+    try {
+        ws.send(JSON.stringify(payload));
+        const type = payload && typeof payload === 'object' ? payload.type : undefined;
+        console.log('[Server] ⏩ Delayed send:', type, payload);
+    } catch (err) {
+        try {
+            const state = typeof ws?.readyState === 'number' ? ws.readyState : undefined;
+            console.error('[Server] Delayed send failed', { readyState: state }, err);
         } catch { /* ignore meta logging errors */ }
     }
 }
@@ -190,7 +213,7 @@ wss.on('connection', (ws) => {
             return;
         }
         // 3. Out-of-game/room packets from clients in a started room
-        if (outOfGamePackets.has(msg.type) && isGameStarted) {
+        if (outOfGamePackets.has(msg.type) && (isGameStarted || isInRoom)) {
             sendPayload(ws, {
                 type: 'error',
                 error: `Invalid packet: ${msg.type} packet sent while in a started room`,
@@ -358,22 +381,10 @@ wss.on('connection', (ws) => {
 
             return;
         } else if (msg.type === 'host') {
-            // If this connection is already in a room, remove it from that room first
-            // Find existing meta for this ws
-            const { sessionId: existingSessionId, meta: metaExisting } = findSessionByWs(ws);
-
+            // Block host if already in any room (started or not)
+            const { meta: metaExisting } = findSessionByWs(ws);
             if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
-                const prevRoom = rooms[metaExisting.roomName];
-                prevRoom.participants = prevRoom.participants.filter(p => p.sessionId !== existingSessionId);
-                if (prevRoom.participants.length === 0) {
-                    const oldKey = prevRoom.roomKey;
-                    console.log(`[Room Delete] Room '${metaExisting.roomName}' deleted because last participant left/disconnected.`);
-                    delete rooms[metaExisting.roomName];
-                    if (oldKey) roomKeys.delete(oldKey);
-                } else {
-                    // notify previous room (no roomupdate, just rely on roomlist)
-                }
-                connectionMeta.delete(existingSessionId);
+                return;
             }
             // Compute a unique room name using the same pattern as player names
             const roomBaseRaw = (typeof msg.roomName === 'string' && msg.roomName)
@@ -517,9 +528,12 @@ wss.on('connection', (ws) => {
                 sendPayload(ws, { type: 'error', error: 'Room already started' });
                 return;
             }
-            // Remove from existing room if any
+            // Remove from existing room if any, but only if not already in the target room
             const { sessionId: existingSessionId, meta: metaExisting } = findSessionByWs(ws);
-
+            if (metaExisting && metaExisting.roomName === roomName) {
+                // Already in the target room, do nothing
+                return;
+            }
             if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
                 const prevRoom = rooms[metaExisting.roomName];
                 prevRoom.participants = prevRoom.participants.filter(p => p.sessionId !== existingSessionId);
@@ -738,7 +752,7 @@ wss.on('connection', (ws) => {
             const room = rooms[meta.roomName];
             if (!room) return;
 
-            /*/ Simulate 25% chance to close all players' WebSockets
+            // Simulate 25% chance to close all players' WebSockets
             if (Math.random() < 0.25) {
                 console.warn('[Server] 🔌 SIMULATED DISCONNECT: Closing all player WebSockets');
                 room.participants.forEach(p => {
@@ -747,7 +761,7 @@ wss.on('connection', (ws) => {
                     }
                 });
                 return;
-            }*/
+            }
 
             // Enforce that a game has started and track turn order
             if (!room.game || !room.game.started) {

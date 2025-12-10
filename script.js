@@ -419,6 +419,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Our move was accepted by the server (otherwise opponent couldn't have moved next)
                 // No need to apply locally again - we already did that when we sent it
                 pendingEchoSeq = null;
+                
+                // If game has ended, now we can safely mark it inactive since move is confirmed
+                if (gameWon) {
+                    onlineConnection.setGameInactive();
+                }
+                
                 // Now proceed to apply the opponent's move normally
             }
 
@@ -479,6 +485,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (seq === lastAppliedSeq) {
                     console.log(`[Move Ack] Seq ${seq} confirmed (own move, myOnlineIndex=${myOnlineIndex})`);
                     pendingEchoSeq = null; // Clear pending echo
+                    
+                    // If game has ended, now we can safely mark it inactive since move is confirmed
+                    if (gameWon) {
+                        onlineConnection.setGameInactive();
+                    }
+                    
                     // Echo confirms our local apply; try drain any buffered moves
                     tryApplyBufferedMoves();
                 } else if (seq < lastAppliedSeq) {
@@ -1542,8 +1554,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (gameWon) return;
         gameWon = true;
 
-        // Disable session restoration when game ends
-        onlineConnection.setGameInactive();
+        // Only disable session restoration if there's no pending move confirmation
+        // This ensures the winning move gets confirmed by the server before stopping
+        if (pendingEchoSeq === null) {
+            onlineConnection.setGameInactive();
+        }
 
         if (menuShownAfterWin) return; // schedule only once
         menuShownAfterWin = true;

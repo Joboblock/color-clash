@@ -613,19 +613,6 @@ export class OnlineConnection {
 	 * @param {object} obj Serializable object payload.
 	 */
 	_sendPayload(obj) {
-		/// Simulate packet loss
-		const type = obj && typeof obj === 'object' ? obj.type : undefined;
-		if (Math.random() < 0.25) {
-			console.warn('[Client] 🔥 Simulated packet loss:', type, obj);
-			return;
-		}
-		if (Math.random() < 0.25) {
-			console.warn('[Client] 🕒 Simulated packet delay (5s):', type, obj);
-			setTimeout(() => {
-				this._sendPayloadDelayed(obj);
-			}, 5000);
-			return;
-		}
 		try {
 			this.ensureConnected();
 			if (this._ws && this._ws.readyState === WebSocket.OPEN) {
@@ -633,15 +620,6 @@ export class OnlineConnection {
 					// Log sent packet
 					const type = obj && typeof obj === 'object' ? obj.type : undefined;
 					console.log('[Client] ⬆️ Sending:', type, obj);
-
-					// Debug: Simulate forced disconnect before move packets only
-					if (type === 'move' && Math.random() < 0.25) {
-						console.warn('[Client] 🔌 SIMULATED DISCONNECT:', type, obj);
-						if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-							this._ws.close();
-						}
-						return;
-					}
 
 					this._ws.send(JSON.stringify(obj));
 				} catch (err) {

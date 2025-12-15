@@ -18,7 +18,7 @@ export const GameParams = Object.freeze({
     DELAY_EXPLOSION_MS: 500,         // delay between chained explosion waves
     DELAY_ANIMATION_MS: 300,         // animation duration for cell value transitions
     DELAY_GAME_END_MS: 2000,         // pause before showing game end state
-    PERFORMANCE_MODE_CUTOFF: 16      // grid size threshold to alter animations/perf mode
+    PERFORMANCE_MODE_CUTOFF: 16      // amount of explosions to switch to performance mode
 });
 
 // Named exports (for selective import convenience)

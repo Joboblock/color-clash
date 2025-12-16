@@ -1242,3 +1242,17 @@ body.magenta {
     border-radius: 2px;
     transform: translate(-50%, -50%) rotate(-45deg);
 }
+
+#versionInfoTag {
+    position: fixed;
+    left: 18px;
+    top: 16px;
+    z-index: 1001;
+    background: rgba(0, 0, 0, 0.72);
+    border-radius: 12px;
+    padding: 10px 14px;
+    color: #f1f1f1;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    font-size: 11px;
+    opacity: 0.88;
+}

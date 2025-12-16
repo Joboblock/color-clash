@@ -14,9 +14,63 @@ import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLO
 import { createEdgeCircles, updateEdgeCirclesActive, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
 // Navigation and routing
 import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, removeMenuParam, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
+import { APP_VERSION } from './src/version.js';
 
 // PLAYER_NAME_LENGTH now imported from nameUtils.js
 document.addEventListener('DOMContentLoaded', () => {
+    let serverVersion = null;
+
+    function initVersionOverlay() {
+        const overlay = document.createElement('div');
+        overlay.id = 'versionInfoTag';
+        overlay.setAttribute('role', 'status');
+        const versionLine = document.createElement('div');
+        overlay.append(versionLine);
+        document.body.appendChild(overlay);
+        return { versionLine };
+    }
+
+    function formatVersionTag() {
+        if (!serverVersion) {
+            return `c: ${APP_VERSION}`;
+        }
+        if (serverVersion === APP_VERSION) {
+            return `c+s: ${APP_VERSION}`;
+        }
+        return `c: ${APP_VERSION}; s: ${serverVersion}`;
+    }
+
+    function renderVersionOverlay(state) {
+        const summary = formatVersionTag();
+        state.versionLine.textContent = summary;
+    }
+
+    function handleServerInfoPayload(payload) {
+        if (payload && typeof payload.version === 'string' && payload.version.trim()) {
+            serverVersion = payload.version.trim();
+        }
+        renderVersionOverlay(versionOverlayState);
+    }
+
+    const versionOverlayState = initVersionOverlay();
+    function updateVersionOverlayVisibility() {
+        const menus = [document.getElementById('firstMenu'), document.getElementById('mainMenu'), document.getElementById('onlineMenu')];
+        const anyMenuVisible = menus.some(m => m && !m.classList.contains('hidden'));
+        const overlay = document.getElementById('versionInfoTag');
+        if (overlay) {
+            overlay.style.display = anyMenuVisible ? 'block' : 'none';
+        }
+    }
+    renderVersionOverlay(versionOverlayState);
+    updateVersionOverlayVisibility();
+    // Observe menu visibility changes
+    const menuIds = ['firstMenu', 'mainMenu', 'onlineMenu'];
+    const observer = new MutationObserver(updateVersionOverlayVisibility);
+    for (const id of menuIds) {
+        const el = document.getElementById(id);
+        if (el) observer.observe(el, { attributes: true, attributeFilter: ['class'] });
+    }
+
     // Shared name sanitization and validity functions (top-level)
     // On load, if grid is visible and no menu is open, show edge circles
     setTimeout(() => {
@@ -148,6 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
             hideConnBanner();
         }
     });
+    onlineConnection.on('info', handleServerInfoPayload);
     onlineConnection.on('restoring_session', ({ restoring }) => {
         if (restoring) {
             showConnBanner('Restoring Session…', 'error');
@@ -419,12 +474,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Our move was accepted by the server (otherwise opponent couldn't have moved next)
                 // No need to apply locally again - we already did that when we sent it
                 pendingEchoSeq = null;
-                
+
                 // If game has ended, now we can safely mark it inactive since move is confirmed
                 if (gameWon) {
                     onlineConnection.setGameInactive();
                 }
-                
+
                 // Now proceed to apply the opponent's move normally
             }
 
@@ -485,12 +540,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (seq === lastAppliedSeq) {
                     console.log(`[Move Ack] Seq ${seq} confirmed (own move, myOnlineIndex=${myOnlineIndex})`);
                     pendingEchoSeq = null; // Clear pending echo
-                    
+
                     // If game has ended, now we can safely mark it inactive since move is confirmed
                     if (gameWon) {
                         onlineConnection.setGameInactive();
                     }
-                    
+
                     // Echo confirms our local apply; try drain any buffered moves
                     tryApplyBufferedMoves();
                 } else if (seq < lastAppliedSeq) {

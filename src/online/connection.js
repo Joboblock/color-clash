@@ -431,6 +431,9 @@ export class OnlineConnection {
 					}
 					break;
 				}
+				case 'info':
+					this._emit('info', msg);
+					break;
 				case 'roomlist': {
 					// Ignore roomlist packets while trying to restore session
 					if (this._isRestoringSession) {

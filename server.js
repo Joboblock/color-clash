@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import { WebSocketServer } from 'ws';
+import { APP_VERSION } from './src/version.js';
 
 // Cloud Run provides PORT; default to 8080 locally
 const PORT = Number.parseInt(process.env.PORT || '', 10) || 8080;
@@ -1088,7 +1089,7 @@ wss.on('connection', (ws) => {
     });
 
     // Greet new connections
-    try { sendPayload(ws, { type: 'info', message: 'Connected to server!' }); } catch { /* ignore */ }
+    try { sendPayload(ws, { type: 'info', version: APP_VERSION }); } catch { /* ignore */ }
 
     ws.on('close', () => {
         console.error('[Client] 🔌 Disconnected');

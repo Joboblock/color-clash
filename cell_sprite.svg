@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Cell sprite">
+  <rect x="0" y="0" width="256" height="256" rx="64.0" ry="64.0" fill="#AFCAEA" />
+  <circle cx="128.0" cy="128.0" r="96.0" fill="#5f95d5" />
+  <circle cx="128.0" cy="78.7328" r="19.200000000000003" fill="#FFFFFF" />
+  <circle cx="170.6667" cy="152.6336" r="19.200000000000003" fill="#FFFFFF" />
+  <circle cx="85.3333" cy="152.6336" r="19.200000000000003" fill="#FFFFFF" />
+</svg>

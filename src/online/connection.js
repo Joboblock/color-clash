@@ -120,7 +120,7 @@ export class OnlineConnection {
 		this._unansweredPings = 0;
 		this._pingTimer = setInterval(() => {
 			// Only send pings while in a started game
-			if (!this._inActiveGame) {
+			if (!this._inActiveGame || !this.isConnected()) {
 				return;
 			}
 
@@ -616,6 +616,19 @@ export class OnlineConnection {
 	 * @param {object} obj Serializable object payload.
 	 */
 	_sendPayload(obj) {
+		// Simulate packet loss
+		const type = obj && typeof obj === 'object' ? obj.type : undefined;
+		if (Math.random() < 0.25) {
+			console.warn('[Client] 🔥 Simulated packet loss:', type, obj);
+			return;
+		}
+		if (Math.random() < 0.25) {
+			console.warn('[Client] 🕒 Simulated packet delay (5s):', type, obj);
+			setTimeout(() => {
+				this._sendPayloadDelayed(obj);
+			}, 5000);
+			return;
+		}
 		try {
 			this.ensureConnected();
 			if (this._ws && this._ws.readyState === WebSocket.OPEN) {
@@ -623,6 +636,14 @@ export class OnlineConnection {
 					// Log sent packet
 					const type = obj && typeof obj === 'object' ? obj.type : undefined;
 					console.log('[Client] ⬆️ Sending:', type, obj);
+					// Debug: Simulate forced disconnect before move packets only
+					if (type === 'move' && Math.random() < 0.05) {
+						console.warn('[Client] 🔌 SIMULATED DISCONNECT:', type, obj);
+						if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+							this._ws.close();
+						}
+						return;
+					}
 
 					this._ws.send(JSON.stringify(obj));
 				} catch (err) {
@@ -666,6 +687,7 @@ export class OnlineConnection {
 	 * @param {{roomName:string, maxPlayers:number, gridSize?:number, debugName?:string}} p
 	 */
 	host({ roomName, maxPlayers, gridSize, debugName }) {
+		this.setGameInactive();
 		// Generate sessionId if not already present
 		if (!this._sessionInfo.sessionId) {
 			this._sessionInfo.sessionId = this._generateSessionId();
@@ -678,6 +700,7 @@ export class OnlineConnection {
 	 * @param {string} debugName Client name (display/debug only)
 	 */
 	join(roomName, debugName) {
+		this.setGameInactive();
 		// Generate sessionId if not already present
 		if (!this._sessionInfo.sessionId) {
 			this._sessionInfo.sessionId = this._generateSessionId();
@@ -690,6 +713,7 @@ export class OnlineConnection {
 	 * @param {string} debugName Client name
 	 */
 	joinByKey(roomKey, debugName) {
+		this.setGameInactive();
 		console.log('[Client] 🔑 joinByKey() called:', { roomKey, debugName, stack: new Error().stack });
 		// Generate sessionId if not already present
 		if (!this._sessionInfo.sessionId) {
@@ -705,6 +729,7 @@ export class OnlineConnection {
 	 * @param {string} [roomName]
 	 */
 	leave(roomName) {
+		this.setGameInactive();
 		this._clearSessionInfo(); // Clear session on explicit leave
 		this._sendPayload({ type: 'leave', roomName });
 	}
@@ -731,7 +756,7 @@ export class OnlineConnection {
 	}
 
 	/**
-	 * Mark that the game has ended (disables session restoration).
+	 * Mark that the game has not started/ended (disables session restoration).
 	 */
 	setGameInactive() {
 		this._inActiveGame = false;

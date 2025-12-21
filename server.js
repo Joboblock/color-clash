@@ -129,12 +129,41 @@ const connectionMeta = new Map();
  * @param {object} payload - The payload object to send (will be JSON-stringified).
  */
 function sendPayload(ws, payload) {
+    // Simulate packet loss
+    const type = payload && typeof payload === 'object' ? payload.type : undefined;
+    if (Math.random() < 0.25) {
+        console.warn('[Server] 🔥 Simulated packet loss:', type, payload);
+        return;
+    }
+    if (Math.random() < 0.25) {
+        console.warn('[Server] 🕒 Simulated packet delay (5s):', type, payload);
+        setTimeout(() => {
+            sendPayloadDelayed(ws, payload);
+        }, 5000);
+        return;
+    }
     try {
         ws.send(JSON.stringify(payload));
     } catch (err) {
         try {
             const state = typeof ws?.readyState === 'number' ? ws.readyState : undefined;
             console.error('[Server] Failed to send payload', { readyState: state }, err);
+        } catch { /* ignore meta logging errors */ }
+    }
+}
+
+/**
+ * Helper for delayed packet send (used for simulated delay).
+ */
+function sendPayloadDelayed(ws, payload) {
+    try {
+        ws.send(JSON.stringify(payload));
+        const type = payload && typeof payload === 'object' ? payload.type : undefined;
+        console.log('[Server] ⏩ Delayed send:', type, payload);
+    } catch (err) {
+        try {
+            const state = typeof ws?.readyState === 'number' ? ws.readyState : undefined;
+            console.error('[Server] Delayed send failed', { readyState: state }, err);
         } catch { /* ignore meta logging errors */ }
     }
 }
@@ -722,6 +751,17 @@ wss.on('connection', (ws) => {
             if (!meta || !meta.roomName) return;
             const room = rooms[meta.roomName];
             if (!room) return;
+
+            // Simulate chance to close all players' WebSockets
+            if (Math.random() < 0.05) {
+                console.warn('[Server] 🔌 SIMULATED DISCONNECT: Closing all player WebSockets');
+                room.participants.forEach(p => {
+                    if (p.ws && p.ws.readyState === 1) {
+                        try { p.ws.close(); } catch { 0 }
+                    }
+                });
+                return;
+            }
 
             // Enforce that a game has started and track turn order
             if (!room.game || !room.game.started) {

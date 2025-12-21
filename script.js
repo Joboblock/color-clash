@@ -294,6 +294,13 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('[Start] Server sent start with colors:', msg.colors);
         if (!clientFullyInitialized) return;
 
+        if (onlineGameActive) {
+            // Already in a started room, just send the confirmation again
+            console.log('[Start] Already in started room, resending start_ack');
+            onlineConnection.sendStartAck();
+            return;
+        }
+
         try {
             // Initialize game state for non-host clients
             lastAppliedSeq = 0;

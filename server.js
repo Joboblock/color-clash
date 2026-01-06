@@ -187,7 +187,7 @@ wss.on('connection', (ws) => {
         const isGameStarted = !!(room && room.game && room.game.started);
 
         // Define packet type groups
-        const gamePackets = new Set(['move', 'move_ack', 'ping']);
+    const gamePackets = new Set(['move', 'ping']);
         const roomPackets = new Set(['leave', 'start_req', 'start_ack', 'color_ans']);
         const outOfGamePackets = new Set(['host', 'join', 'join_by_key', 'list', 'roomlist']);
         // restore_session is allowed at any time (it's specifically for reconnecting to started games)
@@ -281,52 +281,7 @@ wss.on('connection', (ws) => {
             }
             connectionMeta.set(clientSessionId, { roomName, name: participant.name, participantRef: participant });
 
-            // IMPORTANT: Update all pending move acks to map the old WebSocket to the new one
-            if (room.game && room.game._moveAcks) {
-                for (const ackData of room.game._moveAcks.values()) {
-                    // Update senderSessionId if this reconnected participant was the sender
-                    if (ackData.senderSessionId === clientSessionId) {
-                        ackData.senderWs = ws;
-                    }
-
-                    // The expectedAcks and receivedAcks now use participant sessionIds,
-                    // so they automatically work across reconnections
-
-                    // Check if all expected participants have now acknowledged after reconnection
-                    if (ackData.expectedAcks.has(clientSessionId)) {
-                        const allAcked = [...ackData.expectedAcks].every(participantSessionId => ackData.receivedAcks.has(participantSessionId));
-                        if (allAcked) {
-                            // All clients acknowledged - commit the move, send echo to sender
-                            ackData.commitMove();
-                            const ackPayload = { ...ackData.payload, type: 'move_ack' };
-                            try { sendPayload(ackData.senderWs, ackPayload); } catch { /* ignore */ }
-                            // Find and delete this ack key
-                            for (const [key, data] of room.game._moveAcks.entries()) {
-                                if (data === ackData) {
-                                    room.game._moveAcks.delete(key);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Re-send pending moves to the reconnected client that they haven't acknowledged yet
-            if (room.game && room.game._moveAcks) {
-                console.log(`[Session Restore] Checking ${room.game._moveAcks.size} pending move(s) for ${participant.name}`);
-                console.log(`[Session Restore] Pending move keys:`, Array.from(room.game._moveAcks.keys()));
-                for (const [ackKey, ackData] of room.game._moveAcks.entries()) {
-                    console.log(`[Session Restore]   - ${ackKey}: expectedAcks=[${Array.from(ackData.expectedAcks).join(', ')}], receivedAcks=[${Array.from(ackData.receivedAcks).join(', ')}]`);
-                    // If this move expects an ack from this client and we haven't received it yet (by sessionId)
-                    if (ackData.expectedAcks.has(clientSessionId) && !ackData.receivedAcks.has(clientSessionId)) {
-                        console.log(`[Session Restore] 📤 Resending pending move ${ackKey} (seq ${ackData.payload.seq}) to ${participant.name}`);
-                        try { sendPayload(ws, ackData.payload); } catch { /* ignore */ }
-                    } else {
-                        console.log(`[Session Restore] ⏭️ Skipping ${ackKey} for ${participant.name} (expected: ${ackData.expectedAcks.has(clientSessionId)}, received: ${ackData.receivedAcks.has(clientSessionId)})`);
-                    }
-                }
-            }
+            // Move catch-up is handled via ping(seq) now.
 
             console.log('[Session Restore] ✅ Session restored for', participant.name, 'in room', roomName);
 
@@ -785,42 +740,6 @@ wss.on('connection', (ws) => {
                 return;
             }
 
-            // IMPLICIT ACKNOWLEDGMENT: If this client is sending a move with seq N,
-            // they must have received all moves up to seq N-1.
-            // This MUST run BEFORE sequence validation to commit pending moves first.
-            if (room.game._moveAcks && Number.isInteger(msg.seq)) {
-                const clientSeq = msg.seq;
-                console.log(`[Implicit Ack] Client ${senderName} (sessionId: ${senderSessionId}) sending move with seq ${clientSeq}, checking pending acks...`);
-                // Acknowledge all pending moves with seq < clientSeq
-                for (const [ackKey, ackData] of room.game._moveAcks.entries()) {
-                    const pendingSeq = parseInt(ackKey.replace('move_', ''));
-                    // Only implicitly ack if:
-                    // 1. This client is expected to ack (they're a receiver, not the sender)
-                    // 2. The pending move seq is less than the current move seq
-                    if (pendingSeq < clientSeq && ackData.expectedAcks.has(senderSessionId) && ackData.senderSessionId !== senderSessionId) {
-                        // This client should have received this move, implicitly acknowledge it
-                        console.log(`[Implicit Ack] ✓ ${senderName}'s move (seq ${clientSeq}) implicitly acks pending move seq ${pendingSeq}`);
-                        console.log(`[Implicit Ack]   Packet content: type=${msg.type}, row=${msg.row}, col=${msg.col}, fromIndex=${msg.fromIndex}`);
-                        console.log(`[Implicit Ack]   Acking move: row=${ackData.payload.row}, col=${ackData.payload.col}, fromIndex=${ackData.payload.fromIndex}`);
-                        ackData.receivedAcks.add(senderSessionId);
-
-                        // Check if all clients have now acknowledged
-                        const allAcked = [...ackData.expectedAcks].every(participantSessionId => ackData.receivedAcks.has(participantSessionId));
-                        if (allAcked) {
-                            // All clients acknowledged - commit the move, send echo to sender
-                            console.log(`[Implicit Ack] 🎉 All clients have acked move seq ${pendingSeq}, committing now`);
-                            clearTimeout(ackData.timeout);
-                            ackData.commitMove();
-                            try { sendPayload(ackData.senderWs, ackData.payload); } catch { /* ignore */ }
-                            room.game._moveAcks.delete(ackKey);
-                        } else {
-                            const remaining = [...ackData.expectedAcks].filter(participantSessionId => !ackData.receivedAcks.has(participantSessionId)).length;
-                            console.log(`[Implicit Ack]   Still waiting for ${remaining} more ack(s) for move seq ${pendingSeq}`);
-                        }
-                    }
-                }
-            }
-
             // Validate sequence number BEFORE turn validation (to handle retries of already-committed/pending moves)
             if (Number.isInteger(msg.seq)) {
                 const currentSeq = room.game.moveSeq || 0;
@@ -862,27 +781,7 @@ wss.on('connection', (ws) => {
                 } else if (msg.seq > expectedSeq) {
                     return;
                 }
-                // msg.seq === expectedSeq - proceed to check for pending moves or new move
-            }
-
-            // Check if this move is already pending acknowledgment (client is retrying)
-            const newMoveSeq = (room.game.moveSeq || 0) + 1;
-            const pendingAckKey = `move_${newMoveSeq}`;
-            if (room.game._moveAcks && room.game._moveAcks.has(pendingAckKey)) {
-                const pendingAck = room.game._moveAcks.get(pendingAckKey);
-                // Verify it's the same move from the same sender
-                if (pendingAck.senderWs === ws) {
-                    // This is a retry of a pending move - resend to clients that haven't acked yet
-                    const otherParticipants = room.participants.filter(p => p.sessionId !== senderSessionId);
-                    otherParticipants.forEach(p => {
-                        // Only resend to connected clients that haven't acknowledged
-                        if (p.connected && p.ws && p.ws.readyState === 1 && !pendingAck.receivedAcks.has(p.sessionId)) {
-                            try { sendPayload(p.ws, pendingAck.payload); } catch { /* ignore */ }
-                        }
-                    });
-                    // Don't process this as a new move
-                    return;
-                }
+                // msg.seq === expectedSeq - proceed
             }
 
             // Now validate turn (only for NEW moves, not retries)
@@ -892,6 +791,7 @@ wss.on('connection', (ws) => {
             }
 
             // Accept move: compute next turn and prepare for broadcast
+            const newMoveSeq = (room.game.moveSeq || 0) + 1;
             const nextIndex = (fromIndex + 1) % Math.max(1, players.length);
             // Derive the authoritative color for this player, if available
             const assignedColor = (room.game && Array.isArray(room.game.colors))
@@ -909,98 +809,29 @@ wss.on('connection', (ws) => {
                 seq: newMoveSeq
             };
 
-            // Get ALL other participants (not the sender), including disconnected ones
-            // We track ALL participants in expectedAcks so we don't confirm until ALL have acknowledged
-            // Use sessionId to uniquely identify the sender (handles reconnects and duplicate names)
-            const allOtherParticipants = room.participants.filter(p => p.sessionId !== senderSessionId);
-            const connectedOtherParticipants = allOtherParticipants.filter(p => p.connected);
-            console.log(`[Move Setup] Sender: ${senderName} (session: ${senderSessionId}), All participants: [${room.participants.map(p => `${p.name}(${p.sessionId})`).join(', ')}]`);
-            console.log(`[Move Setup] Other participants (expected to ack): [${allOtherParticipants.map(p => p.name).join(', ')}]`);
-            console.log(`[Move Setup] Connected other participants: [${connectedOtherParticipants.map(p => p.name).join(', ')}]`);
+            // Commit immediately (server-authoritative)
+            room.game.moveSeq = newMoveSeq;
+            room.game.turnIndex = nextIndex;
 
-            // Function to commit the move (increment sequence and update turn)
-            const commitMove = () => {
-                // Now commit the sequence increment and buffer the move
-                room.game.moveSeq = newMoveSeq;
-                room.game.turnIndex = nextIndex;
+            // Buffer for reconnect/catch-up (keep a rolling history)
+            try {
+                const moveRecord = { seq: newMoveSeq, room: meta.roomName, row: r, col: c, fromIndex, nextIndex, color: assignedColor };
+                if (!Array.isArray(room.game.recentMoves)) room.game.recentMoves = [];
+                const bufferSize = 256; // keep enough history for ping-based catch-up
+                room.game.recentMoves.push(moveRecord);
+                if (room.game.recentMoves.length > bufferSize) room.game.recentMoves.shift();
+            } catch { /* ignore buffering errors */ }
 
-                // Buffer for reconnect catch-up
-                try {
-                    const moveRecord = { seq: newMoveSeq, room: meta.roomName, row: r, col: c, fromIndex, nextIndex, color: assignedColor };
-                    if (!Array.isArray(room.game.recentMoves)) room.game.recentMoves = [];
-                    const bufferSize = Math.max(1, (Array.isArray(room.game.players) ? room.game.players.length : 2));
-                    room.game.recentMoves.push(moveRecord);
-                    if (room.game.recentMoves.length > bufferSize) room.game.recentMoves.shift();
-                } catch { /* ignore buffering errors */ }
-            };
+            // Immediately confirm back to the sender (does not wait for other clients)
+            try { sendPayload(ws, { ...payload, type: 'move_ack' }); } catch { /* ignore */ }
 
-            // If there are no other participants, immediately confirm to sender
-            if (allOtherParticipants.length === 0) {
-                commitMove();
-                const ackPayload = { ...payload, type: 'move_ack' };
-                try { sendPayload(ws, ackPayload); } catch { /* ignore */ }
-            } else {
-                // Initialize move acknowledgment tracking
-                if (!room.game._moveAcks) room.game._moveAcks = new Map();
-
-                const ackKey = `move_${newMoveSeq}`;
-                const ackData = {
-                    senderWs: ws,
-                    senderSessionId: senderSessionId,
-                    payload,
-                    commitMove, // Pass the commit function
-                    // Track ALL other participants (including disconnected) to wait for all acks
-                    // Store participant references instead of WebSockets so we can handle reconnects
-                    expectedParticipants: new Set(allOtherParticipants),
-                    expectedAcks: new Set(allOtherParticipants.map(p => p.sessionId)), // Track by sessionId
-                    receivedAcks: new Set(), // Will store sessionIds
-                    // Store participant list so we can match sessionIds to participant objects on reconnect
-                    participantsBySessionId: new Map(allOtherParticipants.map(p => [p.sessionId, p]))
-                    // No timeout: wait indefinitely for all acks
-                };
-                room.game._moveAcks.set(ackKey, ackData);
-
-                // Broadcast move to ONLY connected participants
-                console.log(`[Move Broadcast] Sending move seq ${newMoveSeq} to ${connectedOtherParticipants.length} connected participant(s)`);
-                connectedOtherParticipants.forEach(p => {
-                    if (p.ws.readyState === 1) {
-                        console.log(`[Move Broadcast]   → Sending to ${p.name} (sessionId: ${p.sessionId}, readyState: ${p.ws.readyState})`);
-                        try { sendPayload(p.ws, payload); } catch { /* ignore */ }
-                    } else {
-                        console.log(`[Move Broadcast]   ⚠️ Skipping ${p.name} (sessionId: ${p.sessionId}, readyState: ${p.ws.readyState}, connected: ${p.connected})`);
-                    }
-                });
-            }
-        } else if (msg.type === 'move_ack') {
-            // Client acknowledged receipt of a move
-            // Find the sender's sessionId
-            const { sessionId: senderSessionId, meta } = findSessionByWs(ws);
-
-            if (!meta || !meta.roomName) return;
-            const room = rooms[meta.roomName];
-            if (!room || !room.game || !room.game._moveAcks) return;
-
-            const moveSeq = Number(msg.seq);
-            if (!Number.isInteger(moveSeq)) return;
-
-            const ackKey = `move_${moveSeq}`;
-            const ackData = room.game._moveAcks.get(ackKey);
-            if (!ackData) return; // No pending acknowledgment for this move
-
-            // Record this client's acknowledgment by sessionId
-            ackData.receivedAcks.add(senderSessionId);
-
-            // Check if all expected participants have acknowledged (by sessionId)
-            const allAcked = [...ackData.expectedAcks].every(participantSessionId => ackData.receivedAcks.has(participantSessionId));
-
-            if (allAcked) {
-                // All clients acknowledged - commit the move, send echo to sender
-                // No timeout to clear
-                ackData.commitMove(); // Commit sequence and turn
-                const ackPayload = { ...ackData.payload, type: 'move_ack' };
-                try { sendPayload(ackData.senderWs, ackPayload); } catch { /* ignore */ }
-                room.game._moveAcks.delete(ackKey);
-            }
+            // Broadcast to all other CONNECTED participants
+            const connectedOtherParticipants = room.participants.filter(p => p.sessionId !== senderSessionId && p.connected);
+            connectedOtherParticipants.forEach(p => {
+                if (p.ws && p.ws.readyState === 1) {
+                    try { sendPayload(p.ws, payload); } catch { /* ignore */ }
+                }
+            });
         } else if (msg.type === 'color_ans') {
             // A client acknowledged start and sent their preferred color
             // Find the sender's sessionId
@@ -1123,8 +954,41 @@ wss.on('connection', (ws) => {
             }
             broadcastRoomList();
         } else if (msg.type === 'ping') {
-            // Respond to ping with pong
-            try { sendPayload(ws, { type: 'pong' }); } catch { /* ignore */ }
+            // Ping now carries client's last received move sequence number.
+            // If the client is behind, send the missing moves.
+            const { meta } = findSessionByWs(ws);
+            const roomName = meta?.roomName;
+            const room = roomName ? rooms[roomName] : undefined;
+
+            const clientSeq = Number.isInteger(msg.seq) ? msg.seq : 0;
+            const serverSeq = room && room.game ? (room.game.moveSeq || 0) : 0;
+
+            if (!room || !room.game || !room.game.started) {
+                // Not in a started game; keep-alive only.
+                try { sendPayload(ws, { type: 'pong', seq: serverSeq }); } catch { /* ignore */ }
+                return;
+            }
+
+            if (clientSeq === serverSeq) {
+                try { sendPayload(ws, { type: 'pong', seq: serverSeq }); } catch { /* ignore */ }
+                return;
+            }
+
+            // Client is behind (or ahead due to bad state). Send what we have.
+            let moves = [];
+            try {
+                const recent = Array.isArray(room.game.recentMoves) ? room.game.recentMoves : [];
+                moves = recent.filter(m => Number.isInteger(m.seq) && m.seq > clientSeq);
+            } catch { /* ignore */ }
+
+            try {
+                sendPayload(ws, {
+                    type: 'missing_moves',
+                    fromSeq: clientSeq,
+                    serverSeq,
+                    moves
+                });
+            } catch { /* ignore */ }
         }
     });
 

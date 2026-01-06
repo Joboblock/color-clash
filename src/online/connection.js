@@ -26,6 +26,7 @@ import { WS_PROD_BASE_URL, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from '../c
  *  - (deprecated) 'joined' (JoinedMessage): replaced by enriched 'roomlist'.
  *  - 'move' (MoveMessage): A game move broadcast (other players' moves).
  *  - 'move_ack' (MoveMessage): Server confirmation that our move was accepted.
+ *  - 'missing_moves' ({type:'missing_moves', fromSeq:number, serverSeq:number, moves:MoveMessage[]}): Catch-up packet (sent when ping(seq) indicates the client is behind).
  *  - 'rejoined' (RejoinedMessage): State catch-up after reconnect.
  *  - 'error' (ErrorMessage): Server-side validation or protocol error.
  *
@@ -59,6 +60,7 @@ import { WS_PROD_BASE_URL, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from '../c
 // RoomUpdateMessage is obsolete; use enriched roomlist entries instead
  * @typedef {{type:'move', room?:string, row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} MoveMessage
  * @typedef {{type:'rejoined', room?:string, roomKey?:string, players?:PlayerEntry[], recentMoves?:MoveMessage[], maxPlayers?:number}} RejoinedMessage
+ * @typedef {{type:'missing_moves', fromSeq:number, serverSeq:number, moves:MoveMessage[]}} MissingMovesMessage
  * @typedef {{type:'error', error:string}} ErrorMessage
  * @typedef {{initialBackoffMs?:number, maxBackoffMs?:number, getWebSocketUrl?:()=>string}} OnlineConnectionOptions
  */
@@ -147,7 +149,9 @@ export class OnlineConnection {
 				// Send ping
 				this._unansweredPings++;
 				this._log('sending ping (unanswered count:', this._unansweredPings, ')');
-				this._sendPayload({ type: 'ping' });
+				// Include our last applied move sequence so server can send catch-up moves.
+				const seq = Number.isInteger(window.lastAppliedSeq) ? window.lastAppliedSeq : 0;
+				this._sendPayload({ type: 'ping', seq });
 				// Reset timer for next check
 				this._lastMessageTime = Date.now();
 			}
@@ -507,6 +511,10 @@ export class OnlineConnection {
 				case 'rejoined':
 					this._emit('rejoined', msg);
 					break;
+				case 'missing_moves':
+					// Server indicates we're behind and provides missing moves for catch-up.
+					this._emit('missing_moves', msg);
+					break;
 				case 'error': {
 					// Cancel join_by_key retries if room not found or full
 					const errStr = String(msg.error || '');
@@ -540,7 +548,8 @@ export class OnlineConnection {
 					break;
 				}
 				case 'pong':
-					// Pong received - timer already reset above
+					// Pong received - timer already reset above; also reset unanswered ping counter
+					this._unansweredPings = 0;
 					break;
 				default: this._log('unhandled message type', type);
 			}
@@ -804,14 +813,6 @@ export class OnlineConnection {
 		const packet = { type: 'move', row, col, fromIndex, nextIndex, color };
 		if (Number.isInteger(seq)) packet.seq = seq;
 		this._sendWithRetry(moveKey, packet, 'move');
-	}
-
-	/** Send acknowledgment for received move.
-	 * @param {number} seq - The sequence number of the move being acknowledged
-	 */
-	sendMoveAck(seq) {
-		if (!Number.isInteger(seq)) return;
-		this._sendPayload({ type: 'move_ack', seq });
 	}
 
 	/**

@@ -135,6 +135,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let pendingEchoSeq = null;
     console.log('[Init] lastAppliedSeq initialized to', lastAppliedSeq);
 
+    // Expose lastAppliedSeq for OnlineConnection ping(seq) catch-up.
+    // OnlineConnection reads window.lastAppliedSeq; keep it synced.
+    window.lastAppliedSeq = lastAppliedSeq;
+
     // Connection banner helpers stay in UI layer; OnlineConnection just emits events.
 
     // Only show the connection banner while user is in Online/Host menus
@@ -305,6 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Initialize game state for non-host clients
             lastAppliedSeq = 0;
             pendingEchoSeq = null;
+            window.lastAppliedSeq = lastAppliedSeq;
             onlineGameActive = true;
             onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
             myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
@@ -367,6 +372,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Initialize game state for host
             lastAppliedSeq = 0;
             pendingEchoSeq = null;
+            window.lastAppliedSeq = lastAppliedSeq;
             onlineGameActive = true;
             onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
             myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
@@ -432,6 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`[Buffer] handleClick returned ${applied} for seq=${nextSeq}`);
             if (applied) {
                 lastAppliedSeq = nextSeq;
+                window.lastAppliedSeq = lastAppliedSeq;
                 console.log(`[Buffer] Updated lastAppliedSeq to ${lastAppliedSeq}`);
                 pendingMoves.delete(nextSeq);
                 appliedCount++;
@@ -461,11 +468,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!Number.isInteger(r) || !Number.isInteger(c)) {
                 console.warn(`[Move Handler] Invalid coordinates (myOnlineIndex=${myOnlineIndex})`);
                 return;
-            }
-
-            // Send acknowledgment to server (for other players' moves only - we don't ack our own confirmation)
-            if (fromIdx !== myOnlineIndex && Number.isInteger(seq)) {
-                onlineConnection.sendMoveAck(seq);
             }
 
             // For other players' moves: only apply when in-order; otherwise store
@@ -500,6 +502,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.log(`[Move] handleClick returned ${applied} for seq=${seq}`);
                     if (applied) {
                         lastAppliedSeq = seq;
+                        window.lastAppliedSeq = lastAppliedSeq;
                         console.log(`[Move] Updated lastAppliedSeq to ${lastAppliedSeq}`);
                         // After applying, try to drain any subsequent buffered moves in order
                         tryApplyBufferedMoves();
@@ -526,6 +529,25 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('[Move] Error handling move:', err);
         }
     });
+
+    // Catch-up packet: server noticed we're behind (via ping) and returns the missing move list.
+    onlineConnection.on('missing_moves', (msg) => {
+        try {
+            if (!onlineGameActive) return;
+            const moves = Array.isArray(msg.moves) ? msg.moves : [];
+            if (moves.length === 0) return;
+
+            console.warn(`[Catch-up] Received ${moves.length} missing move(s) from server (fromSeq=${msg.fromSeq}, serverSeq=${msg.serverSeq}). lastAppliedSeq=${lastAppliedSeq}`);
+            for (const m of moves) {
+                if (!m || !Number.isInteger(m.seq)) continue;
+                pendingMoves.set(Number(m.seq), { r: Number(m.row), c: Number(m.col), fromIdx: Number(m.fromIndex) });
+            }
+            // Try to apply starting from our current lastAppliedSeq.
+            tryApplyBufferedMoves();
+        } catch (err) {
+            console.error('[Catch-up] Error applying missing moves:', err);
+        }
+    });
     onlineConnection.on('move_ack', (msg) => {
         try {
             console.log(`[Move Ack] Received move confirmation:`, msg, `onlineGameActive=${onlineGameActive}, lastAppliedSeq=${lastAppliedSeq}, myOnlineIndex=${myOnlineIndex}`);
@@ -547,6 +569,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (seq === lastAppliedSeq) {
                     console.log(`[Move Ack] Seq ${seq} confirmed (own move, myOnlineIndex=${myOnlineIndex})`);
                     pendingEchoSeq = null; // Clear pending echo
+
+                    // Keep window.lastAppliedSeq in sync (used by ping).
+                    window.lastAppliedSeq = lastAppliedSeq;
 
                     // If game has ended, now we can safely mark it inactive since move is confirmed
                     if (gameWon) {

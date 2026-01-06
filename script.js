@@ -244,7 +244,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             const gridSizeTile = pageRegistry.get('main')?.components?.gridSizeTile;
                             gridSizeTile && gridSizeTile.setSize(s, 'network', { silent: true, bump: false });
                         } catch { /* ignore */ }
-                        if (s !== gridSize) recreateGrid(s, playerCount);
+                        // Don't recreate the grid mid-game.
+                        // Roomlist updates can arrive while we're already in a started room.
+                        if (!onlineGameActive && s !== gridSize) recreateGrid(s, playerCount);
                     }
                 } catch { /* ignore */ }
                 foundSelf = true;
@@ -299,8 +301,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!clientFullyInitialized) return;
 
         if (onlineGameActive) {
-            // Already in a started room, just send the confirmation again
-            console.log('[Start] Already in started room, resending start_ack');
+            // Already in a started room. Don't reset/recreate anything; just re-ack for server retry logic.
+            console.log('[Start] Already in started room, ignoring start and resending start_ack');
             onlineConnection.sendStartAck();
             return;
         }
@@ -367,6 +369,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // Host receives final confirmation with assigned colors
         console.log('[Start Cnf] Server sent start confirmation with colors:', msg.colors);
         if (!clientFullyInitialized) return;
+
+        if (onlineGameActive) {
+            // If start_cnf is replayed (packet loss/retry), don't recreate/reset mid-game.
+            console.log('[Start Cnf] Already in started game, ignoring duplicate start_cnf');
+            return;
+        }
 
         try {
             // Initialize game state for host

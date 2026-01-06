@@ -1907,7 +1907,37 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void}
      */
     function handleClick(row, col) {
-        if (isProcessing || gameWon) return false;
+        // Debug helper (only logs for online games to reduce noise)
+        const _logReject = (reason, extra = {}) => {
+            try {
+                if (!onlineGameActive) return;
+                let cellState = null;
+                try {
+                    const g = (grid && grid[row] && grid[row][col]) ? grid[row][col] : null;
+                    if (g) cellState = { value: g.value, player: g.player };
+                } catch { /* ignore */ }
+                console.warn('[handleClick reject]', {
+                    reason,
+                    row,
+                    col,
+                    currentPlayer,
+                    currentPlayerColor: (activeColors && typeof activeColors === 'function') ? activeColors()[currentPlayer] : undefined,
+                    onlineGameActive,
+                    myOnlineIndex,
+                    isProcessing,
+                    gameWon,
+                    initialPlacements: Array.isArray(initialPlacements) ? initialPlacements.slice() : initialPlacements,
+                    cellState,
+                    ...extra
+                });
+                alert('Fatal Error: Desync. This should not happen');
+            } catch { /* ignore */ }
+        };
+
+        if (isProcessing || gameWon) {
+            _logReject('isProcessing_or_gameWon');
+            return false;
+        }
 
         const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
         // Save last focused cell for current player
@@ -1915,7 +1945,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const cellColor = getPlayerColor(row, col);
 
         if (!initialPlacements[currentPlayer]) {
-            if (isInitialPlacementInvalid(row, col)) return false;
+            if (isInitialPlacementInvalid(row, col)) {
+                _logReject('initialPlacementInvalid');
+                return false;
+            }
 
             if (grid[row][col].value === 0) {
                 grid[row][col].value = initialPlacementValue;
@@ -1934,6 +1967,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 return true;
             }
 
+            _logReject('initialPlacement_cellNotEmpty', { existingValue: grid[row][col].value, existingPlayer: grid[row][col].player });
+
         } else {
             if (grid[row][col].value > 0 && cellColor === activeColors()[currentPlayer]) {
                 grid[row][col].value++;
@@ -1947,6 +1982,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return true;
             }
+
+            _logReject('nonInitialPlacement_invalidCellOrOwnership', {
+                cellValue: grid[row][col].value,
+                cellColor,
+                expectedColor: activeColors()[currentPlayer]
+            });
         }
         return false;
     }

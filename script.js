@@ -2644,15 +2644,23 @@ document.addEventListener('DOMContentLoaded', () => {
     function highlightInvalidInitialPositions() {
         clearInvalidHighlights();
 
+        // Only show any invalid placement highlights during the initial placement phase.
+        // - Online: phase is seq-driven.
+        // - Local/practice: phase is driven by initialPlacements flags.
+        const stableOnlineCount = (onlineGameActive && Array.isArray(onlinePlayers) && onlinePlayers.length)
+            ? onlinePlayers.length
+            : (Number(playerCount) || 0);
+        const inInitialPlacementPhase = onlineGameActive
+            ? ((Number(onlineTurnSeq) || 0) < stableOnlineCount)
+            : (Array.isArray(initialPlacements) && initialPlacements.some(p => !p));
+
+        if (!inInitialPlacementPhase) return;
+
+        // Static center invalids (initial placement only)
         invalidInitialPositions.forEach(pos => {
             const cell = document.querySelector(`.cell[data-row="${pos.r}"][data-col="${pos.c}"]`);
             cell.classList.add('invalid');
         });
-
-        // Only show dynamic adjacency invalids during the initial placement phase.
-        // (Once all players have placed, adjacency restrictions no longer apply.)
-        const inInitialPlacementPhase = Array.isArray(initialPlacements) && initialPlacements.some(p => !p);
-        if (!inInitialPlacementPhase) return;
 
         for (let i = 0; i < gridSize; i++) {
             for (let j = 0; j < gridSize; j++) {

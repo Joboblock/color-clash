@@ -423,6 +423,21 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     // Ordered move buffer: store out-of-order or deferred moves by sequence
     const pendingMoves = new Map(); // seq -> { r, c, fromIdx }
+
+    // When applying server/catch-up moves we want better diagnostics.
+    // This is set just-in-time before calling handleClick() for online moves.
+    let _applyingOnlineSeq = null;
+
+    /**
+     * Determine if the game is still in the initial placement phase.
+     * Rule: if the move sequence is higher than playerCount, initial placements have ended.
+     * @param {number} seq
+     * @returns {boolean}
+     */
+    function _isInitialPlacementPhaseForSeq(seq) {
+        const s = Number(seq);
+        return Number.isFinite(s) ? s <= (Number(playerCount) || 0) : true;
+    }
     function tryApplyBufferedMoves() {
         // Apply any contiguous moves starting from lastAppliedSeq + 1
         let appliedCount = 0;
@@ -434,7 +449,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const { r, c, fromIdx } = m;
             console.log(`[Buffer] Draining seq ${nextSeq} from player ${fromIdx} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
             currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
+            // Apply with seq context and seq-based initial-placement override.
+            const prevSeq = _applyingOnlineSeq;
+            _applyingOnlineSeq = nextSeq;
+            let prevInitialFlag = null;
+            const shouldOverrideInitial = !_isInitialPlacementPhaseForSeq(nextSeq);
+            if (shouldOverrideInitial && Array.isArray(initialPlacements)) {
+                prevInitialFlag = initialPlacements[currentPlayer];
+                initialPlacements[currentPlayer] = true;
+            }
             const applied = handleClick(r, c);
+            if (shouldOverrideInitial && Array.isArray(initialPlacements) && prevInitialFlag !== null) {
+                initialPlacements[currentPlayer] = prevInitialFlag;
+            }
+            _applyingOnlineSeq = prevSeq;
             console.log(`[Buffer] handleClick returned ${applied} for seq=${nextSeq}`);
             if (applied) {
                 lastAppliedSeq = nextSeq;
@@ -498,7 +526,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const doApply = () => {
                     console.log(`[Move] Applying seq ${seq} from player ${fromIdx} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
                     currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
+                    const prevSeq = _applyingOnlineSeq;
+                    _applyingOnlineSeq = seq;
+                    let prevInitialFlag = null;
+                    const shouldOverrideInitial = !_isInitialPlacementPhaseForSeq(seq);
+                    if (shouldOverrideInitial && Array.isArray(initialPlacements)) {
+                        prevInitialFlag = initialPlacements[currentPlayer];
+                        initialPlacements[currentPlayer] = true;
+                    }
                     const applied = handleClick(r, c);
+                    if (shouldOverrideInitial && Array.isArray(initialPlacements) && prevInitialFlag !== null) {
+                        initialPlacements[currentPlayer] = prevInitialFlag;
+                    }
+                    _applyingOnlineSeq = prevSeq;
                     console.log(`[Move] handleClick returned ${applied} for seq=${seq}`);
                     if (applied) {
                         lastAppliedSeq = seq;
@@ -1918,6 +1958,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch { /* ignore */ }
                 console.warn('[handleClick reject]', {
                     reason,
+                    seq: (typeof _applyingOnlineSeq === 'number' || typeof _applyingOnlineSeq === 'string') ? _applyingOnlineSeq : null,
                     row,
                     col,
                     currentPlayer,
@@ -1930,7 +1971,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     cellState,
                     ...extra
                 });
-                alert('Fatal Error: Desync. This should not happen');
+                // This reject can happen for authoritative online moves that arrive while
+                // animations/explosions are processing, so don't treat it as fatal.
+                if (reason !== 'isProcessing_or_gameWon') {
+                    alert('Fatal Error: Desync. This should not happen');
+                }
             } catch { /* ignore */ }
         };
 

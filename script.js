@@ -538,9 +538,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (moves.length === 0) return;
 
             console.warn(`[Catch-up] Received ${moves.length} missing move(s) from server (fromSeq=${msg.fromSeq}, serverSeq=${msg.serverSeq}). lastAppliedSeq=${lastAppliedSeq}`);
+            // If we're already ahead (e.g., we rejoined and caught up), ignore this stale catch-up payload.
+            // This can happen because pings were sent with an older seq and delayed/retried.
+            const serverSeq = Number(msg.serverSeq);
+            if (Number.isInteger(serverSeq) && (Number(lastAppliedSeq) || 0) >= serverSeq) {
+                console.log(`[Catch-up] Ignoring stale missing_moves: already at lastAppliedSeq=${lastAppliedSeq} >= serverSeq=${serverSeq}`);
+                return;
+            }
             for (const m of moves) {
                 if (!m || !Number.isInteger(m.seq)) continue;
-                pendingMoves.set(Number(m.seq), { r: Number(m.row), c: Number(m.col), fromIdx: Number(m.fromIndex) });
+                const seq = Number(m.seq);
+                if (seq <= (Number(lastAppliedSeq) || 0)) continue;
+                pendingMoves.set(seq, { r: Number(m.row), c: Number(m.col), fromIdx: Number(m.fromIndex) });
             }
             // Try to apply starting from our current lastAppliedSeq.
             tryApplyBufferedMoves();
@@ -602,26 +611,20 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const missed = Array.isArray(msg.recentMoves) ? msg.recentMoves.slice() : [];
             if (missed.length) {
+                // IMPORTANT: never apply out-of-order on rejoin.
+                // If seq 6 fails but seq 7 succeeds, advancing lastAppliedSeq to 7 creates a gap.
+                // From then on, the buffer drain starts at 8 and you can never apply seq 6 again.
                 missed.sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
-                let idx = 0; const applyNext = () => {
-                    if (idx >= missed.length) { updateStartButtonState(); return; }
-                    const m = missed[idx]; const r = Number(m.row), c = Number(m.col), fromIdx = Number(m.fromIndex); const seq = Number(m.seq);
-                    if (Number.isInteger(seq) && seq <= lastAppliedSeq) { idx++; applyNext(); return; }
-                    if (!Number.isInteger(r) || !Number.isInteger(c) || !Number.isInteger(fromIdx)) { idx++; applyNext(); return; }
-                    const doApply = () => {
-                        if (!onlineGameActive) { idx++; applyNext(); return; }
-                        currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
-                        const applied = handleClick(r, c);
-                        console.log(`[Rejoined] handleClick returned ${applied} for seq=${seq}, lastAppliedSeq before=${lastAppliedSeq}`);
-                        if (applied && Number.isInteger(seq)) {
-                            lastAppliedSeq = Math.max(lastAppliedSeq, seq);
-                            console.log(`[Rejoined] Updated lastAppliedSeq to ${lastAppliedSeq}`);
-                        }
-                        idx++;
-                        setTimeout(applyNext, 0);
-                    };
-                    if (isProcessing) { setTimeout(applyNext, 100); } else { doApply(); }
-                }; applyNext();
+
+                for (const m of missed) {
+                    const r = Number(m.row), c = Number(m.col), fromIdx = Number(m.fromIndex); const seq = Number(m.seq);
+                    if (!Number.isInteger(seq) || !Number.isInteger(r) || !Number.isInteger(c) || !Number.isInteger(fromIdx)) continue;
+                    if (seq <= (Number(lastAppliedSeq) || 0)) continue;
+                    pendingMoves.set(seq, { r, c, fromIdx });
+                }
+
+                // Try apply in-order (will also handle deferring while isProcessing).
+                tryApplyBufferedMoves();
             }
         } catch { /* ignore */ }
         updateStartButtonState();

@@ -103,7 +103,11 @@ export class OnlineConnection {
 		this._lastMessageTime = Date.now();
 		this._pingTimer = null;
 		this._unansweredPings = 0;
-		this._PING_TIMEOUT_MS = 5000; // Send ping after 5 seconds of inactivity
+		// Ping logic:
+		// - Wait up to 16s of inactivity before sending the first ping
+		// - If no pong is received within 8s after a ping, send the next ping immediately (do not wait for full 16s)
+		this._PING_TIMEOUT_MS = 16000; // 16s inactivity before first ping
+		this._PING_RETRY_MS = 8000;    // 8s after ping, send next ping if no packet
 		this._MAX_UNANSWERED_PINGS = 3; // Close connection after 3 unanswered pings
 	}	/** @private */
 	_log(...args) {
@@ -120,40 +124,67 @@ export class OnlineConnection {
 		this._stopPingTimer();
 		this._lastMessageTime = Date.now();
 		this._unansweredPings = 0;
+		this._pingInFlight = false;
 		this._pingTimer = setInterval(() => {
 			// Only send pings while in a started game
 			if (!this._inActiveGame || !this.isConnected()) {
 				return;
 			}
 
-			const timeSinceLastMessage = Date.now() - this._lastMessageTime;
-			if (timeSinceLastMessage >= this._PING_TIMEOUT_MS) {
-				// Time to send a ping
-				if (this._unansweredPings >= this._MAX_UNANSWERED_PINGS) {
-					// Too many unanswered pings - close connection to trigger reconnect
-					this._log('closing connection due to', this._MAX_UNANSWERED_PINGS, 'unanswered pings');
-					console.warn('[Client] ⚠️ Connection timeout: closing WebSocket after', this._MAX_UNANSWERED_PINGS, 'unanswered pings');
-					this._stopPingTimer();
-					if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-						try {
-							this._ws.close();
-						} catch (e) {
-							console.warn('[Client] Failed to close WebSocket:', e);
-							// Force cleanup if close fails
-							this._ws = null;
-							this._scheduleReconnect();
+			const now = Date.now();
+			const timeSinceLastMessage = now - this._lastMessageTime;
+
+			if (!this._pingInFlight) {
+				// No ping in flight: send ping if inactivity >= 16s
+				if (timeSinceLastMessage >= this._PING_TIMEOUT_MS) {
+					if (this._unansweredPings >= this._MAX_UNANSWERED_PINGS) {
+						this._log('closing connection due to', this._MAX_UNANSWERED_PINGS, 'unanswered pings');
+						console.warn('[Client] ⚠️ Connection timeout: closing WebSocket after', this._MAX_UNANSWERED_PINGS, 'unanswered pings');
+						this._stopPingTimer();
+						if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+							try {
+								this._ws.close();
+							} catch (e) {
+								console.warn('[Client] Failed to close WebSocket:', e);
+								this._ws = null;
+								this._scheduleReconnect();
+							}
 						}
+						return;
 					}
-					return;
+					// Send ping
+					this._unansweredPings++;
+					this._log('sending ping (unanswered count:', this._unansweredPings, ')');
+					const seq = Number.isInteger(window.lastAppliedSeq) ? window.lastAppliedSeq : 0;
+					this._sendPayload({ type: 'ping', seq });
+					this._pingInFlight = true;
+					this._pingSentTime = now;
 				}
-				// Send ping
-				this._unansweredPings++;
-				this._log('sending ping (unanswered count:', this._unansweredPings, ')');
-				// Include our last applied move sequence so server can send catch-up moves.
-				const seq = Number.isInteger(window.lastAppliedSeq) ? window.lastAppliedSeq : 0;
-				this._sendPayload({ type: 'ping', seq });
-				// Reset timer for next check
-				this._lastMessageTime = Date.now();
+			} else {
+				// Ping in flight: if 8s passed since last ping, send next ping
+				if (now - this._pingSentTime >= this._PING_RETRY_MS) {
+					if (this._unansweredPings >= this._MAX_UNANSWERED_PINGS) {
+						this._log('closing connection due to', this._MAX_UNANSWERED_PINGS, 'unanswered pings');
+						console.warn('[Client] ⚠️ Connection timeout: closing WebSocket after', this._MAX_UNANSWERED_PINGS, 'unanswered pings');
+						this._stopPingTimer();
+						if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+							try {
+								this._ws.close();
+							} catch (e) {
+								console.warn('[Client] Failed to close WebSocket:', e);
+								this._ws = null;
+								this._scheduleReconnect();
+							}
+						}
+						return;
+					}
+					// Send next ping
+					this._unansweredPings++;
+					this._log('sending ping (unanswered count:', this._unansweredPings, ')');
+					const seq = Number.isInteger(window.lastAppliedSeq) ? window.lastAppliedSeq : 0;
+					this._sendPayload({ type: 'ping', seq });
+					this._pingSentTime = now;
+				}
 			}
 		}, 1000); // Check every second
 	}
@@ -175,8 +206,11 @@ export class OnlineConnection {
 	 * @private
 	 */
 	_resetPingTimer() {
-		this._lastMessageTime = Date.now();
-		this._unansweredPings = 0;
+	// Any received packet resets the inactivity timer and ping-in-flight state
+	this._lastMessageTime = Date.now();
+	this._unansweredPings = 0;
+	this._pingInFlight = false;
+	this._pingSentTime = null;
 	}
 
 

@@ -472,10 +472,11 @@ document.addEventListener('DOMContentLoaded', () => {
             : (Array.isArray(gameColors) && gameColors.length)
                 ? gameColors.length
                 : (Number(playerCount) || 0);
-        return Number.isFinite(s) ? s <= stableCount : true;
+        // Unified 0-based seq: initial placement is seq 0..(players-1)
+        return Number.isFinite(s) ? s < stableCount : true;
     }
     function tryApplyBufferedMoves() {
-        // Apply any contiguous moves starting from lastAppliedSeq + 1
+        // Apply any contiguous moves starting from lastAppliedSeq
         let appliedCount = 0;
         while (onlineGameActive) {
             // lastAppliedSeq is the next sequence number we still need to apply.
@@ -640,7 +641,8 @@ document.addEventListener('DOMContentLoaded', () => {
             for (const m of moves) {
                 if (!m || !Number.isInteger(m.seq)) continue;
                 const seq = Number(m.seq);
-                if (seq <= (Number(lastAppliedSeq) || 0)) continue;
+                // lastAppliedSeq is the next expected seq, so we must still accept seq === lastAppliedSeq.
+                if (seq < (Number(lastAppliedSeq) || 0)) continue;
                 pendingMoves.set(seq, { r: Number(m.row), c: Number(m.col), fromIdx: Number(m.fromIndex) });
             }
             // Try to apply starting from our current lastAppliedSeq.

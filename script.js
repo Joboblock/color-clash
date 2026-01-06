@@ -310,6 +310,7 @@ document.addEventListener('DOMContentLoaded', () => {
             lastAppliedSeq = 0;
             pendingEchoSeq = null;
             window.lastAppliedSeq = lastAppliedSeq;
+            onlineTurnSeq = 0;
             onlineGameActive = true;
             onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
             myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
@@ -342,8 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             practiceMode = false;
             recreateGrid(s, p);
-            currentPlayer = 0;
-            document.body.className = activeColors()[currentPlayer];
+            _setOnlineTurnFromSeq();
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
 
@@ -373,6 +373,7 @@ document.addEventListener('DOMContentLoaded', () => {
             lastAppliedSeq = 0;
             pendingEchoSeq = null;
             window.lastAppliedSeq = lastAppliedSeq;
+            onlineTurnSeq = 0;
             onlineGameActive = true;
             onlinePlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
             myOnlineIndex = onlinePlayers.indexOf(myPlayerName || '');
@@ -405,8 +406,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             practiceMode = false;
             recreateGrid(s, p);
-            currentPlayer = 0;
-            document.body.className = activeColors()[currentPlayer];
+            _setOnlineTurnFromSeq();
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
 
@@ -424,49 +424,87 @@ document.addEventListener('DOMContentLoaded', () => {
     // Ordered move buffer: store out-of-order or deferred moves by sequence
     const pendingMoves = new Map(); // seq -> { r, c, fromIdx }
 
+    // Online turn sequencing (client-maintained).
+    // This is the local single source of truth for whose turn it is in online games.
+    // It advances when we apply a move (ours or others') and is used for input gating.
+    let onlineTurnSeq = 0; // next move sequence to be played/applied locally
+
+    function _stableOnlineCount() {
+        return (onlineGameActive && Array.isArray(onlinePlayers) && onlinePlayers.length)
+            ? onlinePlayers.length
+            : (Array.isArray(gameColors) && gameColors.length)
+                ? gameColors.length
+                : (Number(playerCount) || 0);
+    }
+
+    function _setOnlineTurnFromSeq() {
+        if (!onlineGameActive) return;
+        const n = _stableOnlineCount();
+        if (!n) return;
+        currentPlayer = (Number(onlineTurnSeq) || 0) % n;
+        document.body.className = activeColors()[currentPlayer];
+        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    }
+
     // When applying server/catch-up moves we want better diagnostics.
     // This is set just-in-time before calling handleClick() for online moves.
     let _applyingOnlineSeq = null;
 
     /**
      * Determine if the game is still in the initial placement phase.
-     * Rule: if the move sequence is higher than playerCount, initial placements have ended.
+     * Rule: if the move sequence is higher than the online player count, initial placements have ended.
+     * NOTE: playerCount may be derived from UI/config and can drift; onlinePlayers length is the stable value.
      * @param {number} seq
      * @returns {boolean}
      */
     function _isInitialPlacementPhaseForSeq(seq) {
         const s = Number(seq);
-        return Number.isFinite(s) ? s <= (Number(playerCount) || 0) : true;
+        const stableCount = (onlineGameActive && Array.isArray(onlinePlayers) && onlinePlayers.length)
+            ? onlinePlayers.length
+            : (Array.isArray(gameColors) && gameColors.length)
+                ? gameColors.length
+                : (Number(playerCount) || 0);
+        return Number.isFinite(s) ? s <= stableCount : true;
     }
     function tryApplyBufferedMoves() {
         // Apply any contiguous moves starting from lastAppliedSeq + 1
         let appliedCount = 0;
         while (onlineGameActive) {
-            const nextSeq = (Number(lastAppliedSeq) || 0) + 1;
+            // lastAppliedSeq is the next sequence number we still need to apply.
+            const nextSeq = (Number(lastAppliedSeq) || 0);
             const m = pendingMoves.get(nextSeq);
             if (!m) break;
             // Apply this buffered move
             const { r, c, fromIdx } = m;
             console.log(`[Buffer] Draining seq ${nextSeq} from player ${fromIdx} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
-            currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
-            // Apply with seq context and seq-based initial-placement override.
+            const stableCount = (onlineGameActive && Array.isArray(onlinePlayers) && onlinePlayers.length)
+                ? onlinePlayers.length
+                : (Array.isArray(gameColors) && gameColors.length)
+                    ? gameColors.length
+                    : (Number(playerCount) || 0);
+            const seqMover = stableCount > 0 ? (nextSeq % stableCount) : fromIdx;
+            currentPlayer = Math.max(0, Math.min(playerCount - 1, seqMover));
+            // Apply with seq context and seq-based placement-phase forcing.
             const prevSeq = _applyingOnlineSeq;
             _applyingOnlineSeq = nextSeq;
             let prevInitialFlag = null;
-            const shouldOverrideInitial = !_isInitialPlacementPhaseForSeq(nextSeq);
-            if (shouldOverrideInitial && Array.isArray(initialPlacements)) {
+            const isInitialPhase = _isInitialPlacementPhaseForSeq(nextSeq);
+            if (Array.isArray(initialPlacements)) {
                 prevInitialFlag = initialPlacements[currentPlayer];
-                initialPlacements[currentPlayer] = true;
+                // Force correct phase for server-authoritative application.
+                // - During initial placements (seq <= stable player count): force flag false so handleClick uses placement rules.
+                // - After that: force flag true so handleClick uses ownership/increment rules.
+                initialPlacements[currentPlayer] = isInitialPhase ? false : true;
             }
             const applied = handleClick(r, c);
-            if (shouldOverrideInitial && Array.isArray(initialPlacements) && prevInitialFlag !== null) {
-                initialPlacements[currentPlayer] = prevInitialFlag;
-            }
+            if (Array.isArray(initialPlacements) && prevInitialFlag !== null) initialPlacements[currentPlayer] = prevInitialFlag;
             _applyingOnlineSeq = prevSeq;
             console.log(`[Buffer] handleClick returned ${applied} for seq=${nextSeq}`);
             if (applied) {
-                lastAppliedSeq = nextSeq;
+                lastAppliedSeq = nextSeq + 1;
                 window.lastAppliedSeq = lastAppliedSeq;
+                onlineTurnSeq = lastAppliedSeq;
+                _setOnlineTurnFromSeq();
                 console.log(`[Buffer] Updated lastAppliedSeq to ${lastAppliedSeq}`);
                 pendingMoves.delete(nextSeq);
                 appliedCount++;
@@ -506,8 +544,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Handle implicit echo confirmation: if we sent a move but haven't received our echo,
             // and we receive the opponent's next move, treat it as if our echo arrived
-            if (pendingEchoSeq !== null && seq === pendingEchoSeq + 1) {
-                console.log(`[Implicit Echo] Received opponent move seq=${seq} while waiting for echo seq=${pendingEchoSeq}. Confirming our move implicitly. (myOnlineIndex=${myOnlineIndex})`);
+            if (pendingEchoSeq !== null && seq >= pendingEchoSeq + 1) {
+                console.log(`[Implicit Echo] Received move seq=${seq} while waiting for echo seq=${pendingEchoSeq}. Confirming our move implicitly. (myOnlineIndex=${myOnlineIndex})`);
                 // Our move was accepted by the server (otherwise opponent couldn't have moved next)
                 // No need to apply locally again - we already did that when we sent it
                 pendingEchoSeq = null;
@@ -520,29 +558,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Now proceed to apply the opponent's move normally
             }
 
-            const expectedNext = (Number(lastAppliedSeq) || 0) + 1;
+            const expectedNext = (Number(lastAppliedSeq) || 0);
             if (seq === expectedNext) {
                 // Apply immediately, or buffer if UI is currently processing
                 const doApply = () => {
                     console.log(`[Move] Applying seq ${seq} from player ${fromIdx} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
-                    currentPlayer = Math.max(0, Math.min(playerCount - 1, fromIdx));
+                    const stableCount = (onlineGameActive && Array.isArray(onlinePlayers) && onlinePlayers.length)
+                        ? onlinePlayers.length
+                        : (Array.isArray(gameColors) && gameColors.length)
+                            ? gameColors.length
+                            : (Number(playerCount) || 0);
+                    const seqMover = stableCount > 0 ? (seq % stableCount) : fromIdx;
+                    currentPlayer = Math.max(0, Math.min(playerCount - 1, seqMover));
                     const prevSeq = _applyingOnlineSeq;
                     _applyingOnlineSeq = seq;
                     let prevInitialFlag = null;
-                    const shouldOverrideInitial = !_isInitialPlacementPhaseForSeq(seq);
-                    if (shouldOverrideInitial && Array.isArray(initialPlacements)) {
+                    const isInitialPhase = _isInitialPlacementPhaseForSeq(seq);
+                    if (Array.isArray(initialPlacements)) {
                         prevInitialFlag = initialPlacements[currentPlayer];
-                        initialPlacements[currentPlayer] = true;
+                        initialPlacements[currentPlayer] = isInitialPhase ? false : true;
                     }
                     const applied = handleClick(r, c);
-                    if (shouldOverrideInitial && Array.isArray(initialPlacements) && prevInitialFlag !== null) {
-                        initialPlacements[currentPlayer] = prevInitialFlag;
-                    }
+                    if (Array.isArray(initialPlacements) && prevInitialFlag !== null) initialPlacements[currentPlayer] = prevInitialFlag;
                     _applyingOnlineSeq = prevSeq;
                     console.log(`[Move] handleClick returned ${applied} for seq=${seq}`);
                     if (applied) {
-                        lastAppliedSeq = seq;
+                        lastAppliedSeq = seq + 1;
                         window.lastAppliedSeq = lastAppliedSeq;
+                        onlineTurnSeq = lastAppliedSeq;
+                        _setOnlineTurnFromSeq();
                         console.log(`[Move] Updated lastAppliedSeq to ${lastAppliedSeq}`);
                         // After applying, try to drain any subsequent buffered moves in order
                         tryApplyBufferedMoves();
@@ -615,8 +659,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (Number.isInteger(seq)) {
                 console.log(`[Move Ack] Received echo for seq=${seq}, current lastAppliedSeq=${lastAppliedSeq}, pendingEchoSeq=${pendingEchoSeq}, myOnlineIndex=${myOnlineIndex}`);
-                if (seq === lastAppliedSeq) {
-                    console.log(`[Move Ack] Seq ${seq} confirmed (own move, myOnlineIndex=${myOnlineIndex})`);
+                const expectedNextSeq = (Number(seq) || 0) + 1;
+                if ((Number(lastAppliedSeq) || 0) <= expectedNextSeq && (pendingEchoSeq === null || pendingEchoSeq === seq)) {
+                    // Our local apply already happened; ack confirms server committed it.
+                    // Ensure our 'next seq to apply' is at least seq+1.
+                    if ((Number(lastAppliedSeq) || 0) < expectedNextSeq) lastAppliedSeq = expectedNextSeq;
+                    onlineTurnSeq = lastAppliedSeq;
+                    _setOnlineTurnFromSeq();
+                    console.log(`[Move Ack] Seq ${seq} confirmed (own move, myOnlineIndex=${myOnlineIndex}). lastAppliedSeq now=${lastAppliedSeq}`);
                     pendingEchoSeq = null; // Clear pending echo
 
                     // Keep window.lastAppliedSeq in sync (used by ping).
@@ -629,7 +679,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     // Echo confirms our local apply; try drain any buffered moves
                     tryApplyBufferedMoves();
-                } else if (seq < lastAppliedSeq) {
+                } else if (seq + 1 < lastAppliedSeq) {
                     console.warn(`[Move Ack] Old echo seq ${seq}, already at ${lastAppliedSeq}. Ignoring. (myOnlineIndex=${myOnlineIndex})`);
                 } else {
                     // seq > lastAppliedSeq - should not happen in normal flow
@@ -667,6 +717,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 tryApplyBufferedMoves();
             }
         } catch { /* ignore */ }
+
+        // Ensure our local turn pointer matches our catch-up position.
+        onlineTurnSeq = Number(lastAppliedSeq) || 0;
+        _setOnlineTurnFromSeq();
         updateStartButtonState();
     });
     onlineConnection.on('error', (msg) => {
@@ -871,34 +925,89 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void}
      */
     function handleOnlineMove(row, col, source = 'unknown') {
-        if (!clientFullyInitialized) return;
-        if (isProcessing) return; // Prevent sending moves while processing
-        if (currentPlayer !== myOnlineIndex) return;
-        if (!isValidLocalMove(row, col, myOnlineIndex)) return;
+        if (!clientFullyInitialized) {
+            console.log(`[Online Move/${source}] blocked:not-initialized`, { row, col });
+            return;
+        }
+        if (isProcessing) {
+            console.log(`[Online Move/${source}] blocked:isProcessing`, { row, col, currentPlayer, myOnlineIndex, onlineTurnSeq, lastAppliedSeq });
+            return; // Prevent sending moves while processing
+        }
+        _setOnlineTurnFromSeq();
+        if (currentPlayer !== myOnlineIndex) {
+            console.log(`[Online Move/${source}] blocked:not-your-turn`, { row, col, currentPlayer, myOnlineIndex, onlineTurnSeq, lastAppliedSeq });
+            return;
+        }
+        const valid = isValidLocalMove(row, col, myOnlineIndex);
+        if (!valid) {
+            console.log(`[Online Move/${source}] blocked:invalid-local-move`, {
+                row,
+                col,
+                myOnlineIndex,
+                currentPlayer,
+                onlineTurnSeq,
+                lastAppliedSeq,
+                initialPlacements: Array.isArray(initialPlacements) ? initialPlacements.slice() : initialPlacements,
+                cell: (grid && grid[row] && grid[row][col]) ? { value: grid[row][col].value, player: grid[row][col].player } : null,
+                isInitialInvalid: (() => { try { return isInitialPlacementInvalid(row, col); } catch { return null; } })()
+            });
+            return;
+        }
 
         // Only act when connected; avoid local desync while offline
         if (!onlineConnection.isConnected()) {
+            console.log(`[Online Move/${source}] blocked:offline`, { row, col, currentPlayer, myOnlineIndex, onlineTurnSeq, lastAppliedSeq });
             showConnBanner('You are offline. Reconnecting…', 'error');
             onlineConnection.ensureConnected();
             return;
         }
 
-        // Apply move locally first
-        const moveApplied = handleClick(row, col);
+        console.log(`[Online Move/${source}] attempting`, {
+            row,
+            col,
+            myOnlineIndex,
+            currentPlayer,
+            onlineTurnSeq,
+            lastAppliedSeq,
+            pendingEchoSeq,
+            initialPlacements: Array.isArray(initialPlacements) ? initialPlacements.slice() : initialPlacements
+        });
+
+    // Apply move locally first (set seq context so handleClick logs include it)
+    const prevSeqCtx = _applyingOnlineSeq;
+    _applyingOnlineSeq = Number(onlineTurnSeq) || 0;
+    const moveApplied = handleClick(row, col);
+    _applyingOnlineSeq = prevSeqCtx;
         console.log(`[Online Move/${source}] handleClick returned ${moveApplied}, lastAppliedSeq before increment: ${lastAppliedSeq}`);
 
         if (moveApplied) {
-            lastAppliedSeq++;
-            pendingEchoSeq = lastAppliedSeq;
-            console.log(`[Online Move/${source}] Applied and incremented seq to ${lastAppliedSeq}, waiting for echo (myOnlineIndex=${myOnlineIndex})`);
+            // Sequencing model is 0-based and server expects seq === lastAppliedSeq (the next move to play).
+            const seqToSend = Number(onlineTurnSeq) || 0;
+            pendingEchoSeq = seqToSend;
+            console.log(`[Online Move/${source}] Applied; sending seq=${seqToSend}, waiting for echo (myOnlineIndex=${myOnlineIndex})`);
+            const stableOnlineCount = (onlineGameActive && Array.isArray(onlinePlayers) && onlinePlayers.length)
+                ? onlinePlayers.length
+                : (Number(playerCount) || 0);
+            const nextIndex = stableOnlineCount > 0 ? (((seqToSend + 1) % stableOnlineCount)) : (myOnlineIndex + 1);
+
+            // Advance our local notion of turn immediately.
+            // If the server rejects the move, catch-up/echo will correct us.
+            onlineTurnSeq = seqToSend + 1;
+            lastAppliedSeq = onlineTurnSeq;
+            window.lastAppliedSeq = lastAppliedSeq;
+            _setOnlineTurnFromSeq();
+
             onlineConnection.sendMove({
                 row,
                 col,
                 fromIndex: myOnlineIndex,
-                nextIndex: (myOnlineIndex + 1) % playerCount,
+                nextIndex,
                 color: activeColors()[myOnlineIndex],
-                seq: lastAppliedSeq
+                seq: seqToSend
             });
+            console.log(`[Online Move/${source}] sendMove called`, { row, col, seq: seqToSend, fromIndex: myOnlineIndex, nextIndex });
+        } else {
+            console.log(`[Online Move/${source}] handleClick rejected`, { row, col, myOnlineIndex, currentPlayer, onlineTurnSeq, lastAppliedSeq });
         }
     }
 
@@ -914,6 +1023,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = parseInt(el.dataset.row, 10);
         const col = parseInt(el.dataset.col, 10);
         if (Number.isInteger(row) && Number.isInteger(col)) {
+            console.log('[UI Click] cell', { row, col, onlineGameActive, isProcessing, currentPlayer, myOnlineIndex, onlineTurnSeq, lastAppliedSeq });
             // In online mode, use centralized handler
             if (onlineGameActive) {
                 handleOnlineMove(row, col, 'click');
@@ -1654,6 +1764,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let grid = [];
     let isProcessing = false;
     let performanceMode = false;
+    // Unified sequencing for local/practice games (0-based per game).
+    // In online games, lastAppliedSeq plays the role of "next seq to apply".
+    let localMoveSeq = 0;
     // Start with the first selected color (index 0) instead of a random player
     let currentPlayer = computeStartPlayerIndexProxy();
     let initialPlacements = Array(playerCount).fill(false);
@@ -1701,21 +1814,6 @@ document.addEventListener('DOMContentLoaded', () => {
             showMenuFor(targetMenu);
             exitFullscreenIfPossible();
         }, delayGameEnd);
-    }
-
-    /**
-     * Quick scan to determine if the given player has any valid initial placement.
-     * @param {number} playerIndex
-     * @returns {boolean}
-     */
-    function playerHasValidInitialPlacement(playerIndex) {
-        if (initialPlacements[playerIndex]) return true; // already placed
-        for (let r = 0; r < gridSize; r++) {
-            for (let c = 0; c < gridSize; c++) {
-                if (grid[r][c].value === 0 && !isInitialPlacementInvalid(r, c)) return true;
-            }
-        }
-        return false;
     }
 
     // Practice mode globals
@@ -1881,15 +1979,20 @@ document.addEventListener('DOMContentLoaded', () => {
         // reset game state arrays according to new sizes
         grid = [];
         initialPlacements = Array(playerCount).fill(false);
+    localMoveSeq = 0;
         gameWon = false;
         menuShownAfterWin = false;
         stopExplosionLoop();
         isProcessing = false;
         performanceMode = false;
-        // When creating a new level, start with the selected cycler color within the active palette
-        // For local games, gameColors is already rotated to start with the selected color, so currentPlayer should be 0
-        // For online games, computeStartPlayerIndex uses the server-assigned gameColors
-        currentPlayer = computeStartPlayerIndex(gameColors);
+        // Turn selection:
+        // - Local / practice: strictly seq-driven (seq % players)
+        // - Online: currentPlayer will be driven by received moves/handlers.
+        if (!onlineGameActive) {
+            currentPlayer = playerCount > 0 ? (localMoveSeq % playerCount) : 0;
+        } else {
+            currentPlayer = computeStartPlayerIndex(gameColors);
+        }
 
         // recompute invalid initial positions for new size
         invalidInitialPositions = computeInvalidInitialPositions(gridSize);
@@ -1941,6 +2044,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
+     * Advance local/practice turn using the unified seq model.
+     * (Online turns are controlled by server sequencing and are not advanced here.)
+     */
+    function advanceSeqTurn() {
+        if (onlineGameActive) return;
+        localMoveSeq = (Number(localMoveSeq) || 0) + 1;
+        currentPlayer = playerCount > 0 ? (localMoveSeq % playerCount) : 0;
+        document.body.className = activeColors()[currentPlayer];
+        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+        clearCellFocus();
+        updateGrid();
+        restorePlayerFocus();
+        maybeTriggerAIMove();
+    }
+
+    /**
      * Handle a user/AI click to place or increment a cell and schedule explosions.
      * @param {number} row - cell row.
      * @param {number} col - cell column.
@@ -1989,7 +2108,18 @@ document.addEventListener('DOMContentLoaded', () => {
         playerLastFocus[currentPlayer] = { row, col };
         const cellColor = getPlayerColor(row, col);
 
-        if (!initialPlacements[currentPlayer]) {
+        // Phase selection:
+        // - Local/practice: use per-player initialPlacements[] flags.
+        // - Online: phase is driven solely by the unified seq model.
+        const _onlineSeq = (typeof _applyingOnlineSeq === 'number' || typeof _applyingOnlineSeq === 'string')
+            ? Number(_applyingOnlineSeq)
+            : null;
+        const _onlinePlayersCount = Array.isArray(onlinePlayers) ? onlinePlayers.length : playerCount;
+        const _isInitialPlacementPhaseNow = onlineGameActive
+            ? (_onlineSeq !== null && Number.isFinite(_onlineSeq) && _onlineSeq < _onlinePlayersCount)
+            : !initialPlacements[currentPlayer];
+
+        if (_isInitialPlacementPhaseNow) {
             if (isInitialPlacementInvalid(row, col)) {
                 _logReject('initialPlacementInvalid');
                 return false;
@@ -2007,7 +2137,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Delay explosion processing and update the initial placement flag afterward
                 setTimeout(() => {
                     processExplosions();
+                    // Keep local/practice semantics (and any UI that relies on these flags)
+                    // but don't let them drive online phase decisions.
                     initialPlacements[currentPlayer] = true;
+                    // Re-highlight after the placement flag flips, so adjacency rules reflect the latest board state.
+                    try { highlightInvalidInitialPositions(); } catch { /* ignore */ }
                 }, delayExplosion);
                 return true;
             }
@@ -2021,9 +2155,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (grid[row][col].value >= cellExplodeThreshold) {
                     isProcessing = true;
-                    setTimeout(processExplosions, delayExplosion); //DELAY Explosions
+                    setTimeout(processExplosions, delayExplosion);
                 } else {
-                    switchPlayer();
+                    advanceSeqTurn();
                 }
                 return true;
             }
@@ -2099,7 +2233,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (initialPlacements.every(placement => placement)) {
                 checkWinCondition();
             }
-            if (!gameWon) switchPlayer();
+            if (!gameWon) advanceSeqTurn();
             // Process any buffered online moves that were waiting for UI to finish
             if (onlineGameActive && typeof tryApplyBufferedMoves === 'function') {
                 tryApplyBufferedMoves();
@@ -2367,36 +2501,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * Advance to the next active player and update body color; trigger AI in practice mode.
      * @returns {void} updates currentPlayer and grid visuals.
      */
-    function switchPlayer() {
-        // const prevIndex = currentPlayer; // unused after instant send
-
-
-        let tried = 0;
-        while (tried < playerCount) {
-            currentPlayer = (currentPlayer + 1) % playerCount;
-            // During initial-placement phase: if this player cannot place at all, end game
-            if (!initialPlacements[currentPlayer] && !playerHasValidInitialPlacement(currentPlayer)) {
-                scheduleGameEnd();
-                return;
-            }
-            // Accept this player if they either have cells (normal phase) or are still placing
-            if (!initialPlacements[currentPlayer] || hasCells(currentPlayer) || !initialPlacements.every(p => p)) break;
-            tried++;
-        }
-
-        document.body.className = activeColors()[currentPlayer];
-        // Update edge circle emphasis for new active player
-        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
-        clearCellFocus();
-        updateGrid();
-        // Restore focus to last focused cell for this player, if any
-        restorePlayerFocus();
-        // If in practice mode, possibly trigger AI move for non-human players
-        maybeTriggerAIMove();
-        // ...existing code...
-        // Online: sending move is now handled instantly in click/keyboard handler
-        // ...existing code...
-    }
+    // switchPlayer() replaced by seq-driven advanceSeqTurn().
 
     /**
      * Restore focus to the last cell focused by the current player, if any.
@@ -2422,16 +2527,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * Check if the player owns at least one visible cell on the board.
-     * @param {number} playerIndex - index within playerColors.
-     * @returns {boolean} true if any cell has the player's class.
-     */
-    function hasCells(playerIndex) {
-        return Array.from(document.querySelectorAll('.cell'))
-            .some(cell => cell.classList.contains(activeColors()[playerIndex]));
-    }
-
-    /**
      * Get the current owning color of a grid cell.
      * @param {number} row - cell row.
      * @param {number} col - cell column.
@@ -2453,12 +2548,35 @@ document.addEventListener('DOMContentLoaded', () => {
     function isValidLocalMove(row, col, playerIndex) {
         if (!Number.isInteger(row) || !Number.isInteger(col)) return false;
         if (!Array.isArray(initialPlacements) || playerIndex < 0 || playerIndex >= playerCount) return false;
-        // Initial placement for this player
-        if (!initialPlacements[playerIndex]) {
-            return grid[row][col].value === 0 && !isInitialPlacementInvalid(row, col);
+
+        // Online flow: initial placement phase is seq-driven, not per-player flag-driven.
+        // Otherwise we can incorrectly block valid placements when our local flags drift.
+        const isOnline = !!onlineGameActive;
+        const stableOnlineCount = isOnline && Array.isArray(onlinePlayers) && onlinePlayers.length
+            ? onlinePlayers.length
+            : (Number(playerCount) || 0);
+
+        const isOnlineInitialPhase = isOnline
+            ? (Number.isFinite(Number(onlineTurnSeq)) && stableOnlineCount > 0 ? Number(onlineTurnSeq) < stableOnlineCount : true)
+            : false;
+
+        const cellValue = grid[row][col].value;
+        const cellOwner = getPlayerColor(row, col);
+        const invalidByPlacementRules = isInitialPlacementInvalid(row, col);
+        const isOwnCell = cellValue > 0 && cellOwner === activeColors()[playerIndex];
+
+        if (isOnline) {
+            if (isOnlineInitialPhase) {
+                return cellValue === 0 && !invalidByPlacementRules;
+            }
+            return isOwnCell;
         }
-        // Regular move: must click own cell
-        return grid[row][col].value > 0 && getPlayerColor(row, col) === activeColors()[playerIndex];
+
+        // Local / practice flow: initial placement is per-player flag-driven.
+        if (!initialPlacements[playerIndex]) {
+            return cellValue === 0 && !invalidByPlacementRules;
+        }
+        return isOwnCell;
     }
 
     /**
@@ -2521,9 +2639,14 @@ document.addEventListener('DOMContentLoaded', () => {
             cell.classList.add('invalid');
         });
 
+        // Only show dynamic adjacency invalids during the initial placement phase.
+        // (Once all players have placed, adjacency restrictions no longer apply.)
+        const inInitialPlacementPhase = Array.isArray(initialPlacements) && initialPlacements.some(p => !p);
+        if (!inInitialPlacementPhase) return;
+
         for (let i = 0; i < gridSize; i++) {
             for (let j = 0; j < gridSize; j++) {
-                if (initialPlacements.some(placement => placement) && isInitialPlacementInvalid(i, j)) {
+                if (isInitialPlacementInvalid(i, j)) {
                     const cell = document.querySelector(`.cell[data-row="${i}"][data-col="${j}"]`);
                     cell.classList.add('invalid');
                 }
@@ -2634,7 +2757,7 @@ document.addEventListener('DOMContentLoaded', () => {
             debug: aiDebug
         });
         if (result.scheduleGameEnd) { scheduleGameEnd(); return; }
-        if (result.requireAdvanceTurn) { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; switchPlayer(); return; }
+    if (result.requireAdvanceTurn) { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; advanceSeqTurn(); return; }
         const move = result.chosen;
         if (aiDebug && result.debugInfo) {
             clearAIDebugUI();
@@ -2658,7 +2781,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
         }
-        if (move) handleClick(move.r, move.c); else { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; switchPlayer(); }
+    if (move) handleClick(move.r, move.c); else { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; advanceSeqTurn(); }
     }
 
     //#endregion

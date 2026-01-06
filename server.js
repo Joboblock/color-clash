@@ -740,10 +740,15 @@ wss.on('connection', (ws) => {
                 return;
             }
 
-            // Validate sequence number BEFORE turn validation (to handle retries of already-committed/pending moves)
+            // Unified sequencing model:
+            // - seq starts at 0 each game
+            // - expected mover is (seq % players.length)
+            // - server accepts only seq === currentSeq (new move) or seq < currentSeq (retry/echo)
+            //   where currentSeq is the next sequence number to be played.
             if (Number.isInteger(msg.seq)) {
-                const currentSeq = room.game.moveSeq || 0;
-                const expectedSeq = currentSeq + 1;
+                const currentSeq = Number.isInteger(room.game.moveSeq) ? room.game.moveSeq : 0;
+                const expectedSeq = currentSeq;
+                const expectedMover = players.length > 0 ? (expectedSeq % players.length) : 0;
 
                 if (msg.seq < expectedSeq) {
                     // Client is retrying an already-committed move (echo was lost)
@@ -781,18 +786,29 @@ wss.on('connection', (ws) => {
                 } else if (msg.seq > expectedSeq) {
                     return;
                 }
-                // msg.seq === expectedSeq - proceed
+                // msg.seq === expectedSeq - proceed (new move)
+
+                // Turn validation is seq-driven (single source of truth).
+                // Keep the old turnIndex check only as a compatibility safety net.
+                if (fromIndex !== expectedMover) {
+                    return;
+                }
             }
 
-            // Now validate turn (only for NEW moves, not retries)
-            if (fromIndex !== currentTurn) {
-                // Silenced - handled correctly by client retry logic
-                return;
+            // If client didn't send seq (legacy), fall back to turnIndex validation.
+            if (!Number.isInteger(msg.seq)) {
+                // Now validate turn (only for NEW moves, not retries)
+                if (fromIndex !== currentTurn) {
+                    // Silenced - handled correctly by client retry logic
+                    return;
+                }
             }
 
             // Accept move: compute next turn and prepare for broadcast
-            const newMoveSeq = (room.game.moveSeq || 0) + 1;
-            const nextIndex = (fromIndex + 1) % Math.max(1, players.length);
+            // room.game.moveSeq is the *next* sequence number to be played.
+            const newMoveSeq = Number.isInteger(room.game.moveSeq) ? room.game.moveSeq : 0;
+            const nextSeq = newMoveSeq + 1;
+            const nextIndex = players.length > 0 ? (nextSeq % players.length) : 0;
             // Derive the authoritative color for this player, if available
             const assignedColor = (room.game && Array.isArray(room.game.colors))
                 ? room.game.colors[fromIndex]
@@ -810,7 +826,7 @@ wss.on('connection', (ws) => {
             };
 
             // Commit immediately (server-authoritative)
-            room.game.moveSeq = newMoveSeq;
+            room.game.moveSeq = nextSeq;
             room.game.turnIndex = nextIndex;
 
             // Buffer for reconnect/catch-up (keep a rolling history)
@@ -876,6 +892,7 @@ wss.on('connection', (ws) => {
                     turnIndex: 0,
                     colors: assigned.slice(),
                     gridSize, // Store for potential retry
+                    // moveSeq is the next sequence number to be played (0-based)
                     moveSeq: 0,
                     recentMoves: []
                 };
@@ -954,7 +971,7 @@ wss.on('connection', (ws) => {
             }
             broadcastRoomList();
         } else if (msg.type === 'ping') {
-            // Ping now carries client's last received move sequence number.
+            // Ping now carries client's next expected move sequence number.
             // If the client is behind, send the missing moves.
             const { meta } = findSessionByWs(ws);
             const roomName = meta?.roomName;
@@ -978,7 +995,8 @@ wss.on('connection', (ws) => {
             let moves = [];
             try {
                 const recent = Array.isArray(room.game.recentMoves) ? room.game.recentMoves : [];
-                moves = recent.filter(m => Number.isInteger(m.seq) && m.seq > clientSeq);
+                // If clientSeq is the next expected seq, we need to send all moves with seq >= clientSeq.
+                moves = recent.filter(m => Number.isInteger(m.seq) && m.seq >= clientSeq);
             } catch { /* ignore */ }
 
             try {

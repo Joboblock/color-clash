@@ -753,6 +753,30 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch { /* ignore */ }
     });
 
+    // Server-side authoritative validation failure.
+    // This indicates a real mismatch between client and server state.
+    onlineConnection.on('desync', (msg) => {
+        try {
+            const detail = (msg && typeof msg === 'object')
+                ? `\nReason: ${msg.reason || 'unknown'}\nExpected seq: ${msg.expectedSeq}\nReceived seq: ${msg.receivedSeq}`
+                : '';
+            alert(`Desync detected. The server rejected a move as invalid.${detail}`);
+        } catch {
+            alert('Desync detected. The server rejected a move as invalid.');
+        }
+        // Stop trying to restore/continue this game session.
+        try { onlineConnection.setGameInactive(); } catch { /* ignore */ }
+        // Bring the player back to the online menu.
+        try {
+            gameWon = true;
+            stopExplosionLoop();
+            clearCellFocus();
+            setMenuParam('online', false);
+            showMenuFor('online');
+            exitFullscreenIfPossible();
+        } catch { /* ignore */ }
+    });
+
     let myJoinedRoom = null; // track the room this tab is in
     let myRoomKey = null; // track the room key for the joined room
     let myRoomMaxPlayers = null; // capacity of the room I'm in

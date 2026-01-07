@@ -8,6 +8,13 @@ import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import { WebSocketServer } from 'ws';
 import { APP_VERSION } from './src/version.js';
+import { createInitialRoomGridState, validateAndApplyMove } from './src/game/serverGridEngine.js';
+
+// Keep server rules aligned with client constants.
+// These values should match the client build-time constants used in `script.js`.
+const MAX_CELL_VALUE = 9;
+const INITIAL_PLACEMENT_VALUE = 3;
+const CELL_EXPLODE_THRESHOLD = 4;
 
 // Cloud Run provides PORT; default to 8080 locally
 const PORT = Number.parseInt(process.env.PORT || '', 10) || 8080;
@@ -661,6 +668,12 @@ wss.on('connection', (ws) => {
                     moveSeq: 0,
                     recentMoves: []
                 };
+                // Server-authoritative grid state
+                try {
+                    room.game.gridState = createInitialRoomGridState({ gridSize, playerColors: assigned });
+                } catch (err) {
+                    console.error('[Start] Failed to initialize grid state (solo host)', err);
+                }
                 if (!room._lastSeqByName) room._lastSeqByName = new Map();
                 const colorsPayload = { type: 'start_cnf', room: meta.roomName, players, gridSize, colors: assigned };
                 console.log(`[Start] ✅ Sending immediate start_cnf to solo host ${meta.name}`);
@@ -722,6 +735,19 @@ wss.on('connection', (ws) => {
             if (!room.game || !room.game.started) {
                 try { sendPayload(ws, { type: 'error', error: 'Game not started' }); } catch { /* ignore */ }
                 return;
+            }
+
+            // Ensure authoritative grid state exists for this room
+            if (!room.game.gridState) {
+                try {
+                    const gridSize = Number.isFinite(room.game.gridSize) ? room.game.gridSize : 3;
+                    const colors = Array.isArray(room.game.colors) ? room.game.colors.slice() : [];
+                    room.game.gridState = createInitialRoomGridState({ gridSize, playerColors: colors });
+                } catch (err) {
+                    console.error('[Move] Failed to initialize room grid state', err);
+                    try { sendPayload(ws, { type: 'error', error: 'Server failed to initialize game state' }); } catch { /* ignore */ }
+                    return;
+                }
             }
 
             const r = Number(msg.row);
@@ -800,6 +826,33 @@ wss.on('connection', (ws) => {
                 // Now validate turn (only for NEW moves, not retries)
                 if (fromIndex !== currentTurn) {
                     // Silenced - handled correctly by client retry logic
+                    return;
+                }
+            }
+
+            // --- Authoritative grid validation ---
+            // Only validate NEW moves (seq === expectedSeq). Retries (seq < expectedSeq) are handled above.
+            // Legacy moves without seq cannot be validated deterministically; they are accepted under turnIndex rules.
+            if (Number.isInteger(msg.seq)) {
+                const state = room.game.gridState;
+                const result = validateAndApplyMove(
+                    state,
+                    { seq: msg.seq, row: r, col: c, fromIndex },
+                    { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD }
+                );
+                if (!result.ok) {
+                    try {
+                        sendPayload(ws, {
+                            type: 'desync',
+                            error: 'Game desynced: invalid move rejected by server',
+                            reason: result.reason,
+                            expectedSeq: state && Number.isInteger(state.seq) ? state.seq : undefined,
+                            receivedSeq: msg.seq,
+                            row: r,
+                            col: c,
+                            fromIndex
+                        });
+                    } catch { /* ignore */ }
                     return;
                 }
             }
@@ -896,6 +949,12 @@ wss.on('connection', (ws) => {
                     moveSeq: 0,
                     recentMoves: []
                 };
+                // Server-authoritative grid state (ready before first move)
+                try {
+                    room.game.gridState = createInitialRoomGridState({ gridSize, playerColors: assigned.slice() });
+                } catch (err) {
+                    console.error('[Start Ack] Failed to initialize grid state', err);
+                }
                 if (!room._lastSeqByName) room._lastSeqByName = new Map();
                 console.log(`[Start Ack] 🎨 Colors assigned:`, { players, colors: assigned, gridSize });
 

@@ -450,8 +450,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const n = _stableOnlineCount();
         if (!n) return;
         currentPlayer = (Number(onlineTurnSeq) || 0) % n;
-        document.body.className = activeColors()[currentPlayer];
+        const _turnColor = activeColors()[currentPlayer];
+        document.body.className = _turnColor;
         try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+        // Keep cell highlighting in sync with the current turn.
+        // (Online mode doesn't use advanceSeqTurn(), so we refresh here.)
+        try { updateGrid(); } catch { /* ignore */ }
+
+        // Dev-only: helps confirm turn->color mapping when debugging online desync/visual issues.
+        try {
+            if (typeof window !== 'undefined' && window?.__CC_DEBUG_TURNS) {
+                console.debug('[Online Turn]', { onlineTurnSeq, currentPlayer, turnColor: _turnColor, myOnlineIndex, lastAppliedSeq });
+            }
+        } catch { /* ignore */ }
     }
 
     // When applying server/catch-up moves we want better diagnostics.
@@ -2338,7 +2349,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cell = document.querySelector(`.cell[data-row="${i}"][data-col="${j}"]`);
                 updateInnerCircle(cell, grid[i][j].player);
                 updateValueCircles(cell.querySelector('.inner-circle'), grid[i][j].value);
-                if (grid[i][j].player === activeColors()[currentPlayer]) {
+                // Visual turn highlight: the ACTIVE cells are those owned by the *current player's color*.
+                // NOTE: grid[i][j].player stores the owning color key (e.g. 'red'),
+                // while activeColors()[currentPlayer] is the color key of the player whose turn it is.
+                // The previous comparison mistakenly compared owner -> currentColor in the wrong direction,
+                // causing only the first player's cells to be treated as active.
+                if (grid[i][j].player && grid[i][j].player === activeColors()[currentPlayer]) {
                     cell.className = `cell ${grid[i][j].player}`;
                 } else if (grid[i][j].player) {
                     cell.className = `cell inactive ${grid[i][j].player}`;

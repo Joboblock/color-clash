@@ -497,6 +497,18 @@ export class OnlineConnection {
 				case 'joined':
 					break;
 				case 'move': {
+					try {
+						if (typeof window !== 'undefined' && window?.__CC_DEBUG_TURNS) {
+							console.debug('[Client][Recv Move]', {
+								seq: msg.seq,
+								fromIndex: msg.fromIndex,
+								nextIndex: msg.nextIndex,
+								row: msg.row,
+								col: msg.col,
+								color: msg.color
+							});
+						}
+					} catch { /* ignore */ }
 					// Cancel pending move retries when we receive any move
 					// This includes our own echo (confirmation) or other players' moves
 					const moveSeq = Number(msg.seq);
@@ -524,6 +536,18 @@ export class OnlineConnection {
 					break;
 				}
 				case 'move_ack': {
+					try {
+						if (typeof window !== 'undefined' && window?.__CC_DEBUG_TURNS) {
+							console.debug('[Client][Recv MoveAck]', {
+								seq: msg.seq,
+								fromIndex: msg.fromIndex,
+								nextIndex: msg.nextIndex,
+								row: msg.row,
+								col: msg.col,
+								color: msg.color
+							});
+						}
+					} catch { /* ignore */ }
 					// Server confirmation that our move was accepted (echo)
 					const moveSeq = Number(msg.seq);
 					if (Number.isInteger(moveSeq)) {
@@ -661,11 +685,11 @@ export class OnlineConnection {
 	_sendPayload(obj) {
 		// Simulate packet loss
 		const type = obj && typeof obj === 'object' ? obj.type : undefined;
-		if (Math.random() < 0.25) {
+		if (Math.random() < 0.025) {
 			console.warn('[Client] 🔥 Simulated packet loss:', type, obj);
 			return;
 		}
-		if (Math.random() < 0.25) {
+		if (Math.random() < 0.025) {
 			console.warn('[Client] 🕒 Simulated packet delay (5s):', type, obj);
 			setTimeout(() => {
 				this._sendPayloadDelayed(obj);
@@ -837,6 +861,11 @@ export class OnlineConnection {
 	 * @param {{row:number, col:number, fromIndex:number, nextIndex:number, color:string, seq?:number}} move
 	 */
 	sendMove({ row, col, fromIndex, nextIndex, color, seq }) {
+		try {
+			if (typeof window !== 'undefined' && window?.__CC_DEBUG_TURNS) {
+				console.debug('[Client][Send Move]', { row, col, fromIndex, nextIndex, color, seq });
+			}
+		} catch { /* ignore */ }
 		// Block moves while restoring session - queue them for later
 		if (this._isRestoringSession) {
 			console.log('[Client] 🚫 Move blocked: session restoration in progress, queueing move');
@@ -846,6 +875,11 @@ export class OnlineConnection {
 		const moveKey = `move:${fromIndex}:${row}:${col}`;
 		const packet = { type: 'move', row, col, fromIndex, nextIndex, color };
 		if (Number.isInteger(seq)) packet.seq = seq;
+		try {
+			if (typeof window !== 'undefined' && window?.__CC_DEBUG_TURNS) {
+				console.debug('[Client][Send Payload]', packet);
+			}
+		} catch { /* ignore */ }
 		this._sendWithRetry(moveKey, packet, 'move');
 	}
 

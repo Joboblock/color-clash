@@ -9,12 +9,10 @@ import { stat } from 'fs/promises';
 import { WebSocketServer } from 'ws';
 import { APP_VERSION } from './src/version.js';
 import { createInitialRoomGridState, validateAndApplyMove } from './src/game/serverGridEngine.js';
+import { computeAliveMask, nextAliveIndex } from './src/game/turnCalc.js';
+import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD } from './src/config/index.js';
 
-// Keep server rules aligned with client constants.
-// These values should match the client build-time constants used in `script.js`.
-const MAX_CELL_VALUE = 9;
-const INITIAL_PLACEMENT_VALUE = 3;
-const CELL_EXPLODE_THRESHOLD = 4;
+// Keep server rules aligned with client constants (single source of truth).
 
 // Cloud Run provides PORT; default to 8080 locally
 const PORT = Number.parseInt(process.env.PORT || '', 10) || 8080;
@@ -138,11 +136,11 @@ const connectionMeta = new Map();
 function sendPayload(ws, payload) {
     // Simulate packet loss
     const type = payload && typeof payload === 'object' ? payload.type : undefined;
-    if (Math.random() < 0.25) {
+    if (Math.random() < 0.025) {
         console.warn('[Server] 🔥 Simulated packet loss:', type, payload);
         return;
     }
-    if (Math.random() < 0.25) {
+    if (Math.random() < 0.025) {
         console.warn('[Server] 🕒 Simulated packet delay (5s):', type, payload);
         setTimeout(() => {
             sendPayloadDelayed(ws, payload);
@@ -767,14 +765,32 @@ wss.on('connection', (ws) => {
             }
 
             // Unified sequencing model:
-            // - seq starts at 0 each game
-            // - expected mover is (seq % players.length)
+            // - seq starts at 0 each game and increments by exactly 1 per accepted move
+            // - during initial placements: strict seq % players.length
+            // - after that: expected mover is determined by room.game.turnIndex (alive-aware)
             // - server accepts only seq === currentSeq (new move) or seq < currentSeq (retry/echo)
-            //   where currentSeq is the next sequence number to be played.
+            //   where currentSeq is the next move number to be played.
             if (Number.isInteger(msg.seq)) {
                 const currentSeq = Number.isInteger(room.game.moveSeq) ? room.game.moveSeq : 0;
                 const expectedSeq = currentSeq;
-                const expectedMover = players.length > 0 ? (expectedSeq % players.length) : 0;
+                let expectedMover = players.length > 0 ? (expectedSeq % players.length) : 0;
+                // Initial placement is always seq-driven. After that, use turnIndex as the single source of truth.
+                if (expectedSeq >= players.length) {
+                    expectedMover = Number.isInteger(room.game.turnIndex) ? room.game.turnIndex : expectedMover;
+                }
+
+                if (room.game.gridState && room.game.gridState.grid && Array.isArray(room.game.colors)) {
+                    const alive = computeAliveMask(room.game.gridState.grid, room.game.colors, expectedSeq);
+                    console.log('[Server][Turn] Pre-validate', {
+                        room: meta.roomName,
+                        expectedSeq,
+                        expectedMover,
+                        alive,
+                        playerCount: players.length,
+                        colors: room.game.colors,
+                        turnIndex: room.game.turnIndex
+                    });
+                }
 
                 if (msg.seq < expectedSeq) {
                     // Client is retrying an already-committed move (echo was lost)
@@ -835,16 +851,36 @@ wss.on('connection', (ws) => {
             // Legacy moves without seq cannot be validated deterministically; they are accepted under turnIndex rules.
             if (Number.isInteger(msg.seq)) {
                 const state = room.game.gridState;
+                console.log('[Server][Move Validation] Incoming move:', {
+                    seq: msg.seq, row: r, col: c, fromIndex,
+                    expectedSeq: state && Number.isInteger(state.seq) ? state.seq : undefined
+                });
+                if (state && state.grid) {
+                    console.log('[Server][Move Validation] Current grid:');
+                    for (let row of state.grid) {
+                        console.log(JSON.stringify(row));
+                    }
+                }
                 const result = validateAndApplyMove(
                     state,
                     { seq: msg.seq, row: r, col: c, fromIndex },
                     { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD }
                 );
                 if (!result.ok) {
+                    console.log('[Server][Move Validation] Move rejected:', {
+                        reason: result.reason,
+                        seq: msg.seq, row: r, col: c, fromIndex
+                    });
+                    if (state && state.grid) {
+                        console.log('[Server][Move Validation] Grid at rejection:');
+                        for (let row of state.grid) {
+                            console.log(JSON.stringify(row));
+                        }
+                    }
                     try {
                         sendPayload(ws, {
-                            type: 'desync',
-                            error: 'Game desynced: invalid move rejected by server',
+                            type: 'error',
+                            error: 'Invalid move rejected by server',
                             reason: result.reason,
                             expectedSeq: state && Number.isInteger(state.seq) ? state.seq : undefined,
                             receivedSeq: msg.seq,
@@ -854,14 +890,51 @@ wss.on('connection', (ws) => {
                         });
                     } catch { /* ignore */ }
                     return;
+                } else {
+                    console.log('[Server][Move Validation] Move accepted.');
                 }
             }
 
             // Accept move: compute next turn and prepare for broadcast
-            // room.game.moveSeq is the *next* sequence number to be played.
+            // moveSeq is the *next* move number to be played.
             const newMoveSeq = Number.isInteger(room.game.moveSeq) ? room.game.moveSeq : 0;
             const nextSeq = newMoveSeq + 1;
-            const nextIndex = players.length > 0 ? (nextSeq % players.length) : 0;
+
+            // Compute nextIndex from the previous turnIndex (or seq-based for initial placement),
+            // skipping eliminated players based on current grid.
+            let nextIndex = players.length > 0 ? (nextSeq % players.length) : 0;
+            if (players.length > 0) {
+                if (nextSeq >= players.length) {
+                    const base = Number.isInteger(room.game.turnIndex) ? room.game.turnIndex : (newMoveSeq % players.length);
+                    const candidate = (base + 1) % players.length;
+                    nextIndex = candidate;
+                    if (room.game.gridState && room.game.gridState.grid && Array.isArray(room.game.colors)) {
+                        const alive = computeAliveMask(room.game.gridState.grid, room.game.colors, nextSeq);
+                        console.log('[Server][Turn] Post-apply', {
+                            room: meta.roomName,
+                            newMoveSeq,
+                            nextSeq,
+                            baseTurnIndex: base,
+                            candidate,
+                            alive,
+                            playerCount: players.length,
+                            colors: room.game.colors
+                        });
+                        if (alive.filter(Boolean).length > 1 && !alive[nextIndex]) {
+                            const next = nextAliveIndex(alive, nextIndex + 1);
+                            if (next !== null) nextIndex = next;
+                        }
+                    }
+                }
+            }
+
+            console.log('[Server][Turn] Commit', {
+                room: meta.roomName,
+                committedMoveSeq: newMoveSeq,
+                committedNextSeq: nextSeq,
+                committedTurnIndex: nextIndex,
+                mover: fromIndex
+            });
             // Derive the authoritative color for this player, if available
             const assignedColor = (room.game && Array.isArray(room.game.colors))
                 ? room.game.colors[fromIndex]

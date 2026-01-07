@@ -936,31 +936,17 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function handleOnlineMove(row, col, source = 'unknown') {
         if (!clientFullyInitialized) {
-            console.log(`[Online Move/${source}] blocked:not-initialized`, { row, col });
             return;
         }
         if (isProcessing) {
-            console.log(`[Online Move/${source}] blocked:isProcessing`, { row, col, currentPlayer, myOnlineIndex, onlineTurnSeq, lastAppliedSeq });
             return; // Prevent sending moves while processing
         }
         _setOnlineTurnFromSeq();
         if (currentPlayer !== myOnlineIndex) {
-            console.log(`[Online Move/${source}] blocked:not-your-turn`, { row, col, currentPlayer, myOnlineIndex, onlineTurnSeq, lastAppliedSeq });
             return;
         }
         const valid = isValidLocalMove(row, col, myOnlineIndex);
         if (!valid) {
-            console.log(`[Online Move/${source}] blocked:invalid-local-move`, {
-                row,
-                col,
-                myOnlineIndex,
-                currentPlayer,
-                onlineTurnSeq,
-                lastAppliedSeq,
-                initialPlacements: Array.isArray(initialPlacements) ? initialPlacements.slice() : initialPlacements,
-                cell: (grid && grid[row] && grid[row][col]) ? { value: grid[row][col].value, player: grid[row][col].player } : null,
-                isInitialInvalid: (() => { try { return isInitialPlacementInvalid(row, col); } catch { return null; } })()
-            });
             return;
         }
 
@@ -1033,7 +1019,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = parseInt(el.dataset.row, 10);
         const col = parseInt(el.dataset.col, 10);
         if (Number.isInteger(row) && Number.isInteger(col)) {
-            console.log('[UI Click] cell', { row, col, onlineGameActive, isProcessing, currentPlayer, myOnlineIndex, onlineTurnSeq, lastAppliedSeq });
             // In online mode, use centralized handler
             if (onlineGameActive) {
                 handleOnlineMove(row, col, 'click');

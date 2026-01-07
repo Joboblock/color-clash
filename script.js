@@ -7,6 +7,7 @@ import { mainPage } from './src/pages/main.js';
 
 // General utilities (merged)
 import { sanitizeName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
+import { computeInvalidInitialPositions as calcInvalidInitialPositions, isInitialPlacementInvalid as calcIsInitialPlacementInvalid, getCellsToExplode as calcGetCellsToExplode, computeExplosionTargets as calcComputeExplosionTargets } from './src/game/gridCalc.js';
 import { playerColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './src/game/palette.js';
 import { computeAIMove } from './src/ai/engine.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
@@ -2222,16 +2223,7 @@ document.addEventListener('DOMContentLoaded', () => {
             stopExplosionLoop();
             return;
         }
-        let cellsToExplode = [];
-
-        // Identify cells that need to explode
-        for (let i = 0; i < gridSize; i++) {
-            for (let j = 0; j < gridSize; j++) {
-                if (grid[i][j].value >= cellExplodeThreshold) {
-                    cellsToExplode.push({ row: i, col: j, player: grid[i][j].player, value: grid[i][j].value });
-                }
-            }
-        }
+        const cellsToExplode = calcGetCellsToExplode(grid, gridSize, cellExplodeThreshold);
 
         // If no cells need to explode, end processing
         if (cellsToExplode.length === 0) {
@@ -2260,36 +2252,15 @@ document.addEventListener('DOMContentLoaded', () => {
             grid[row][col].value = 0;
             updateCell(row, col, 0, '', true);
 
-            let extraBackToOrigin = 0; // To track how many split-offs go out of bounds
-            const targetCells = [];
-
             // Determine if this explosion is from an initial placement
             const isInitialPlacement = !initialPlacements.every(placement => placement);
-
-            // Check all four directions
-            if (row > 0) {
-                targetCells.push({ row: row - 1, col, value: explosionValue });
-            } else if (isInitialPlacement) {
-                extraBackToOrigin++;  // Out of bounds (top)
-            }
-
-            if (row < gridSize - 1) {
-                targetCells.push({ row: row + 1, col, value: explosionValue });
-            } else if (isInitialPlacement) {
-                extraBackToOrigin++;  // Out of bounds (bottom)
-            }
-
-            if (col > 0) {
-                targetCells.push({ row, col: col - 1, value: explosionValue });
-            } else if (isInitialPlacement) {
-                extraBackToOrigin++;  // Out of bounds (left)
-            }
-
-            if (col < gridSize - 1) {
-                targetCells.push({ row, col: col + 1, value: explosionValue });
-            } else if (isInitialPlacement) {
-                extraBackToOrigin++;  // Out of bounds (right)
-            }
+            const { targets: targetCells, extraBackToOrigin } = calcComputeExplosionTargets(
+                gridSize,
+                row,
+                col,
+                explosionValue,
+                isInitialPlacement
+            );
 
             // Animate valid explosions
             animateInnerCircles(document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`), targetCells, player, explosionValue);
@@ -2597,21 +2568,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {boolean} true if placement is invalid.
      */
     function isInitialPlacementInvalid(row, col) {
-        if (invalidInitialPositions.some(pos => pos.r === row && pos.c === col)) {
-            return true;
-        }
-
-        const adjacentPositions = [
-            { r: row - 1, c: col },
-            { r: row + 1, c: col },
-            { r: row, c: col - 1 },
-            { r: row, c: col + 1 }
-        ];
-
-        return adjacentPositions.some(pos =>
-            pos.r >= 0 && pos.r < gridSize && pos.c >= 0 && pos.c < gridSize &&
-            grid[pos.r][pos.c].player !== ''
-        );
+        return calcIsInitialPlacementInvalid(grid, gridSize, invalidInitialPositions, row, col);
     }
 
     /**
@@ -2620,22 +2577,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {Array<{r:number,c:number}>} disallowed initial placement cells.
      */
     function computeInvalidInitialPositions(size) {
-        const positions = [];
-        if (size % 2 === 0) {
-            const middle = size / 2;
-            positions.push({ r: middle - 1, c: middle - 1 });
-            positions.push({ r: middle - 1, c: middle });
-            positions.push({ r: middle, c: middle - 1 });
-            positions.push({ r: middle, c: middle });
-        } else {
-            const middle = Math.floor(size / 2);
-            positions.push({ r: middle, c: middle });
-            positions.push({ r: middle - 1, c: middle });
-            positions.push({ r: middle + 1, c: middle });
-            positions.push({ r: middle, c: middle - 1 });
-            positions.push({ r: middle, c: middle + 1 });
-        }
-        return positions;
+        return calcInvalidInitialPositions(size);
     }
 
     /**

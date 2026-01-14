@@ -65,6 +65,64 @@ export function nextAliveIndex(alive, startIndex) {
 }
 
 /**
+ * Advance a persistent turn index to the next alive player.
+ *
+ * This is the local-game model: instead of deriving the current player from the
+ * global turn sequence, the game state should hold a `turnIndex` representing
+ * "who is up next".
+ *
+ * Rules:
+ * - candidate = (turnIndex + 1) % playerCount
+ * - while candidate is eliminated and more than one player is alive,
+ *   candidate = (candidate + 1) % playerCount
+ *
+ * @param {GridCell[][]} grid
+ * @param {string[]} playerColors
+ * @param {number} turnIndex - current player's index (the one who just played)
+ * @param {number} seq - current move sequence (0-based; next to play)
+ * @returns {{nextIndex:number|null, alive:boolean[]}}
+ */
+export function nextTurnIndexAlive(grid, playerColors, turnIndex, seq) {
+    const n = playerColors.length;
+    if (n <= 0) return { nextIndex: null, alive: [] };
+
+    const alive = computeAliveMask(grid, playerColors, seq);
+    const aliveCount = alive.filter(Boolean).length;
+    if (aliveCount === 0) return { nextIndex: null, alive };
+    if (aliveCount === 1) {
+        const only = alive.findIndex(Boolean);
+        return { nextIndex: only >= 0 ? only : null, alive };
+    }
+
+    // Normal case: advance from the current player to the next alive.
+    let candidate = ((Number(turnIndex) | 0) + 1) % n;
+    if (!alive[candidate]) {
+        const next = nextAliveIndex(alive, candidate + 1);
+        if (next !== null) candidate = next;
+    }
+    return { nextIndex: candidate, alive };
+}
+
+/**
+ * Local-game helper: given the current turn index (the player who is about to play),
+ * compute the next turn index after one move is applied.
+ *
+ * This matches the requested behavior:
+ * next = (current + 1) mod playerCount
+ * while next is eliminated: next = (next + 1) mod playerCount
+ *
+ * @param {GridCell[][]} grid
+ * @param {string[]} playerColors
+ * @param {number} currentTurnIndex
+ * @param {number} nextSeq - sequence number after the move was applied
+ * @returns {number|null}
+ */
+export function advanceTurnIndex(grid, playerColors, currentTurnIndex, nextSeq) {
+    const { nextIndex } = nextTurnIndexAlive(grid, playerColors, currentTurnIndex, nextSeq);
+    return nextIndex;
+}
+
+/**
  * Map a "turn counter" (0..infinity) to a player index, skipping eliminated players.
  *
  * Contract:
@@ -93,21 +151,36 @@ export function playerIndexForTurnWithSkips(grid, playerColors, turn) {
     const aliveCount = alive.filter(Boolean).length;
     if (aliveCount === 0) return { playerIndex: null, skips: 0, alive };
 
-    // After initial placement the next mover is computed from the previous mover.
-    // We approximate "previous mover" as (t-1) % n, then advance to next alive.
-    // NOTE: This is consistent as long as both server and client update turns
-    // using the *same* rule after each applied move.
-    const prevApprox = (t - 1) % n;
-    const playerIndex = nextAliveIndex(alive, prevApprox + 1);
-    if (playerIndex === null) return { playerIndex: null, skips: 0, alive };
-
-    // skips: how many dead players we stepped over from prevApprox+1 to playerIndex
+    // Local game model: maintain a persistent turnIndex ("who is up next")
+    // and advance it by +1 mod n, skipping eliminated players.
+    //
+    // This helper maps a global counter `t` to a player index by simulating that
+    // process from the end of initial placement.
+    // Start state: after the last initial placement (t === n), player 0 is up next.
+    let idx = 0;
     let skips = 0;
-    for (let i = 1; i < n; i++) {
-        const idx = (prevApprox + i) % n;
-        if (idx === playerIndex) break;
-        if (!alive[idx]) skips++;
+    for (let seq = n; seq <= t; seq++) {
+        // seq here is "next to play" in computeAliveMask terms.
+        if (seq === n) {
+            // At t === n, we want player 0.
+            continue;
+        }
+        const { nextIndex, alive: aliveNow } = nextTurnIndexAlive(grid, playerColors, idx, seq);
+        if (nextIndex === null) return { playerIndex: null, skips: 0, alive: aliveNow };
+
+        // Estimate skips for this step.
+        let stepSkips = 0;
+        for (let step = 1; step < n; step++) {
+            const candidate = (idx + step) % n;
+            if (candidate === nextIndex) break;
+            if (!aliveNow[candidate]) stepSkips++;
+        }
+        skips += stepSkips;
+        idx = nextIndex;
     }
+
+    const playerIndex = idx;
+    if (playerIndex === null) return { playerIndex: null, skips: 0, alive };
 
     return { playerIndex, skips, alive };
 }

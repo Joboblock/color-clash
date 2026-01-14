@@ -9,7 +9,7 @@ import { mainPage } from './src/pages/main.js';
 import { sanitizeName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
 import { computeInvalidInitialPositions as calcInvalidInitialPositions, isInitialPlacementInvalid as calcIsInitialPlacementInvalid, getCellsToExplode as calcGetCellsToExplode, computeExplosionTargets as calcComputeExplosionTargets } from './src/game/gridCalc.js';
 import { playerColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './src/game/palette.js';
-import { computeAliveMask, nextAliveIndex } from './src/game/turnCalc.js';
+import { advanceTurnIndex, computeAliveMask, nextAliveIndex } from './src/game/turnCalc.js';
 import { computeAIMove } from './src/ai/engine.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
 // Edge circles component
@@ -1856,6 +1856,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let localMoveSeq = 0;
     // Start with the first selected color (index 0) instead of a random player
     let currentPlayer = computeStartPlayerIndexProxy();
+    // Local/practice turn state: persistent index of the player whose turn it is.
+    // During initial placement, we keep strict seq-driven order.
+    // After initial placement, we advance via turnCalc.advanceTurnIndex() to skip eliminated players.
+    let localTurnIndex = 0;
     let initialPlacements = Array(playerCount).fill(false);
     // Track last focused cell per player: { [playerIndex]: {row, col} }
     let playerLastFocus = Array(playerCount).fill(null);
@@ -2067,6 +2071,7 @@ document.addEventListener('DOMContentLoaded', () => {
         grid = [];
         initialPlacements = Array(playerCount).fill(false);
     localMoveSeq = 0;
+    localTurnIndex = 0;
         gameWon = false;
         menuShownAfterWin = false;
         stopExplosionLoop();
@@ -2076,7 +2081,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // - Local / practice: strictly seq-driven (seq % players)
         // - Online: currentPlayer will be driven by received moves/handlers.
         if (!onlineGameActive) {
-            currentPlayer = playerCount > 0 ? (localMoveSeq % playerCount) : 0;
+			// Initial placement starts at player 0.
+            currentPlayer = playerCount > 0 ? 0 : 0;
         } else {
             currentPlayer = computeStartPlayerIndex(gameColors);
         }
@@ -2136,8 +2142,23 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function advanceSeqTurn() {
         if (onlineGameActive) return;
-        localMoveSeq = (Number(localMoveSeq) || 0) + 1;
-        currentPlayer = playerCount > 0 ? (localMoveSeq % playerCount) : 0;
+        const prevSeq = Number(localMoveSeq) || 0;
+        const nextSeq = prevSeq + 1;
+        localMoveSeq = nextSeq;
+
+        if (playerCount <= 0) {
+            currentPlayer = 0;
+        } else if (nextSeq < playerCount) {
+            // Initial placement: strict order.
+            localTurnIndex = nextSeq % playerCount;
+            currentPlayer = localTurnIndex;
+        } else {
+            // After initial placement: persistent turnIndex with elimination skipping.
+            // `currentPlayer` just played; advance to the next alive player.
+            const nextIndex = advanceTurnIndex(grid, activeColors(), currentPlayer, nextSeq);
+            localTurnIndex = (nextIndex === null) ? currentPlayer : nextIndex;
+            currentPlayer = localTurnIndex;
+        }
         document.body.className = activeColors()[currentPlayer];
         try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
         clearCellFocus();

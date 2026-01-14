@@ -796,7 +796,7 @@ wss.on('connection', (ws) => {
                     // Client is retrying an already-committed move (echo was lost)
                     // Check if we have this move in recent moves buffer
                     const recentMove = (room.game.recentMoves || []).find(m =>
-                        m.seq === msg.seq && m.row === r && m.col === c && m.fromIndex === fromIndex
+                        m.seq === msg.seq && m.row === r && m.col === c
                     );
 
                     if (recentMove) {
@@ -806,8 +806,6 @@ wss.on('connection', (ws) => {
                             room: meta.roomName,
                             row: recentMove.row,
                             col: recentMove.col,
-                            fromIndex: recentMove.fromIndex,
-                            nextIndex: recentMove.nextIndex,
                             color: recentMove.color,
                             seq: recentMove.seq
                         };
@@ -945,8 +943,6 @@ wss.on('connection', (ws) => {
                 room: meta.roomName,
                 row: r,
                 col: c,
-                fromIndex,
-                nextIndex,
                 color: assignedColor,
                 seq: newMoveSeq
             };
@@ -957,7 +953,7 @@ wss.on('connection', (ws) => {
 
             // Buffer for reconnect/catch-up (keep a rolling history)
             try {
-                const moveRecord = { seq: newMoveSeq, room: meta.roomName, row: r, col: c, fromIndex, nextIndex, color: assignedColor };
+                const moveRecord = { seq: newMoveSeq, room: meta.roomName, row: r, col: c, color: assignedColor };
                 if (!Array.isArray(room.game.recentMoves)) room.game.recentMoves = [];
                 const bufferSize = 256; // keep enough history for ping-based catch-up
                 room.game.recentMoves.push(moveRecord);

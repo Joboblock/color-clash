@@ -432,7 +432,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     // Ordered move buffer: store out-of-order or deferred moves by sequence
-    const pendingMoves = new Map(); // seq -> { r, c, fromIdx, nextIdx? }
+    const pendingMoves = new Map(); // seq -> { r, c }
 
     // Online turn sequencing (client-maintained).
     // This is the local single source of truth for whose turn it is in online games.
@@ -515,15 +515,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const m = pendingMoves.get(nextSeq);
             if (!m) break;
             // Apply this buffered move
-            const { r, c, fromIdx, nextIdx } = m;
-            console.log(`[Buffer] Draining seq ${nextSeq} from player ${fromIdx} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
-            const stableCount = (onlineGameActive && Array.isArray(onlinePlayers) && onlinePlayers.length)
-                ? onlinePlayers.length
-                : (Array.isArray(gameColors) && gameColors.length)
-                    ? gameColors.length
-                    : (Number(playerCount) || 0);
-            const seqMover = stableCount > 0 ? (nextSeq % stableCount) : fromIdx;
-            currentPlayer = Math.max(0, Math.min(playerCount - 1, seqMover));
+            const { r, c } = m;
+            console.log(`[Buffer] Draining seq ${nextSeq} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
+            // Moves no longer include fromIndex/nextIndex; derive currentPlayer from our local seq pointer.
+            onlineTurnSeq = nextSeq;
+            _setOnlineTurnFromSeq();
             // Apply with seq context and seq-based placement-phase forcing.
             const prevSeq = _applyingOnlineSeq;
             _applyingOnlineSeq = nextSeq;
@@ -543,18 +539,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (applied) {
                 lastAppliedSeq = nextSeq + 1;
                 window.lastAppliedSeq = lastAppliedSeq;
-                // Prefer server-provided nextIndex for elimination skipping.
-                if (Number.isInteger(nextIdx)) {
-                    currentPlayer = Math.max(0, Math.min(playerCount - 1, Number(nextIdx)));
-                    onlineTurnSeq = lastAppliedSeq;
-                    const _turnColor = activeColors()[currentPlayer];
-                    document.body.className = _turnColor;
-                    try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
-                    try { updateGrid(); } catch { /* ignore */ }
-                } else {
-                    onlineTurnSeq = lastAppliedSeq;
-                    _setOnlineTurnFromSeq();
-                }
+                onlineTurnSeq = lastAppliedSeq;
+                _setOnlineTurnFromSeq();
                 console.log(`[Buffer] Updated lastAppliedSeq to ${lastAppliedSeq}`);
                 pendingMoves.delete(nextSeq);
                 appliedCount++;
@@ -580,8 +566,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             const seq = Number(msg.seq);
-            const r = Number(msg.row), c = Number(msg.col); const fromIdx = Number(msg.fromIndex);
-            const nextIdxFromServer = Number.isInteger(Number(msg.nextIndex)) ? Number(msg.nextIndex) : null;
+            const r = Number(msg.row), c = Number(msg.col);
             if (!Number.isInteger(r) || !Number.isInteger(c)) {
                 console.warn(`[Move Handler] Invalid coordinates (myOnlineIndex=${myOnlineIndex})`);
                 return;
@@ -613,14 +598,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (seq === expectedNext) {
                 // Apply immediately, or buffer if UI is currently processing
                 const doApply = () => {
-                    console.log(`[Move] Applying seq ${seq} from player ${fromIdx} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
-                    const stableCount = (onlineGameActive && Array.isArray(onlinePlayers) && onlinePlayers.length)
-                        ? onlinePlayers.length
-                        : (Array.isArray(gameColors) && gameColors.length)
-                            ? gameColors.length
-                            : (Number(playerCount) || 0);
-                    const seqMover = stableCount > 0 ? (seq % stableCount) : fromIdx;
-                    currentPlayer = Math.max(0, Math.min(playerCount - 1, seqMover));
+                    console.log(`[Move] Applying seq ${seq} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
+                    // Moves no longer include fromIndex/nextIndex; derive currentPlayer from local seq pointer.
+                    onlineTurnSeq = seq;
+                    _setOnlineTurnFromSeq();
                     const prevSeq = _applyingOnlineSeq;
                     _applyingOnlineSeq = seq;
                     let prevInitialFlag = null;
@@ -636,32 +617,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (applied) {
                         lastAppliedSeq = seq + 1;
                         window.lastAppliedSeq = lastAppliedSeq;
-                        // Prefer server-provided nextIndex (it may skip eliminated players).
-                        if (nextIdxFromServer !== null) {
-                            currentPlayer = Math.max(0, Math.min(playerCount - 1, nextIdxFromServer));
-                            onlineTurnSeq = lastAppliedSeq;
-                            // Update visuals based on currentPlayer directly.
-                            const _turnColor = activeColors()[currentPlayer];
-                            document.body.className = _turnColor;
-                            try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
-                            try { updateGrid(); } catch { /* ignore */ }
-                        } else {
-                            onlineTurnSeq = lastAppliedSeq;
-                            _setOnlineTurnFromSeq();
-                        }
+                        onlineTurnSeq = lastAppliedSeq;
+                        _setOnlineTurnFromSeq();
                         console.log(`[Move] Updated lastAppliedSeq to ${lastAppliedSeq}`);
                         // After applying, try to drain any subsequent buffered moves in order
                         tryApplyBufferedMoves();
                     } else {
                         console.warn(`[Move] Failed to apply seq ${seq}, buffering to retry after processing (myOnlineIndex=${myOnlineIndex})`);
                         // Buffer the move to retry after current processing completes
-                        pendingMoves.set(seq, { r, c, fromIdx });
+                        pendingMoves.set(seq, { r, c });
                     }
                 };
                 if (isProcessing) {
                     console.log(`[Move] Seq ${seq} is next but UI processing. Buffering. (myOnlineIndex=${myOnlineIndex})`);
                     // Buffer this exact-next move and it will be applied when processing finishes
-                    pendingMoves.set(seq, { r, c, fromIdx });
+                    pendingMoves.set(seq, { r, c });
                     // No timeout: deterministic ordered application
                 } else {
                     doApply();
@@ -669,7 +639,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (seq > expectedNext) {
                 console.warn(`[Move] Future move seq ${seq}, expected ${expectedNext}. Buffering. (pending: ${Array.from(pendingMoves.keys()).sort((a, b) => a - b).join(', ')}) (myOnlineIndex=${myOnlineIndex})`);
                 // Future move: store and wait for earlier moves
-                pendingMoves.set(seq, { r, c, fromIdx, nextIdx: nextIdxFromServer });
+                pendingMoves.set(seq, { r, c });
             }
         } catch (err) {
             console.error('[Move] Error handling move:', err);
@@ -696,8 +666,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const seq = Number(m.seq);
                 // lastAppliedSeq is the next expected seq, so we must still accept seq === lastAppliedSeq.
                 if (seq < (Number(lastAppliedSeq) || 0)) continue;
-                const nextIdx = Number.isInteger(Number(m.nextIndex)) ? Number(m.nextIndex) : null;
-                pendingMoves.set(seq, { r: Number(m.row), c: Number(m.col), fromIdx: Number(m.fromIndex), nextIdx });
+                pendingMoves.set(seq, { r: Number(m.row), c: Number(m.col) });
             }
             // Try to apply starting from our current lastAppliedSeq.
             tryApplyBufferedMoves();
@@ -713,11 +682,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             const seq = Number(msg.seq);
-            const fromIdx = Number(msg.fromIndex);
 
-            // This should be our own move confirmation
-            if (fromIdx !== myOnlineIndex) {
-                console.warn(`[Move Ack] Received ack for wrong player: fromIdx=${fromIdx}, myOnlineIndex=${myOnlineIndex}`);
+            // move_ack no longer includes fromIndex; treat it as an ack for our currently pending echo.
+            // If it doesn't match, we ignore it.
+            if (pendingEchoSeq !== null && Number.isInteger(seq) && seq !== pendingEchoSeq) {
+                console.warn(`[Move Ack] Received ack for unexpected seq: seq=${seq}, pendingEchoSeq=${pendingEchoSeq} (myOnlineIndex=${myOnlineIndex})`);
                 return;
             }
 
@@ -771,11 +740,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 missed.sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
 
                 for (const m of missed) {
-                    const r = Number(m.row), c = Number(m.col), fromIdx = Number(m.fromIndex); const seq = Number(m.seq);
-                    if (!Number.isInteger(seq) || !Number.isInteger(r) || !Number.isInteger(c) || !Number.isInteger(fromIdx)) continue;
+                    const r = Number(m.row), c = Number(m.col); const seq = Number(m.seq);
+                    if (!Number.isInteger(seq) || !Number.isInteger(r) || !Number.isInteger(c)) continue;
                     if (seq <= (Number(lastAppliedSeq) || 0)) continue;
-                    const nextIdx = Number.isInteger(Number(m.nextIndex)) ? Number(m.nextIndex) : null;
-                    pendingMoves.set(seq, { r, c, fromIdx, nextIdx });
+                    pendingMoves.set(seq, { r, c });
                 }
 
                 // Try apply in-order (will also handle deferring while isProcessing).
@@ -1060,24 +1028,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const seqToSend = Number(onlineTurnSeq) || 0;
             pendingEchoSeq = seqToSend;
             console.log(`[Online Move/${source}] Applied; sending seq=${seqToSend}, waiting for echo (myOnlineIndex=${myOnlineIndex})`);
-            const stableOnlineCount = (onlineGameActive && Array.isArray(onlinePlayers) && onlinePlayers.length)
-                ? onlinePlayers.length
-                : (Number(playerCount) || 0);
-            let nextIndex = stableOnlineCount > 0 ? (((seqToSend + 1) % stableOnlineCount)) : (myOnlineIndex + 1);
-            // After initial placement phase, skip eliminated players locally.
-            try {
-                if (stableOnlineCount > 0 && (seqToSend + 1) >= stableOnlineCount && typeof grid !== 'undefined' && Array.isArray(grid)) {
-                    const alive = computeAliveMask(grid, activeColors(), seqToSend + 1);
-                    if (alive.filter(Boolean).length > 1 && !alive[nextIndex]) {
-                        const next = nextAliveIndex(alive, nextIndex + 1);
-                        if (next !== null) nextIndex = next;
-                    }
-                    if (typeof window !== 'undefined' && window?.__CC_DEBUG_TURNS) {
-                        console.debug('[Online Move][Alive Skip nextIndex]', { seqToSend, nextIndex, alive });
-                    }
-                }
-            } catch { /* ignore */ }
-
             // Advance our local notion of turn immediately.
             // If the server rejects the move, catch-up/echo will correct us.
             onlineTurnSeq = seqToSend + 1;
@@ -1088,12 +1038,9 @@ document.addEventListener('DOMContentLoaded', () => {
             onlineConnection.sendMove({
                 row,
                 col,
-                fromIndex: myOnlineIndex,
-                nextIndex,
-                color: activeColors()[myOnlineIndex],
                 seq: seqToSend
             });
-            console.log(`[Online Move/${source}] sendMove called`, { row, col, seq: seqToSend, fromIndex: myOnlineIndex, nextIndex });
+            console.log(`[Online Move/${source}] sendMove called`, { row, col, seq: seqToSend });
         } else {
             console.log(`[Online Move/${source}] handleClick rejected`, { row, col, myOnlineIndex, currentPlayer, onlineTurnSeq, lastAppliedSeq });
         }

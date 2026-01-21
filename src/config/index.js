@@ -47,10 +47,21 @@ export const OnlineParams = Object.freeze({
     WS_INITIAL_BACKOFF_MS: 500,      // initial reconnect backoff
     WS_MAX_BACKOFF_MS: 10000,         // cap for exponential backoff
     SHOW_CONN_BANNER_ONLY_IN_ONLINE: true, // gating flag for connection banner visibility
+    // Debug/network simulation knobs (set to 0 to disable)
+    // Apply in both client and server to simulate unreliable networks during development.
+    PACKET_LOSS_RATE: 0.0,          // probability to drop a packet outright
+    PACKET_DISCONNECT_RATE: 0.0,     // probability to force a disconnect on a move packet (debug)
     WS_PROD_BASE_URL: 'wss://color-clash-192172087961.europe-west1.run.app/ws' // production service endpoint
 });
 
-export const { WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS, SHOW_CONN_BANNER_ONLY_IN_ONLINE, WS_PROD_BASE_URL } = OnlineParams;
+export const {
+    WS_INITIAL_BACKOFF_MS,
+    WS_MAX_BACKOFF_MS,
+    SHOW_CONN_BANNER_ONLY_IN_ONLINE,
+    PACKET_LOSS_RATE,
+    PACKET_DISCONNECT_RATE,
+    WS_PROD_BASE_URL
+} = OnlineParams;
 
 // Consolidated default export (optional usage)
 export default {

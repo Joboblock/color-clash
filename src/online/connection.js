@@ -1,4 +1,5 @@
 import { WS_PROD_BASE_URL, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from '../config/index.js';
+import { PACKET_LOSS_RATE, PACKET_DISCONNECT_RATE } from '../config/index.js';
 /**
 /**
  * OnlineConnection encapsulates the WebSocket lifecycle for Color Clash, providing
@@ -685,11 +686,11 @@ export class OnlineConnection {
 	_sendPayload(obj) {
 		// Simulate packet loss
 		const type = obj && typeof obj === 'object' ? obj.type : undefined;
-		if (Math.random() < 0.025) {
+		if (Math.random() < PACKET_LOSS_RATE) {
 			console.warn('[Client] 🔥 Simulated packet loss:', type, obj);
 			return;
 		}
-		if (Math.random() < 0.025) {
+		if (Math.random() < PACKET_LOSS_RATE) {
 			console.warn('[Client] 🕒 Simulated packet delay (5s):', type, obj);
 			setTimeout(() => {
 				this._sendPayloadDelayed(obj);
@@ -704,7 +705,7 @@ export class OnlineConnection {
 					const type = obj && typeof obj === 'object' ? obj.type : undefined;
 					console.log('[Client] ⬆️ Sending:', type, obj);
 					// Debug: Simulate forced disconnect before move packets only
-					if (type === 'move' && Math.random() < 0.05) {
+					if (type === 'move' && Math.random() < PACKET_DISCONNECT_RATE) {
 						console.warn('[Client] 🔌 SIMULATED DISCONNECT:', type, obj);
 						if (this._ws && this._ws.readyState === WebSocket.OPEN) {
 							this._ws.close();

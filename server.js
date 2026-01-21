@@ -10,7 +10,7 @@ import { WebSocketServer } from 'ws';
 import { APP_VERSION } from './src/version.js';
 import { createInitialRoomGridState, validateAndApplyMove } from './src/game/serverGridEngine.js';
 import { advanceTurnIndex, computeAliveMask } from './src/game/turnCalc.js';
-import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD } from './src/config/index.js';
+import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, PACKET_LOSS_RATE, PACKET_DISCONNECT_RATE } from './src/config/index.js';
 
 // Keep server rules aligned with client constants (single source of truth).
 
@@ -136,11 +136,11 @@ const connectionMeta = new Map();
 function sendPayload(ws, payload) {
     // Simulate packet loss
     const type = payload && typeof payload === 'object' ? payload.type : undefined;
-    if (Math.random() < 0.025) {
+    if (Math.random() < PACKET_LOSS_RATE) {
         console.warn('[Server] 🔥 Simulated packet loss:', type, payload);
         return;
     }
-    if (Math.random() < 0.025) {
+    if (Math.random() < PACKET_LOSS_RATE) {
         console.warn('[Server] 🕒 Simulated packet delay (5s):', type, payload);
         setTimeout(() => {
             sendPayloadDelayed(ws, payload);
@@ -719,7 +719,7 @@ wss.on('connection', (ws) => {
             if (!room) return;
 
             // Simulate chance to close all players' WebSockets
-            if (Math.random() < 0.05) {
+            if (Math.random() < PACKET_DISCONNECT_RATE) {
                 console.warn('[Server] 🔌 SIMULATED DISCONNECT: Closing all player WebSockets');
                 room.participants.forEach(p => {
                     if (p.ws && p.ws.readyState === 1) {

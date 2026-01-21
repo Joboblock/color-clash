@@ -320,9 +320,12 @@ wss.on('connection', (ws) => {
 
             // If game is active, send catch-up data
             if (room.game && room.game.started) {
-                const lastSeq = (room._lastSeqBySessionId && room._lastSeqBySessionId.get(clientSessionId)) || 0;
+                // Prefer the client's reported next-expected sequence (sent in restore_session)
+                // so we can immediately provide the exact missing slice without waiting for ping.
+                // NOTE: client seq semantics match ping: it's the next seq the client expects.
+                const clientNextSeq = Number.isInteger(msg.seq) ? msg.seq : 0;
                 const recentMoves = (room.game && Array.isArray(room.game.recentMoves))
-                    ? room.game.recentMoves.filter(m => (m.seq || 0) > lastSeq)
+                    ? room.game.recentMoves.filter(m => Number.isInteger(m.seq) && m.seq >= clientNextSeq)
                     : [];
                 const rejoinPayload = {
                     type: 'rejoined',

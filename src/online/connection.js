@@ -362,11 +362,17 @@ export class OnlineConnection {
 				this._sessionRestorationAttempted = true;
 				this._isRestoringSession = true;
 				this._emit('restoring_session', { restoring: true });
+				// Include the client's current catch-up position so the server can immediately
+				// send `rejoined.recentMoves` starting at the correct seq (without waiting for ping).
+				const clientSeq = (typeof window !== 'undefined' && Number.isInteger(window.lastAppliedSeq))
+					? window.lastAppliedSeq
+					: 0;
 				const restorePacket = {
 					type: 'restore_session',
 					roomKey: this._sessionInfo.roomKey,
 					playerName: this._sessionInfo.playerName,
-					sessionId: this._sessionInfo.sessionId
+					sessionId: this._sessionInfo.sessionId,
+					seq: clientSeq
 				};
 				// Use retry logic for restore_session to handle packet loss
 				this._sendWithRetry('restore_session', restorePacket, 'restore_status');

@@ -9,8 +9,8 @@ import { mainPage } from './src/pages/main.js';
 import { sanitizeName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
 import { computeInvalidInitialPositions as calcInvalidInitialPositions, isInitialPlacementInvalid as calcIsInitialPlacementInvalid, getCellsToExplode as calcGetCellsToExplode, computeExplosionTargets as calcComputeExplosionTargets } from './src/game/gridCalc.js';
 import { playerColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './src/game/palette.js';
-import { advanceTurnIndex, computeAliveMask } from './src/game/turnCalc.js';
-import { onlinePlayerIndexForSeq } from './src/online/onlineTurn.js';
+import { advanceTurnIndex } from './src/game/turnCalc.js';
+import { createOnlineTurnTracker } from './src/online/onlineTurn.js';
 import { computeAIMove } from './src/ai/engine.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
 // Edge circles component
@@ -446,6 +446,34 @@ document.addEventListener('DOMContentLoaded', () => {
     // During initial placement, strict seq-driven order is used.
     // After initial placement, this advances via advanceTurnIndex() (skip eliminated players).
     let onlineTurnIndex = 0;
+	let onlineTurnTracker = null;
+    // Defer online turn advancement until explosion processing finalizes eliminations.
+    // When a move is applied in online mode, we stash who played + which seq.
+    // processExplosions() flushes this once the chain ends.
+    let _pendingOnlineApplied = null; // { by:number, seq:number }
+    function _scheduleOnlineTurnAdvance(by, seq) {
+        if (!onlineGameActive) return;
+        if (!Number.isInteger(Number(seq))) return;
+        _pendingOnlineApplied = { by: Number(by) || 0, seq: Number(seq) || 0 };
+        // If nothing is processing, advance immediately.
+        if (!isProcessing) {
+            try { _flushOnlineTurnAdvance(); } catch { /* ignore */ }
+        }
+    }
+    function _flushOnlineTurnAdvance() {
+        if (!onlineGameActive) return;
+        if (!_pendingOnlineApplied) return;
+        if (isProcessing) return;
+        const { by, seq } = _pendingOnlineApplied;
+        _pendingOnlineApplied = null;
+        try {
+            const n = _stableOnlineCount();
+            if (!onlineTurnTracker || onlineTurnTracker.playerCount !== n) {
+                onlineTurnTracker = createOnlineTurnTracker(n);
+            }
+            onlineTurnTracker.onMoveApplied(grid, activeColors(), by, seq);
+        } catch { /* ignore */ }
+    }
 
     // In online mode, avoid updating the "whose turn" UI mid-explosion-chain.
     // Instead, schedule a refresh to run once processing finishes.
@@ -473,22 +501,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const n = _stableOnlineCount();
         if (!n) return;
         const seq = Number(onlineTurnSeq) || 0;
+		if (!onlineTurnTracker || onlineTurnTracker.playerCount !== n) {
+			onlineTurnTracker = createOnlineTurnTracker(n);
+		}
+		// Align tracker to our next-to-play seq. For seq>playerCount it keeps internal state.
+		onlineTurnTracker.setSeq(seq, (typeof grid !== 'undefined' ? grid : null), activeColors());
 
-        // Initial placement: strict order.
-        if (seq < n) {
-            onlineTurnIndex = seq % n;
-        } else {
-            try {
-                if (typeof grid !== 'undefined' && Array.isArray(grid)) {
-                    const idx = onlinePlayerIndexForSeq(grid, activeColors(), seq);
-                    if (idx !== null) onlineTurnIndex = idx;
-                    if (typeof window !== 'undefined' && window?.__CC_DEBUG_TURNS) {
-                        const alive = computeAliveMask(grid, activeColors(), seq);
-                        console.debug('[Online Turn][Persistent]', { seq, chosenIndex: onlineTurnIndex, alive });
-                    }
-                }
-            } catch { /* ignore */ }
-        }
+        // Tracker answers "who acts next" without replaying history.
+        onlineTurnIndex = onlineTurnTracker.currentPlayer;
 
         currentPlayer = onlineTurnIndex;
         const _turnColor = activeColors()[currentPlayer];
@@ -563,6 +583,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 lastAppliedSeq = nextSeq + 1;
                 window.lastAppliedSeq = lastAppliedSeq;
                 onlineTurnSeq = lastAppliedSeq;
+                // Advance online turn model once per applied move AFTER explosions finalize.
+                try { _scheduleOnlineTurnAdvance(currentPlayer, nextSeq); } catch { /* ignore */ }
 				if (isProcessing) scheduleOnlineTurnUiRefresh();
 				else _setOnlineTurnFromSeq();
                 console.log(`[Buffer] Updated lastAppliedSeq to ${lastAppliedSeq}`);
@@ -648,6 +670,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         lastAppliedSeq = seq + 1;
                         window.lastAppliedSeq = lastAppliedSeq;
                         onlineTurnSeq = lastAppliedSeq;
+                    // Advance online turn model once per applied move AFTER explosions finalize.
+                    try { _scheduleOnlineTurnAdvance(currentPlayer, seq + 1); } catch { /* ignore */ }
                         // Defer UI/turn indicator update until any processing ends.
                         scheduleOnlineTurnUiRefresh();
                         // If this move didn't trigger processing, flush immediately so "who's next" updates.
@@ -1064,6 +1088,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const seqToSend = Number(onlineTurnSeq) || 0;
             pendingEchoSeq = seqToSend;
             console.log(`[Online Move/${source}] Applied; sending seq=${seqToSend}, waiting for echo (myOnlineIndex=${myOnlineIndex})`);
+            // Advance online turn model once per applied move AFTER explosions finalize.
+            try { _scheduleOnlineTurnAdvance(myOnlineIndex, seqToSend + 1); } catch { /* ignore */ }
             // Advance our local notion of turn immediately.
             // If the server rejects the move, catch-up/echo will correct us.
             onlineTurnSeq = seqToSend + 1;
@@ -2313,6 +2339,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // If no cells need to explode, end processing
         if (cellsToExplode.length === 0) {
             isProcessing = false;
+                // Online: now that eliminations are final, advance the turn model for the move we just applied.
+                if (onlineGameActive) {
+                    _flushOnlineTurnAdvance();
+                }
             if (initialPlacements.every(placement => placement)) {
                 checkWinCondition();
             }

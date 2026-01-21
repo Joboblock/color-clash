@@ -59,10 +59,33 @@ test('local: after initial placement, eliminated players are skipped', () => {
 	}
 });
 
+test('local: after 0 eliminates 1, next is 2 (then 0,2,0...)', () => {
+	const colors = ['green', 'red', 'blue'];
+	const grid = makeEmptyGrid(3);
+
+	// Post-placement state: players 0 and 1 have cells; player 2 has cells.
+	setOwned(grid, 'green', [[0, 0]]);
+	setOwned(grid, 'red', [[0, 1]]);
+	setOwned(grid, 'blue', [[1, 1]]);
+
+	// Suppose player 0 makes a move that eliminates player 1.
+	grid[0][1] = { value: 0, player: '' };
+
+	// After player 0 plays, the nextSeq is 4 (3 players + 1 move).
+	let nextSeq = 4;
+	let next = advanceTurnIndex(grid, colors, 0, nextSeq);
+	assert.equal(next, 2);
+
+	// After player 2 plays, nextSeq is 5 => back to 0.
+	nextSeq = 5;
+	next = advanceTurnIndex(grid, colors, 2, nextSeq);
+	assert.equal(next, 0);
+});
+
 test('online/server: turnIndex advancement skips eliminated players (matches server contract)', () => {
 	// This test mirrors server.js behavior:
 	// - initial placement is strict seq-driven
-	// - after that, server uses computeAliveMask + nextAliveIndex scanning forward
+	// - after that, server uses a persistent turnIndex advanced via advanceTurnIndex
 	const players = ['p0', 'p1', 'p2', 'p3'];
 	const colors = ['green', 'red', 'blue', 'yellow'];
 
@@ -74,25 +97,33 @@ test('online/server: turnIndex advancement skips eliminated players (matches ser
 	setOwned(gridState.grid, 'blue', [[1, 1]]); // p2 alive
 
 	// Assume placements are done; nextSeq >= playerCount.
-	const nextSeq = players.length; // 4
+	const nextSeq = players.length; // 4 (first post-placement move would be seq=4)
 	const alive = computeAliveMask(gridState.grid, colors, nextSeq);
 	assert.deepEqual(alive, [true, false, true, false]);
 
-	// Server uses baseTurnIndex (= current room.game.turnIndex) then candidate=base+1.
-	// If candidate dead and >1 alive, it advances to next alive.
-	const baseTurnIndex = 0; // p0 just played
-	let nextIndex = (baseTurnIndex + 1) % players.length; // 1 (dead)
-	if (alive.filter(Boolean).length > 1 && !alive[nextIndex]) {
-		// Minimal inline implementation of server's scan-forward behavior.
-		for (let step = 1; step <= players.length; step++) {
-			const idx = (nextIndex + step) % players.length;
-			if (alive[idx]) {
-				nextIndex = idx;
-				break;
-			}
-		}
-	}
+	// Server advances from the mover using the local-style helper.
+	// p0 just played at seq=3, so after committing it the server is computing nextIndex for nextSeq=4.
+	const baseTurnIndex = 0;
+	const nextIndex = advanceTurnIndex(gridState.grid, colors, baseTurnIndex, nextSeq);
+	assert.equal(nextIndex, 2);
+});
 
+test('online/server: after 0 eliminates 1, next is 2 (then 0,2,0...)', () => {
+	const players = ['p0', 'p1', 'p2'];
+	const colors = ['green', 'red', 'blue'];
+	const gridState = createInitialRoomGridState({ gridSize: 3, playerColors: colors });
+
+	gridState.grid = makeEmptyGrid(3);
+	setOwned(gridState.grid, 'green', [[0, 0]]);
+	setOwned(gridState.grid, 'red', [[0, 1]]);
+	setOwned(gridState.grid, 'blue', [[1, 1]]);
+
+	// Player 0 eliminates player 1.
+	gridState.grid[0][1] = { value: 0, player: '' };
+
+	// Next turn after player 0 plays (post-placement) should be player 2.
+	const nextSeq = players.length + 1; // 4
+	const nextIndex = advanceTurnIndex(gridState.grid, colors, 0, nextSeq);
 	assert.equal(nextIndex, 2);
 });
 

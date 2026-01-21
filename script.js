@@ -9,7 +9,8 @@ import { mainPage } from './src/pages/main.js';
 import { sanitizeName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
 import { computeInvalidInitialPositions as calcInvalidInitialPositions, isInitialPlacementInvalid as calcIsInitialPlacementInvalid, getCellsToExplode as calcGetCellsToExplode, computeExplosionTargets as calcComputeExplosionTargets } from './src/game/gridCalc.js';
 import { playerColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './src/game/palette.js';
-import { advanceTurnIndex, computeAliveMask, nextAliveIndex } from './src/game/turnCalc.js';
+import { advanceTurnIndex, computeAliveMask } from './src/game/turnCalc.js';
+import { onlinePlayerIndexForSeq } from './src/online/onlineTurn.js';
 import { computeAIMove } from './src/ai/engine.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
 // Edge circles component
@@ -347,6 +348,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             practiceMode = false;
             recreateGrid(s, p);
+            // At game start, render the turn UI immediately so everyone agrees it's player 0 first.
             _setOnlineTurnFromSeq();
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
@@ -416,6 +418,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             practiceMode = false;
             recreateGrid(s, p);
+            // At game start, render the turn UI immediately so everyone agrees it's player 0 first.
             _setOnlineTurnFromSeq();
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
@@ -439,6 +442,24 @@ document.addEventListener('DOMContentLoaded', () => {
     // It advances when we apply a move (ours or others') and is used for input gating.
     let onlineTurnSeq = 0; // next move sequence to be played/applied locally
 
+    // Online turn state: persistent index of the player whose turn it is.
+    // During initial placement, strict seq-driven order is used.
+    // After initial placement, this advances via advanceTurnIndex() (skip eliminated players).
+    let onlineTurnIndex = 0;
+
+    // In online mode, avoid updating the "whose turn" UI mid-explosion-chain.
+    // Instead, schedule a refresh to run once processing finishes.
+    let _pendingOnlineTurnUiRefresh = false;
+    function scheduleOnlineTurnUiRefresh() {
+        if (!onlineGameActive) return;
+        _pendingOnlineTurnUiRefresh = true;
+    }
+    function flushOnlineTurnUiRefresh() {
+        if (!_pendingOnlineTurnUiRefresh) return;
+        _pendingOnlineTurnUiRefresh = false;
+        try { _setOnlineTurnFromSeq(); } catch { /* ignore */ }
+    }
+
     function _stableOnlineCount() {
         return (onlineGameActive && Array.isArray(onlinePlayers) && onlinePlayers.length)
             ? onlinePlayers.length
@@ -452,24 +473,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const n = _stableOnlineCount();
         if (!n) return;
         const seq = Number(onlineTurnSeq) || 0;
-        let cp = seq % n;
 
-        // After initial placement, compute eliminated players from our local grid
-        // and skip them in turn order.
-        try {
-            if (seq >= n && typeof grid !== 'undefined' && Array.isArray(grid)) {
-                const alive = computeAliveMask(grid, activeColors(), seq);
-                if (alive.filter(Boolean).length > 1 && !alive[cp]) {
-                    const next = nextAliveIndex(alive, cp + 1);
-                    if (next !== null) cp = next;
+        // Initial placement: strict order.
+        if (seq < n) {
+            onlineTurnIndex = seq % n;
+        } else {
+            try {
+                if (typeof grid !== 'undefined' && Array.isArray(grid)) {
+                    const idx = onlinePlayerIndexForSeq(grid, activeColors(), seq);
+                    if (idx !== null) onlineTurnIndex = idx;
+                    if (typeof window !== 'undefined' && window?.__CC_DEBUG_TURNS) {
+                        const alive = computeAliveMask(grid, activeColors(), seq);
+                        console.debug('[Online Turn][Persistent]', { seq, chosenIndex: onlineTurnIndex, alive });
+                    }
                 }
-                if (typeof window !== 'undefined' && window?.__CC_DEBUG_TURNS) {
-                    console.debug('[Online Turn][Alive Skip]', { seq, baseIndex: seq % n, chosenIndex: cp, alive });
-                }
-            }
-        } catch { /* ignore */ }
+            } catch { /* ignore */ }
+        }
 
-        currentPlayer = cp;
+        currentPlayer = onlineTurnIndex;
         const _turnColor = activeColors()[currentPlayer];
         document.body.className = _turnColor;
         try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
@@ -519,7 +540,9 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`[Buffer] Draining seq ${nextSeq} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
             // Moves no longer include fromIndex/nextIndex; derive currentPlayer from our local seq pointer.
             onlineTurnSeq = nextSeq;
-            _setOnlineTurnFromSeq();
+			// During buffered application we may enter processing; keep UI updates consistent.
+			if (isProcessing) scheduleOnlineTurnUiRefresh();
+			else _setOnlineTurnFromSeq();
             // Apply with seq context and seq-based placement-phase forcing.
             const prevSeq = _applyingOnlineSeq;
             _applyingOnlineSeq = nextSeq;
@@ -540,7 +563,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 lastAppliedSeq = nextSeq + 1;
                 window.lastAppliedSeq = lastAppliedSeq;
                 onlineTurnSeq = lastAppliedSeq;
-                _setOnlineTurnFromSeq();
+				if (isProcessing) scheduleOnlineTurnUiRefresh();
+				else _setOnlineTurnFromSeq();
                 console.log(`[Buffer] Updated lastAppliedSeq to ${lastAppliedSeq}`);
                 pendingMoves.delete(nextSeq);
                 appliedCount++;
@@ -548,6 +572,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.warn(`[Buffer] Failed to apply seq ${nextSeq}, stopping drain (myOnlineIndex=${myOnlineIndex})`);
                 break;
             }
+        }
+        // If we applied moves without triggering processing, ensure the turn UI is refreshed now.
+        // When processing is active, the refresh is intentionally deferred and will flush at chain end.
+        if (appliedCount > 0 && !isProcessing) {
+            flushOnlineTurnUiRefresh();
         }
         if (appliedCount > 0) {
             console.log(`[Buffer] Drained ${appliedCount} buffered move(s). Remaining: ${pendingMoves.size} (myOnlineIndex=${myOnlineIndex})`);
@@ -601,7 +630,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.log(`[Move] Applying seq ${seq} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
                     // Moves no longer include fromIndex/nextIndex; derive currentPlayer from local seq pointer.
                     onlineTurnSeq = seq;
-                    _setOnlineTurnFromSeq();
+					if (isProcessing) scheduleOnlineTurnUiRefresh();
+					else _setOnlineTurnFromSeq();
                     const prevSeq = _applyingOnlineSeq;
                     _applyingOnlineSeq = seq;
                     let prevInitialFlag = null;
@@ -618,7 +648,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         lastAppliedSeq = seq + 1;
                         window.lastAppliedSeq = lastAppliedSeq;
                         onlineTurnSeq = lastAppliedSeq;
-                        _setOnlineTurnFromSeq();
+                        // Defer UI/turn indicator update until any processing ends.
+                        scheduleOnlineTurnUiRefresh();
+                        // If this move didn't trigger processing, flush immediately so "who's next" updates.
+                        // (During chains, processExplosions() will flush when the chain ends.)
+                        if (!isProcessing) flushOnlineTurnUiRefresh();
                         console.log(`[Move] Updated lastAppliedSeq to ${lastAppliedSeq}`);
                         // After applying, try to drain any subsequent buffered moves in order
                         tryApplyBufferedMoves();
@@ -698,7 +732,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Ensure our 'next seq to apply' is at least seq+1.
                     if ((Number(lastAppliedSeq) || 0) < expectedNextSeq) lastAppliedSeq = expectedNextSeq;
                     onlineTurnSeq = lastAppliedSeq;
-                    _setOnlineTurnFromSeq();
+					if (isProcessing) scheduleOnlineTurnUiRefresh();
+					else _setOnlineTurnFromSeq();
                     console.log(`[Move Ack] Seq ${seq} confirmed (own move, myOnlineIndex=${myOnlineIndex}). lastAppliedSeq now=${lastAppliedSeq}`);
                     pendingEchoSeq = null; // Clear pending echo
 
@@ -753,7 +788,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Ensure our local turn pointer matches our catch-up position.
         onlineTurnSeq = Number(lastAppliedSeq) || 0;
-        _setOnlineTurnFromSeq();
+		if (isProcessing) scheduleOnlineTurnUiRefresh();
+		else _setOnlineTurnFromSeq();
         updateStartButtonState();
     });
     onlineConnection.on('error', (msg) => {
@@ -1033,7 +1069,8 @@ document.addEventListener('DOMContentLoaded', () => {
             onlineTurnSeq = seqToSend + 1;
             lastAppliedSeq = onlineTurnSeq;
             window.lastAppliedSeq = lastAppliedSeq;
-            _setOnlineTurnFromSeq();
+			// UI/turn indicator update will happen once processing finishes.
+			scheduleOnlineTurnUiRefresh();
 
             onlineConnection.sendMove({
                 row,
@@ -2280,6 +2317,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 checkWinCondition();
             }
             if (!gameWon) advanceSeqTurn();
+			// In online mode, update turn UI only after processing (and any eliminations) are finalized.
+			if (onlineGameActive) {
+				flushOnlineTurnUiRefresh();
+			}
             // Process any buffered online moves that were waiting for UI to finish
             if (onlineGameActive && typeof tryApplyBufferedMoves === 'function') {
                 tryApplyBufferedMoves();

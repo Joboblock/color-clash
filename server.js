@@ -9,7 +9,7 @@ import { stat } from 'fs/promises';
 import { WebSocketServer } from 'ws';
 import { APP_VERSION } from './src/version.js';
 import { createInitialRoomGridState, validateAndApplyMove } from './src/game/serverGridEngine.js';
-import { computeAliveMask, nextAliveIndex } from './src/game/turnCalc.js';
+import { advanceTurnIndex, computeAliveMask } from './src/game/turnCalc.js';
 import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD } from './src/config/index.js';
 
 // Keep server rules aligned with client constants (single source of truth).
@@ -898,31 +898,32 @@ wss.on('connection', (ws) => {
             const newMoveSeq = Number.isInteger(room.game.moveSeq) ? room.game.moveSeq : 0;
             const nextSeq = newMoveSeq + 1;
 
-            // Compute nextIndex from the previous turnIndex (or seq-based for initial placement),
-            // skipping eliminated players based on current grid.
+            // Compute nextIndex from the current mover using the same local-style
+            // persistent turnIndex rules (single source of truth).
+            //
+            // During initial placement, turn order remains seq-driven.
+            // After that, we advance from the mover, skipping eliminated players.
             let nextIndex = players.length > 0 ? (nextSeq % players.length) : 0;
-            if (players.length > 0) {
-                if (nextSeq >= players.length) {
-                    const base = Number.isInteger(room.game.turnIndex) ? room.game.turnIndex : (newMoveSeq % players.length);
-                    const candidate = (base + 1) % players.length;
-                    nextIndex = candidate;
-                    if (room.game.gridState && room.game.gridState.grid && Array.isArray(room.game.colors)) {
-                        const alive = computeAliveMask(room.game.gridState.grid, room.game.colors, nextSeq);
-                        console.log('[Server][Turn] Post-apply', {
-                            room: meta.roomName,
-                            newMoveSeq,
-                            nextSeq,
-                            baseTurnIndex: base,
-                            candidate,
-                            alive,
-                            playerCount: players.length,
-                            colors: room.game.colors
-                        });
-                        if (alive.filter(Boolean).length > 1 && !alive[nextIndex]) {
-                            const next = nextAliveIndex(alive, nextIndex + 1);
-                            if (next !== null) nextIndex = next;
-                        }
-                    }
+            if (players.length > 0 && nextSeq >= players.length) {
+                const colors = Array.isArray(room.game.colors) ? room.game.colors : [];
+                const grid = room.game.gridState?.grid;
+                if (grid && colors.length === players.length) {
+                    const computed = advanceTurnIndex(grid, colors, fromIndex, nextSeq);
+                    if (computed !== null) nextIndex = computed;
+                }
+
+                if (room.game.gridState && room.game.gridState.grid && Array.isArray(room.game.colors)) {
+                    const alive = computeAliveMask(room.game.gridState.grid, room.game.colors, nextSeq);
+                    console.log('[Server][Turn] Post-apply (advanceTurnIndex)', {
+                        room: meta.roomName,
+                        newMoveSeq,
+                        nextSeq,
+                        fromIndex,
+                        alive,
+                        playerCount: players.length,
+                        colors: room.game.colors,
+                        computedNextIndex: nextIndex
+                    });
                 }
             }
 

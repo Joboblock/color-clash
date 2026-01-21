@@ -49,8 +49,8 @@ export const OnlineParams = Object.freeze({
     SHOW_CONN_BANNER_ONLY_IN_ONLINE: true, // gating flag for connection banner visibility
     // Debug/network simulation knobs (set to 0 to disable)
     // Apply in both client and server to simulate unreliable networks during development.
-    PACKET_LOSS_RATE: 0.25,          // probability to drop a packet outright
-    PACKET_DISCONNECT_RATE: 0.25,     // probability to force a disconnect on a move packet (debug)
+    PACKET_LOSS_RATE: 0.0,          // probability to drop a packet outright
+    PACKET_DISCONNECT_RATE: 0.0,     // probability to force a disconnect on a move packet (debug)
     WS_PROD_BASE_URL: 'wss://color-clash-192172087961.europe-west1.run.app/ws' // production service endpoint
 });
 

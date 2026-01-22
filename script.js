@@ -320,12 +320,27 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('[Start] Server sent start with colors:', msg.colors);
         if (!clientFullyInitialized) return;
 
-        // Only ignore duplicate 'start' messages if they belong to the SAME room that already started.
-        // If the player leaves and joins a different room, that new room's first 'start' must be processed.
+        // Only ignore duplicate 'start' messages if they belong to the SAME room/game instance.
+        // A different startUuid signals a restart and must be processed even if we're already active.
         try {
             const currentRoomKey = myRoomKey || null;
             window._onlineStartedOnceByRoomKey = window._onlineStartedOnceByRoomKey || Object.create(null);
-            const startedOnce = currentRoomKey && window._onlineStartedOnceByRoomKey[currentRoomKey];
+            window._onlineStartUuidByRoomKey = window._onlineStartUuidByRoomKey || Object.create(null);
+            let startedOnce = currentRoomKey && window._onlineStartedOnceByRoomKey[currentRoomKey];
+
+            const incomingStartUuid = (msg && typeof msg.startUuid === 'string' && msg.startUuid) ? msg.startUuid : null;
+            const lastStartUuid = currentRoomKey ? (window._onlineStartUuidByRoomKey[currentRoomKey] || null) : null;
+            const isRestart = !!(incomingStartUuid && lastStartUuid && incomingStartUuid !== lastStartUuid);
+
+            if (isRestart) {
+                console.log('[Start] 🔁 Detected restart (new startUuid), resetting per-room started gate', {
+                    roomKey: currentRoomKey,
+                    from: String(lastStartUuid).slice(0, 8),
+                    to: String(incomingStartUuid).slice(0, 8)
+                });
+                if (currentRoomKey) window._onlineStartedOnceByRoomKey[currentRoomKey] = false;
+                startedOnce = false;
+            }
 
             if (onlineGameActive && startedOnce) {
                 // Already in a started instance of this room. Don't reset/recreate anything; just re-ack for server retry logic.
@@ -335,7 +350,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Mark room as started as soon as we decide to process the start message.
-            if (currentRoomKey) window._onlineStartedOnceByRoomKey[currentRoomKey] = true;
+            if (currentRoomKey) {
+                window._onlineStartedOnceByRoomKey[currentRoomKey] = true;
+                if (incomingStartUuid) window._onlineStartUuidByRoomKey[currentRoomKey] = incomingStartUuid;
+            }
         } catch { /* ignore */ }
 
         try {
@@ -402,12 +420,27 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('[Start Cnf] Server sent start confirmation with colors:', msg.colors);
         if (!clientFullyInitialized) return;
 
-        // Only ignore duplicate 'start_cnf' messages if they belong to the SAME room that already started.
-        // If the host leaves and hosts/joins a different room, that new room's first 'start_cnf' must be processed.
+        // Only ignore duplicate 'start_cnf' messages if they belong to the SAME room/game instance.
+        // A different startUuid signals a restart and must be processed even if we're already active.
         try {
             const currentRoomKey = myRoomKey || null;
             window._onlineStartedOnceByRoomKey = window._onlineStartedOnceByRoomKey || Object.create(null);
-            const startedOnce = currentRoomKey && window._onlineStartedOnceByRoomKey[currentRoomKey];
+            window._onlineStartUuidByRoomKey = window._onlineStartUuidByRoomKey || Object.create(null);
+            let startedOnce = currentRoomKey && window._onlineStartedOnceByRoomKey[currentRoomKey];
+
+            const incomingStartUuid = (msg && typeof msg.startUuid === 'string' && msg.startUuid) ? msg.startUuid : null;
+            const lastStartUuid = currentRoomKey ? (window._onlineStartUuidByRoomKey[currentRoomKey] || null) : null;
+            const isRestart = !!(incomingStartUuid && lastStartUuid && incomingStartUuid !== lastStartUuid);
+
+            if (isRestart) {
+                console.log('[Start Cnf] 🔁 Detected restart (new startUuid), resetting per-room started gate', {
+                    roomKey: currentRoomKey,
+                    from: String(lastStartUuid).slice(0, 8),
+                    to: String(incomingStartUuid).slice(0, 8)
+                });
+                if (currentRoomKey) window._onlineStartedOnceByRoomKey[currentRoomKey] = false;
+                startedOnce = false;
+            }
 
             if (onlineGameActive && startedOnce) {
                 // If start_cnf is replayed (packet loss/retry), don't recreate/reset mid-game.
@@ -416,7 +449,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Mark room as started as soon as we decide to process the start confirmation.
-            if (currentRoomKey) window._onlineStartedOnceByRoomKey[currentRoomKey] = true;
+            if (currentRoomKey) {
+                window._onlineStartedOnceByRoomKey[currentRoomKey] = true;
+                if (incomingStartUuid) window._onlineStartUuidByRoomKey[currentRoomKey] = incomingStartUuid;
+            }
         } catch { /* ignore */ }
 
         try {

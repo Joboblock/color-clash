@@ -110,6 +110,8 @@ export class OnlineConnection {
 		this._isRestoringSession = false;
 		// UUID for the current logical start attempt; must persist across start_req retries.
 		this._pendingStartUuid = null;
+		// UUID for the currently active game instance (used to detect restarts).
+		this._activeGameStartUuid = null;
 		this._blockedMoves = [];
 		// Ping/pong keepalive tracking
 		this._lastMessageTime = Date.now();
@@ -126,6 +128,26 @@ export class OnlineConnection {
 		if (this._debug) {
 			console.debug('[OnlineConnection]', ...args);
 		}
+	}
+
+	/**
+	 * Clear any pending move packets (retry timers + queued retries).
+	 * Used when starting a new game instance so old unconfirmed moves can't be replayed.
+	 * @private
+	 */
+	_cancelPendingMoves() {
+		try {
+			let cleared = 0;
+			for (const [packetKey, pending] of this._pendingPackets.entries()) {
+				if (!packetKey.startsWith('move:')) continue;
+				if (pending && pending.retryTimer) clearTimeout(pending.retryTimer);
+				this._pendingPackets.delete(packetKey);
+				cleared++;
+			}
+			if (cleared > 0) {
+				console.log('[Client] 🧹 Cleared', cleared, 'pending move retry packet(s)');
+			}
+		} catch { /* ignore */ }
 	}
 
 	/**
@@ -532,6 +554,22 @@ export class OnlineConnection {
 					break;
 				case 'start':
 					// Server sends 'start' to non-host clients with assigned colors (requesting start_ack)
+					// If this is a new game instance (restart), clear any pending move retries.
+					try {
+						const incomingStartUuid = (msg && typeof msg.startUuid === 'string' && msg.startUuid) ? msg.startUuid : null;
+						if (incomingStartUuid && this._activeGameStartUuid && incomingStartUuid !== this._activeGameStartUuid) {
+							console.log('[Client] 🔁 Restart detected (startUuid changed) - clearing pending moves', {
+								from: String(this._activeGameStartUuid).slice(0, 8),
+								to: String(incomingStartUuid).slice(0, 8)
+							});
+							this._cancelPendingMoves();
+							if (this._blockedMoves.length > 0) {
+								console.log('[Client] 🗑️ Discarding', this._blockedMoves.length, 'blocked move(s) due to restart');
+								this._blockedMoves = [];
+							}
+						}
+						if (incomingStartUuid) this._activeGameStartUuid = incomingStartUuid;
+					} catch { /* ignore */ }
 					this._emit('start', msg);
 					break;
 				case 'start_cnf':
@@ -539,6 +577,18 @@ export class OnlineConnection {
 					// Clear pending start UUID after we get a server response.
 					try {
 						if (msg && typeof msg.startUuid === 'string' && msg.startUuid) {
+							if (this._activeGameStartUuid && msg.startUuid !== this._activeGameStartUuid) {
+								console.log('[Client] 🔁 Restart detected (startUuid changed) - clearing pending moves', {
+									from: String(this._activeGameStartUuid).slice(0, 8),
+									to: String(msg.startUuid).slice(0, 8)
+								});
+								this._cancelPendingMoves();
+								if (this._blockedMoves.length > 0) {
+									console.log('[Client] 🗑️ Discarding', this._blockedMoves.length, 'blocked move(s) due to restart');
+									this._blockedMoves = [];
+								}
+							}
+							this._activeGameStartUuid = msg.startUuid;
 							this._pendingStartUuid = null;
 						}
 					} catch { /* ignore */ }

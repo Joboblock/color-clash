@@ -599,19 +599,31 @@ wss.on('connection', (ws) => {
             const startUuidShort = startUuid ? String(startUuid).slice(0, 8) : 'none';
             console.log(`[Start] 🎮 Host ${meta.name} initiating start for room ${meta.roomName} with ${playerCount} players (startUuid=${startUuidShort})`);
 
-            // Check if game already started (host is retrying after start_cnf was lost)
+            // If a game already started, only treat this as a duplicate retry if the uuid matches.
+            // A different uuid signals a game restart and should be processed like the game never started.
             if (room.game && room.game.started) {
-                console.log(`[Start] 🔄 Game already started, resending start_cnf to host ${meta.name}`);
-                const colorsPayload = {
-                    type: 'start_cnf',
-                    room: meta.roomName,
-                    players: room.game.players,
-                    gridSize: room.game.gridSize || 3, // Use stored gridSize
-                    colors: room.game.colors,
-                    startUuid
-                };
-                try { sendPayload(ws, colorsPayload); } catch (err) { console.error('[Server] Failed to resend colors to host', err); }
-                return;
+                const currentStartUuid = (room.game && typeof room.game.startUuid === 'string') ? room.game.startUuid : null;
+                const isSameUuid = !!(startUuid && currentStartUuid && startUuid === currentStartUuid);
+                
+                if (isSameUuid) {
+                    console.log(`[Start] 🔄 Game already started (same startUuid), resending start_cnf to host ${meta.name}`);
+                    const colorsPayload = {
+                        type: 'start_cnf',
+                        room: meta.roomName,
+                        players: room.game.players,
+                        gridSize: room.game.gridSize || 3, // Use stored gridSize
+                        colors: room.game.colors,
+                        startUuid
+                    };
+                    try { sendPayload(ws, colorsPayload); } catch (err) { console.error('[Server] Failed to resend colors to host', err); }
+                    return;
+                }
+
+                console.log(`[Start] 🔁 Restart requested (new startUuid). Resetting game state for room ${meta.roomName} (old=${currentStartUuid ? String(currentStartUuid).slice(0, 8) : 'none'} new=${startUuidShort})`);
+                // Reset any previous start handshake and game state.
+                delete room._startAcks;
+                delete room._lastSeqByName;
+                room.game = null;
             }
 
             // Initiate color collection before starting (similar to move confirmation flow)
@@ -685,6 +697,7 @@ wss.on('connection', (ws) => {
                     turnIndex: 0,
                     colors: assigned,
                     gridSize, // Store for potential retry
+                    startUuid,
                     moveSeq: 0,
                     recentMoves: []
                 };
@@ -1038,6 +1051,7 @@ wss.on('connection', (ws) => {
                     turnIndex: 0,
                     colors: assigned.slice(),
                     gridSize, // Store for potential retry
+                    startUuid: room._startAcks.startUuid,
                     // moveSeq is the next sequence number to be played (0-based)
                     moveSeq: 0,
                     recentMoves: []

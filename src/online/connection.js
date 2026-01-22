@@ -261,6 +261,30 @@ export class OnlineConnection {
 	 * @returns {string}
 	 */
 	_generateSessionId() {
+		// Prefer standards-based UUIDs over Math.random-based IDs.
+		// crypto.randomUUID() is supported by modern browsers; we keep a no-deps fallback.
+		try {
+			// Browser global
+			if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+				return crypto.randomUUID();
+			}
+		} catch { /* ignore */ }
+
+		// Fallback: RFC4122-ish v4 UUID using crypto.getRandomValues.
+		try {
+			if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+				const bytes = new Uint8Array(16);
+				crypto.getRandomValues(bytes);
+				// Set version to 4
+				bytes[6] = (bytes[6] & 0x0f) | 0x40;
+				// Set variant to RFC4122
+				bytes[8] = (bytes[8] & 0x3f) | 0x80;
+				const hex = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+				return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+			}
+		} catch { /* ignore */ }
+
+		// Last-resort fallback (kept for extreme environments). Not cryptographically strong.
 		return `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
 	}
 

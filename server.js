@@ -2,6 +2,7 @@
 const PLAYER_NAME_LENGTH = 12;
 import http from 'http';
 import process from 'node:process';
+import * as crypto from 'node:crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createReadStream } from 'fs';
@@ -1395,5 +1396,20 @@ function generateRoomKey() {
 
 // Generate a unique session ID for tracking client sessions across reconnects
 function generateSessionId() {
+    // Prefer standards-based UUIDs over Math.random-based IDs.
+    try {
+        // Node (ESM): crypto is imported at module scope.
+        if (typeof crypto?.randomUUID === 'function') return crypto.randomUUID();
+        if (typeof crypto?.randomBytes === 'function') {
+            const bytes = crypto.randomBytes(16);
+            // RFC4122 v4
+            bytes[6] = (bytes[6] & 0x0f) | 0x40;
+            bytes[8] = (bytes[8] & 0x3f) | 0x80;
+            const hex = bytes.toString('hex');
+            return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+        }
+    } catch { /* ignore */ }
+
+    // Last-resort fallback (kept for extreme environments). Not cryptographically strong.
     return `${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
 }

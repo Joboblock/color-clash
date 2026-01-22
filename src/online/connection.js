@@ -80,6 +80,8 @@ export class OnlineConnection {
 		this._backoffMs = initialBackoffMs;
 		this._ws = null;
 		this._reconnectTimer = null;
+		// When true, automatic reconnect (on close) is suppressed until the next explicit connect.
+		this._suppressReconnect = false;
 		this._everOpened = false;
 		this._events = new Map();
 		this._debug = debug;
@@ -334,6 +336,8 @@ export class OnlineConnection {
 	 * Sets up message routing and schedules reconnect on close.
 	 */
 	connect() {
+		// Explicit connect re-enables reconnect scheduling
+		this._suppressReconnect = false;
 		if (this._ws && (this._ws.readyState === WebSocket.OPEN || this._ws.readyState === WebSocket.CONNECTING)) return;
 		const url = this._getWebSocketUrl();
 		this._log('connecting to', url);
@@ -623,7 +627,11 @@ export class OnlineConnection {
 		ws.onclose = () => {
 			// Stop ping timer
 			this._stopPingTimer();
-			console.warn('[Client] 🔄 WebSocket closed, preparing to reconnect...');
+			if (this._suppressReconnect) {
+				console.info('[Client] 📴 WebSocket closed (reconnect suppressed)');
+			} else {
+				console.warn('[Client] 🔄 WebSocket closed, preparing to reconnect...');
+			}
 
 			// Save packets that are still being attempted to be sent
 			this._unsentPackets = [];
@@ -633,7 +641,9 @@ export class OnlineConnection {
 				}
 			}
 			this._emit('close', { wasEverOpened: this._everOpened, unsentPackets: this._unsentPackets });
-			this._scheduleReconnect();
+			if (!this._suppressReconnect) {
+				this._scheduleReconnect();
+			}
 		};
 	}
 
@@ -645,7 +655,8 @@ export class OnlineConnection {
 	/**
 	 * Manually close the socket and cancel any pending reconnect timer.
 	 */
-	disconnect() {
+	disconnect({ suppressReconnect = true } = {}) {
+		this._suppressReconnect = !!suppressReconnect;
 		this._stopPingTimer();
 		if (this._ws) {
 			try { this._ws.close(); } catch { /* ignore */ }
@@ -670,6 +681,7 @@ export class OnlineConnection {
 	 * @private
 	 */
 	_scheduleReconnect() {
+		if (this._suppressReconnect) return;
 		if (this._reconnectTimer) return;
 		const delay = Math.min(this._backoffMs, this._maxBackoffMs);
 		console.warn(`[Client] ⏳ Scheduling reconnect in ${delay} ms (backoff: ${this._backoffMs})`);

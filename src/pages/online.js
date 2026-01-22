@@ -35,7 +35,7 @@ export const onlinePage = {
 	hide(ctx) {
 		const { hideConnBanner, leaveRoom, getMyJoinedRoom, removeUrlRoomKey } = ctx || {};
 		try { hideConnBanner && hideConnBanner(); } catch {/* ignore */ }
-		// Leave the room when exiting the online menu
+		// Leave the room when exiting the online menu (server handles like a normal leave)
 		try {
 			const currentRoom = getMyJoinedRoom && getMyJoinedRoom();
 			if (currentRoom && leaveRoom) {
@@ -46,6 +46,7 @@ export const onlinePage = {
 				removeUrlRoomKey();
 			}
 		} catch {/* ignore */ }
+		// Note: websocket lifecycle is managed centrally by menu navigation (see script.js)
 	}
 };
 

@@ -998,7 +998,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Track client initialization state
     let clientFullyInitialized = false;
 
-    onlineConnection.connect();
+    // Connection is menu-scoped:
+    // - only connect while user is in the online/host menus
+    // - disconnect when leaving them
 
     // Clean up: leave room when page is refreshing, closing, or navigating away
     window.addEventListener('beforeunload', () => {
@@ -1315,6 +1317,11 @@ document.addEventListener('DOMContentLoaded', () => {
             targetId = 'main';
             subMode = menuKey; // main page handles sub-mode selection
         }
+
+		// When switching from Online -> Host, onlinePage.hide() will run.
+		// We do NOT want that transition to send an implicit leave.
+		const activeMenu = getMenuParam() || 'first';
+		const isOnlineToHost = activeMenu === 'online' && menuKey === 'host';
         pageRegistry.open(targetId, {
             subMode,
             onlineConnection,
@@ -1325,14 +1332,32 @@ document.addEventListener('DOMContentLoaded', () => {
             // aiStrengthTile provided via mainPage components
             playerColors,
             startingColorIndex: getStartingColorIndex(),
-            leaveRoom: (roomName) => window.leaveRoom(roomName),
-            getMyJoinedRoom: () => myJoinedRoom,
-            removeUrlRoomKey
+			leaveRoom: isOnlineToHost ? null : (roomName) => window.leaveRoom(roomName),
+			getMyJoinedRoom: isOnlineToHost ? null : (() => myJoinedRoom),
+			removeUrlRoomKey: isOnlineToHost ? null : removeUrlRoomKey
         });
     }
 
     function navigateToMenu(menuKey) {
-        // If navigating to online or host, ensure WS is (re)connecting
+        // If navigating to online or host, ensure WS is (re)connecting.
+        // If leaving online/host menus entirely, close the connection.
+        const activeMenu = getMenuParam() || 'first';
+        const leavingOnlineScope = (activeMenu === 'online' || activeMenu === 'host') && !(menuKey === 'online' || menuKey === 'host');
+        if (leavingOnlineScope) {
+            try { hideConnBanner(); } catch { /* ignore */ }
+
+			// Send a normal leave message before closing the socket so the server
+			// handles this like an explicit player leave (menu exit).
+			try {
+				if (myJoinedRoom && typeof window.leaveRoom === 'function') {
+					window.leaveRoom(myJoinedRoom);
+				} else if (onlineConnection && typeof onlineConnection.leave === 'function') {
+					// If we don't know the room name, the server may infer current room from session.
+					onlineConnection.leave();
+				}
+			} catch { /* ignore */ }
+			try { onlineConnection.disconnect({ suppressReconnect: true }); } catch { /* ignore */ }
+        }
         if (menuKey === 'online' || menuKey === 'host') onlineConnection.ensureConnected();
         setMenuParam(menuKey, true);
         showMenuFor(menuKey);

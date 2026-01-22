@@ -228,6 +228,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Update our player name from the server (important for join_by_key where we don't know our final name)
                 myPlayerName = info.player;
                 myJoinedRoom = roomName;
+                // If we switch rooms without ever hitting the "not in any room" state,
+                // make sure the per-room start suppression does not carry over.
+                try {
+                    const prevRoomKey = myRoomKey || null;
+                    const nextRoomKey = info.roomKey || null;
+                    if (prevRoomKey && nextRoomKey && prevRoomKey !== nextRoomKey) {
+                        window._onlineStartedOnceByRoomKey = window._onlineStartedOnceByRoomKey || Object.create(null);
+                        delete window._onlineStartedOnceByRoomKey[prevRoomKey];
+                    }
+                } catch { /* ignore */ }
                 myRoomKey = info.roomKey || null;
                 myRoomMaxPlayers = Number.isFinite(info.maxPlayers) ? info.maxPlayers : myRoomMaxPlayers;
                 if (Array.isArray(info.players)) { myRoomPlayers = info.players.slice(); myRoomCurrentPlayers = info.players.length; }
@@ -267,6 +277,13 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             // Client is no longer in any room - clear all membership state
             if (myJoinedRoom || myRoomKey) {
+                // Leaving a room should not cause future rooms to ignore their first 'start'.
+                try {
+                    if (typeof window !== 'undefined') {
+                        window._onlineStartedOnceByRoomKey = window._onlineStartedOnceByRoomKey || Object.create(null);
+                        if (myRoomKey) delete window._onlineStartedOnceByRoomKey[myRoomKey];
+                    }
+                } catch { /* ignore */ }
                 myJoinedRoom = null;
                 myRoomKey = null;
                 myRoomMaxPlayers = null;
@@ -303,12 +320,23 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('[Start] Server sent start with colors:', msg.colors);
         if (!clientFullyInitialized) return;
 
-        if (onlineGameActive) {
-            // Already in a started room. Don't reset/recreate anything; just re-ack for server retry logic.
-            console.log('[Start] Already in started room, ignoring start and resending start_ack');
-            onlineConnection.sendStartAck();
-            return;
-        }
+        // Only ignore duplicate 'start' messages if they belong to the SAME room that already started.
+        // If the player leaves and joins a different room, that new room's first 'start' must be processed.
+        try {
+            const currentRoomKey = myRoomKey || null;
+            window._onlineStartedOnceByRoomKey = window._onlineStartedOnceByRoomKey || Object.create(null);
+            const startedOnce = currentRoomKey && window._onlineStartedOnceByRoomKey[currentRoomKey];
+
+            if (onlineGameActive && startedOnce) {
+                // Already in a started instance of this room. Don't reset/recreate anything; just re-ack for server retry logic.
+                console.log('[Start] Already started in this room, ignoring start and resending start_ack', { roomKey: currentRoomKey });
+                onlineConnection.sendStartAck();
+                return;
+            }
+
+            // Mark room as started as soon as we decide to process the start message.
+            if (currentRoomKey) window._onlineStartedOnceByRoomKey[currentRoomKey] = true;
+        } catch { /* ignore */ }
 
         try {
             // Initialize game state for non-host clients
@@ -374,11 +402,22 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('[Start Cnf] Server sent start confirmation with colors:', msg.colors);
         if (!clientFullyInitialized) return;
 
-        if (onlineGameActive) {
-            // If start_cnf is replayed (packet loss/retry), don't recreate/reset mid-game.
-            console.log('[Start Cnf] Already in started game, ignoring duplicate start_cnf');
-            return;
-        }
+        // Only ignore duplicate 'start_cnf' messages if they belong to the SAME room that already started.
+        // If the host leaves and hosts/joins a different room, that new room's first 'start_cnf' must be processed.
+        try {
+            const currentRoomKey = myRoomKey || null;
+            window._onlineStartedOnceByRoomKey = window._onlineStartedOnceByRoomKey || Object.create(null);
+            const startedOnce = currentRoomKey && window._onlineStartedOnceByRoomKey[currentRoomKey];
+
+            if (onlineGameActive && startedOnce) {
+                // If start_cnf is replayed (packet loss/retry), don't recreate/reset mid-game.
+                console.log('[Start Cnf] Already started in this room, ignoring duplicate start_cnf', { roomKey: currentRoomKey });
+                return;
+            }
+
+            // Mark room as started as soon as we decide to process the start confirmation.
+            if (currentRoomKey) window._onlineStartedOnceByRoomKey[currentRoomKey] = true;
+        } catch { /* ignore */ }
 
         try {
             // Initialize game state for host

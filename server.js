@@ -11,7 +11,17 @@ import { WebSocketServer } from 'ws';
 import { APP_VERSION } from './src/version.js';
 import { createInitialRoomGridState, validateAndApplyMove } from './src/game/serverGridEngine.js';
 import { advanceTurnIndex, computeAliveMask } from './src/game/turnCalc.js';
-import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, PACKET_LOSS_RATE, PACKET_DISCONNECT_RATE } from './src/config/index.js';
+import {
+    MAX_CELL_VALUE,
+    INITIAL_PLACEMENT_VALUE,
+    CELL_EXPLODE_THRESHOLD,
+    PACKET_DROP_RATE,
+    PACKET_DELAY_RATE,
+    PACKET_DELAY_MIN_MS,
+    PACKET_DELAY_MAX_MS,
+    PACKET_LOSS_RATE,
+    PACKET_DISCONNECT_RATE
+} from './src/config/index.js';
 
 // Keep server rules aligned with client constants (single source of truth).
 
@@ -135,17 +145,22 @@ const connectionMeta = new Map();
  * @param {object} payload - The payload object to send (will be JSON-stringified).
  */
 function sendPayload(ws, payload) {
-    // Simulate packet loss
+    // Simulate packet drop/delay (debug)
     const type = payload && typeof payload === 'object' ? payload.type : undefined;
-    if (Math.random() < PACKET_LOSS_RATE) {
+    const dropRate = typeof PACKET_DROP_RATE === 'number' ? PACKET_DROP_RATE : PACKET_LOSS_RATE;
+    const delayRate = typeof PACKET_DELAY_RATE === 'number' ? PACKET_DELAY_RATE : 0;
+    if (Math.random() < dropRate) {
         console.warn('[Server] 🔥 Simulated packet loss:', type, payload);
         return;
     }
-    if (Math.random() < PACKET_LOSS_RATE) {
-        console.warn('[Server] 🕒 Simulated packet delay (5s):', type, payload);
+    if (Math.random() < delayRate) {
+        const min = Number.isFinite(PACKET_DELAY_MIN_MS) ? PACKET_DELAY_MIN_MS : 0;
+        const max = Number.isFinite(PACKET_DELAY_MAX_MS) ? PACKET_DELAY_MAX_MS : min;
+        const delay = Math.max(0, Math.floor(min + Math.random() * Math.max(0, max - min)));
+        console.warn(`[Server] 🕒 Simulated packet delay (${delay}ms):`, type, payload);
         setTimeout(() => {
             sendPayloadDelayed(ws, payload);
-        }, 5000);
+        }, delay);
         return;
     }
     try {

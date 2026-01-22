@@ -1,5 +1,13 @@
 import { WS_PROD_BASE_URL, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from '../config/index.js';
-import { PACKET_LOSS_RATE, PACKET_DISCONNECT_RATE } from '../config/index.js';
+import {
+	PACKET_DROP_RATE,
+	PACKET_DELAY_RATE,
+	PACKET_DELAY_MIN_MS,
+	PACKET_DELAY_MAX_MS,
+	PACKET_DISCONNECT_RATE,
+	// Back-compat
+	PACKET_LOSS_RATE
+} from '../config/index.js';
 /**
 /**
  * OnlineConnection encapsulates the WebSocket lifecycle for Color Clash, providing
@@ -733,17 +741,22 @@ export class OnlineConnection {
 	 * @param {object} obj Serializable object payload.
 	 */
 	_sendPayload(obj) {
-		// Simulate packet loss
+		// Simulate packet drop/delay/disconnect (debug)
 		const type = obj && typeof obj === 'object' ? obj.type : undefined;
-		if (Math.random() < PACKET_LOSS_RATE) {
+		const dropRate = typeof PACKET_DROP_RATE === 'number' ? PACKET_DROP_RATE : PACKET_LOSS_RATE;
+		const delayRate = typeof PACKET_DELAY_RATE === 'number' ? PACKET_DELAY_RATE : 0;
+		if (Math.random() < dropRate) {
 			console.warn('[Client] 🔥 Simulated packet loss:', type, obj);
 			return;
 		}
-		if (Math.random() < PACKET_LOSS_RATE) {
-			console.warn('[Client] 🕒 Simulated packet delay (5s):', type, obj);
+		if (Math.random() < delayRate) {
+			const min = Number.isFinite(PACKET_DELAY_MIN_MS) ? PACKET_DELAY_MIN_MS : 0;
+			const max = Number.isFinite(PACKET_DELAY_MAX_MS) ? PACKET_DELAY_MAX_MS : min;
+			const delay = Math.max(0, Math.floor(min + Math.random() * Math.max(0, max - min)));
+			console.warn(`[Client] 🕒 Simulated packet delay (${delay}ms):`, type, obj);
 			setTimeout(() => {
 				this._sendPayloadDelayed(obj);
-			}, 5000);
+			}, delay);
 			return;
 		}
 		try {

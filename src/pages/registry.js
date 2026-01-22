@@ -27,7 +27,10 @@ class PageRegistry {
             try {
                 const el = document.querySelector(p.selector);
                 if (el && p.selector !== target.selector) {
+                    const active = document.activeElement;
+                    if (active && el.contains(active)) active.blur?.();
                     el.classList.add('hidden');
+                    el.toggleAttribute('inert', true);
                     el.setAttribute('aria-hidden', 'true');
                     if (p.hide) { try { p.hide(ctx); } catch { /* ignore */ } }
                 }
@@ -38,6 +41,7 @@ class PageRegistry {
             const el = document.querySelector(target.selector);
             if (el) {
                 el.classList.remove('hidden');
+                el.toggleAttribute('inert', false);
                 el.setAttribute('aria-hidden', 'false');
             }
             if (target.show) { try { target.show(ctx); } catch { /* ignore */ } }

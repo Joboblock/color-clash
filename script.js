@@ -1294,7 +1294,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Helpers ---
     const setHidden = (el, hidden) => {
         if (!el) return;
+        // If a descendant is focused, blur it before hiding to avoid `aria-hidden` warnings.
+        if (hidden) {
+            const active = document.activeElement;
+            if (active && el.contains(active)) active.blur?.();
+        }
         el.classList.toggle('hidden', !!hidden);
+        // Use `inert` so that hidden menus can't retain or receive focus.
+        // Keep `aria-hidden` in sync for assistive technologies.
+        el.toggleAttribute('inert', !!hidden);
         el.setAttribute('aria-hidden', hidden ? 'true' : 'false');
         // If we're hiding Online/Host menus, make sure to hide any connection banner
         if (hidden) {

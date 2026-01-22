@@ -580,7 +580,9 @@ wss.on('connection', (ws) => {
                 sendPayload(ws, { type: 'error', error: 'Room is not full yet' });
                 return;
             }
-            console.log(`[Start] 🎮 Host ${meta.name} initiating start for room ${meta.roomName} with ${playerCount} players`);
+            const startUuid = (msg && typeof msg.startUuid === 'string' && msg.startUuid) ? msg.startUuid : null;
+            const startUuidShort = startUuid ? String(startUuid).slice(0, 8) : 'none';
+            console.log(`[Start] 🎮 Host ${meta.name} initiating start for room ${meta.roomName} with ${playerCount} players (startUuid=${startUuidShort})`);
 
             // Check if game already started (host is retrying after start_cnf was lost)
             if (room.game && room.game.started) {
@@ -590,7 +592,8 @@ wss.on('connection', (ws) => {
                     room: meta.roomName,
                     players: room.game.players,
                     gridSize: room.game.gridSize || 3, // Use stored gridSize
-                    colors: room.game.colors
+                    colors: room.game.colors,
+                    startUuid
                 };
                 try { sendPayload(ws, colorsPayload); } catch (err) { console.error('[Server] Failed to resend colors to host', err); }
                 return;
@@ -623,7 +626,7 @@ wss.on('connection', (ws) => {
                 // Case 2: Colors collected but not all colors_acks received - resend start to non-host clients who haven't acked
                 if (room._startAcks.colorsAcksReceived.size < room._startAcks.colorsAcksExpected) {
                     console.log(`[Start] 🔄 Colors collected but acks pending (${room._startAcks.colorsAcksReceived.size}/${room._startAcks.colorsAcksExpected}), resending colors...`);
-                    const colorsPayload = JSON.stringify({ type: 'start', room: meta.roomName, players, colors: room._startAcks.assignedColors, gridSize: room._startAcks.gridSize });
+                    const colorsPayload = JSON.stringify({ type: 'start', room: meta.roomName, players, colors: room._startAcks.assignedColors, gridSize: room._startAcks.gridSize, startUuid: room._startAcks.startUuid });
                     let resentCount = 0;
                     otherParticipants.forEach(p => {
                         // Only resend to clients who haven't sent start_ack yet
@@ -638,7 +641,7 @@ wss.on('connection', (ws) => {
 
                 // Case 3: All acks received, just resend start_cnf to host
                 console.log(`[Start] 🔄 All acks collected, resending colors to host`);
-                const colorsPayload = { type: 'start_cnf', room: meta.roomName, players, colors: room._startAcks.assignedColors, gridSize: room._startAcks.gridSize };
+                const colorsPayload = { type: 'start_cnf', room: meta.roomName, players, colors: room._startAcks.assignedColors, gridSize: room._startAcks.gridSize, startUuid: room._startAcks.startUuid || startUuid };
                 try { sendPayload(ws, colorsPayload); } catch (err) { console.error('[Server] Failed to resend colors to host', err); }
                 return;
             }
@@ -677,7 +680,7 @@ wss.on('connection', (ws) => {
                     console.error('[Start] Failed to initialize grid state (solo host)', err);
                 }
                 if (!room._lastSeqByName) room._lastSeqByName = new Map();
-                const colorsPayload = { type: 'start_cnf', room: meta.roomName, players, gridSize, colors: assigned };
+                const colorsPayload = { type: 'start_cnf', room: meta.roomName, players, gridSize, colors: assigned, startUuid };
                 console.log(`[Start] ✅ Sending immediate start_cnf to solo host ${meta.name}`);
                 try { sendPayload(ws, colorsPayload); } catch (err) { console.error('[Server] Failed to send start_cnf to host', err); }
                 return;
@@ -701,7 +704,8 @@ wss.on('connection', (ws) => {
                 hostWs: ws,
                 hostSessionId: senderSessionId,
                 hostName: meta.name,
-                gridSize // Store for later use when sending to host
+                gridSize, // Store for later use when sending to host
+                startUuid
             };
             room._startAcks = collect;
 
@@ -1037,7 +1041,7 @@ wss.on('connection', (ws) => {
                 room._startAcks.colorsAcksExpected = otherParticipants.length;
                 room._startAcks.colorsAcksReceived = new Set(); // Track by sessionId
 
-                const colorsPayload = JSON.stringify({ type: 'start', room: meta.roomName, players, colors: assigned, gridSize });
+                const colorsPayload = JSON.stringify({ type: 'start', room: meta.roomName, players, colors: assigned, gridSize, startUuid: room._startAcks.startUuid });
                 console.log(`[Start Ack] 📤 Sending colors to ${otherParticipants.length} non-host clients`);
                 otherParticipants.forEach(p => {
                     if (p.ws.readyState === 1) {
@@ -1072,7 +1076,7 @@ wss.on('connection', (ws) => {
                 const players = room.game.players;
                 const colors = room._startAcks.assignedColors;
                 const gridSize = room._startAcks.gridSize;
-                const colorsPayload = { type: 'start_cnf', room: meta.roomName, players, colors, gridSize };
+                const colorsPayload = { type: 'start_cnf', room: meta.roomName, players, colors, gridSize, startUuid: room._startAcks.startUuid };
                 console.log(`[Colors Ack] 📤 Sending colors confirmation to host...`);
                 try { sendPayload(room._startAcks.hostWs, colorsPayload); } catch (err) { console.error('[Server] Failed to send colors to host', err); }
 

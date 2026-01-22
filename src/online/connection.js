@@ -100,7 +100,8 @@ export class OnlineConnection {
 		this._sessionRestorationAttempted = false;
 		// Track if we're currently restoring a session (blocks moves)
 		this._isRestoringSession = false;
-		// Queue for moves blocked during restoration
+		// UUID for the current logical start attempt; must persist across start_req retries.
+		this._pendingStartUuid = null;
 		this._blockedMoves = [];
 		// Ping/pong keepalive tracking
 		this._lastMessageTime = Date.now();
@@ -527,6 +528,12 @@ export class OnlineConnection {
 					break;
 				case 'start_cnf':
 					// Server sends 'start_cnf' to host as final confirmation
+					// Clear pending start UUID after we get a server response.
+					try {
+						if (msg && typeof msg.startUuid === 'string' && msg.startUuid) {
+							this._pendingStartUuid = null;
+						}
+					} catch { /* ignore */ }
 					this._emit('start_cnf', msg);
 					break;
 				case 'joined':
@@ -878,7 +885,11 @@ export class OnlineConnection {
 	 * @param {number} [gridSize]
 	 */
 	start(gridSize) {
-		const payload = { type: 'start_req' };
+		// Track a UUID per logical start attempt so retries keep the same identity.
+		if (!this._pendingStartUuid) {
+			this._pendingStartUuid = this._generateSessionId();
+		}
+		const payload = { type: 'start_req', startUuid: this._pendingStartUuid };
 		if (Number.isInteger(gridSize)) payload.gridSize = gridSize;
 		// Store gridSize for retry and mark this client as host
 		this._lastStartGridSize = gridSize;

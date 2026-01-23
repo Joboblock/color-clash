@@ -465,8 +465,12 @@ export class OnlineConnection {
 			let msg; try { msg = JSON.parse(evt.data); } catch { return; }
 			const type = msg.type;
 
-			// Reset ping timer on any message received
-			this._resetPingTimer();
+			// Reset ping timer only on gameplay/catch-up packets.
+			// This keeps the keepalive meaningful: lobby/menu traffic (roomlist/info/etc)
+			// shouldn't prevent a timeout while a game connection is effectively stale.
+			if (type === 'move' || type === 'missing_moves' || type === 'rejoined') {
+				this._resetPingTimer();
+			}
 
 			// Log received packet with additional info for roomlist
 			if (type === 'roomlist') {

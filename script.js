@@ -794,19 +794,41 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log(`[Catch-up] Ignoring stale missing_moves: already at lastAppliedSeq=${lastAppliedSeq} >= serverSeq=${serverSeq}`);
                 return;
             }
-            for (const m of moves) {
-                if (!m || !Number.isInteger(m.seq)) continue;
-                const seq = Number(m.seq);
-                // lastAppliedSeq is the next expected seq, so we must still accept seq === lastAppliedSeq.
-                if (seq < (Number(lastAppliedSeq) || 0)) continue;
-                pendingMoves.set(seq, { r: Number(m.row), c: Number(m.col) });
-            }
-            // Try to apply starting from our current lastAppliedSeq.
-            tryApplyBufferedMoves();
+            applyCatchUpMoves(moves, 'missing_moves');
         } catch (err) {
             console.error('[Catch-up] Error applying missing moves:', err);
         }
     });
+
+    /**
+     * Treat any catch-up move payload (missing_moves.recovered slice OR rejoined.recentMoves)
+     * identically: buffer by seq (>= lastAppliedSeq) and then drain in-order.
+     *
+     * `lastAppliedSeq` is the next seq we still need to apply.
+     * @param {Array<{seq:number,row:number,col:number}>} moves
+     * @param {string} source
+     */
+    function applyCatchUpMoves(moves, source) {
+        if (!onlineGameActive) return;
+        const list = Array.isArray(moves) ? moves : [];
+        if (list.length === 0) return;
+
+        // Preserve the important invariant: we never advance lastAppliedSeq by skipping.
+        // Buffering + tryApplyBufferedMoves() ensures ordered, contiguous application.
+        for (const m of list) {
+            if (!m || !Number.isInteger(m.seq)) continue;
+            const seq = Number(m.seq);
+            if (seq < (Number(lastAppliedSeq) || 0)) continue;
+            const r = Number(m.row);
+            const c = Number(m.col);
+            if (!Number.isInteger(r) || !Number.isInteger(c)) continue;
+            pendingMoves.set(seq, { r, c });
+        }
+        if (list.length) {
+            console.log(`[Catch-up] Buffered ${list.length} move(s) from ${source}. lastAppliedSeq=${lastAppliedSeq}`);
+        }
+        tryApplyBufferedMoves();
+    }
     onlineConnection.on('move_ack', (msg) => {
         try {
             console.log(`[Move Ack] Received move confirmation:`, msg, `onlineGameActive=${onlineGameActive}, lastAppliedSeq=${lastAppliedSeq}, myOnlineIndex=${myOnlineIndex}`);
@@ -865,25 +887,10 @@ document.addEventListener('DOMContentLoaded', () => {
         myRoomMaxPlayers = Number.isFinite(msg.maxPlayers) ? msg.maxPlayers : myRoomMaxPlayers;
         // Clear pending echo on rejoin - we'll get the full state from server
         pendingEchoSeq = null;
-        try {
-            const missed = Array.isArray(msg.recentMoves) ? msg.recentMoves.slice() : [];
-            if (missed.length) {
-                // IMPORTANT: never apply out-of-order on rejoin.
-                // If seq 6 fails but seq 7 succeeds, advancing lastAppliedSeq to 7 creates a gap.
-                // From then on, the buffer drain starts at 8 and you can never apply seq 6 again.
-                missed.sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0));
 
-                for (const m of missed) {
-                    const r = Number(m.row), c = Number(m.col); const seq = Number(m.seq);
-                    if (!Number.isInteger(seq) || !Number.isInteger(r) || !Number.isInteger(c)) continue;
-                    if (seq <= (Number(lastAppliedSeq) || 0)) continue;
-                    pendingMoves.set(seq, { r, c });
-                }
-
-                // Try apply in-order (will also handle deferring while isProcessing).
-                tryApplyBufferedMoves();
-            }
-        } catch { /* ignore */ }
+        // Handle rejoin catch-up moves the same way as ping-based missing_moves.
+        // (Server semantics: recentMoves is a slice of moves with seq >= clientNextSeq.)
+        try { applyCatchUpMoves(msg.recentMoves, 'rejoined'); } catch { /* ignore */ }
 
         // Ensure our local turn pointer matches our catch-up position.
         onlineTurnSeq = Number(lastAppliedSeq) || 0;

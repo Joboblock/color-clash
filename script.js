@@ -954,6 +954,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const inRoom = !!myJoinedRoom;
         const isFull = inRoom && Number.isFinite(myRoomMaxPlayers) && myRoomCurrentPlayers >= myRoomMaxPlayers;
+
+        // If we have an active online game but the online menu is open, show a "Rejoin Game" button.
+        // This resumes the existing in-memory grid state without recreating/resetting anything.
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const menu = params.get('menu');
+            const inOnlineMenu = menu === 'online';
+            if (inOnlineMenu && onlineGameActive) {
+                btn.textContent = 'Rejoin Game';
+                btn.disabled = false;
+                btn.classList.add('rejoin-mode');
+                btn.classList.remove('start-mode');
+                btn.removeAttribute('aria-disabled');
+                btn.title = 'Return to the active game';
+                return;
+            }
+            btn.classList.remove('rejoin-mode');
+        } catch { /* ignore */ }
         // Determine host name: prefer roomlist hostName, else first player in myRoomPlayers
         let hostName = null;
         if (rooms && myJoinedRoom && rooms[myJoinedRoom] && rooms[myJoinedRoom].hostName) {
@@ -1052,6 +1070,37 @@ document.addEventListener('DOMContentLoaded', () => {
     if (hostCustomGameBtnRef) {
         hostCustomGameBtnRef.addEventListener('click', (e) => {
             const btn = e.currentTarget;
+            // If we're in Rejoin Game mode, just close menus and resume the existing game UI.
+            if (btn.classList && btn.classList.contains('rejoin-mode') && !btn.disabled) {
+                try {
+                    // Hide menus but do NOT recreate/reset the grid.
+                    const firstMenu = document.getElementById('firstMenu');
+                    const mainMenu = document.getElementById('mainMenu');
+                    const onlineMenu = document.getElementById('onlineMenu');
+                    if (firstMenu) setHidden(firstMenu, true);
+                    if (mainMenu) setHidden(mainMenu, true);
+                    if (onlineMenu) setHidden(onlineMenu, true);
+
+                    // Create a history entry for returning to the game.
+                    // Other menu transitions call `setMenuParam(..., true)` which pushes a state;
+                    // our previous implementation used `removeMenuParam()` which only replaces
+                    // the current entry, so Back had nothing to return to.
+                    try {
+                        // Preserve existing query params (especially `key`) but remove only `menu`.
+                        const params = new URLSearchParams(window.location.search);
+                        params.delete('menu');
+                        const newUrl = params.toString()
+                            ? `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`
+                            : `${window.location.pathname}${window.location.hash || ''}`;
+                        window.history.pushState({ ...(window.history.state || {}), menu: null }, '', newUrl);
+                    } catch {
+                        window.history.pushState({ ...(window.history.state || {}), menu: null }, '', window.location.pathname + window.location.hash);
+                    }
+                    updateGrid();
+                    try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+                } catch { /* ignore */ }
+                return;
+            }
             // If we're in Start Game mode and enabled, trigger online start (stub)
             if (btn.classList && btn.classList.contains('start-mode') && !btn.disabled) {
                 if (!clientFullyInitialized) return;

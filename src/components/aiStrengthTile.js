@@ -107,13 +107,11 @@ export class AIStrengthTile {
     setValueRenderer(fn) {
         if (typeof fn === 'function') {
             this.valueRenderer = fn;
-            // Use double RAF on first injection so initial centered state is committed before animating outwards.
+            // Use a single RAF on first injection so the browser commits an initial paint before animating.
             if (!this._firstPaintDone) {
                 requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                        this.updatePreview();
-                        this._firstPaintDone = true;
-                    });
+                    this.updatePreview();
+                    this._firstPaintDone = true;
                 });
             } else {
                 this.updatePreview();

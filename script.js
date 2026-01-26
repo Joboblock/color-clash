@@ -2742,9 +2742,16 @@ document.addEventListener('DOMContentLoaded', () => {
             valueCircle._removalTimer = tid;
         }
 
-        // One RAF to trigger all transitions together
+        // One RAF to trigger all transitions together.
+        // For the AI preview tile specifically, we also force a layout flush before applying
+        // the "final" state so repeated keyboard triggers (Enter/Space) reliably restart
+        // the transition even when the element stays focused.
         requestAnimationFrame(() => {
-            // Optionally one more RAF can be used on extremely picky browsers, but usually one is enough.
+            if (isAIPreview && newElements.length) {
+                // Force the browser to commit the "start" state (centered, opacity 0)
+                // before we apply final positions/opacity.
+                void newElements[0].el.offsetWidth;
+            }
             for (const item of newElements) {
                 const { el, x, y } = item;
                 // compute percent relative to the *element's own width*, as translate(%) uses the element box

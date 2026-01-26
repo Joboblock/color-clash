@@ -968,7 +968,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const params = new URLSearchParams(window.location.search);
             const menu = params.get('menu');
             const inOnlineMenu = menu === 'online';
-            if (inOnlineMenu && onlineGameActive) {
+            if (inOnlineMenu && onlineGameActive && !gameWon) {
                 btn.textContent = 'Rejoin Game';
                 btn.disabled = false;
                 btn.classList.add('rejoin-mode');

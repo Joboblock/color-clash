@@ -2943,10 +2943,10 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function maybeTriggerAIMove() {
         if (!practiceMode || gameWon || isProcessing || currentPlayer === humanPlayer) return;
-        if (mainMenu && !mainMenu.classList.contains('hidden')) return;
+        if (isAnyMenuOpen && isAnyMenuOpen()) return;
         setTimeout(() => {
             if (isProcessing || gameWon || currentPlayer === humanPlayer) return;
-            if (mainMenu && !mainMenu.classList.contains('hidden')) return;
+            if (isAnyMenuOpen && isAnyMenuOpen()) return;
             aiMakeMoveFor(currentPlayer);
         }, 350);
     }

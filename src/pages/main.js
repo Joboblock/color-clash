@@ -115,9 +115,12 @@ export const mainPage = {
                 getIndex: () => getStartingColorIndex(),
                 setIndex: (idx) => setStartingColorIndex(idx),
                 isMenuOpen: () => {
+                    // Treat any visible menu as "menu open" so the body tint updates immediately
+                    // (first/main/online menus can all be shown depending on navigation).
+                    const firstMenu = document.getElementById('firstMenu');
                     const mainMenu = document.getElementById('mainMenu');
                     const onlineMenu = document.getElementById('onlineMenu');
-                    return !!((mainMenu && !mainMenu.classList.contains('hidden')) || (onlineMenu && !onlineMenu.classList.contains('hidden')));
+                    return !!((firstMenu && !firstMenu.classList.contains('hidden')) || (mainMenu && !mainMenu.classList.contains('hidden')) || (onlineMenu && !onlineMenu.classList.contains('hidden')));
                 },
                 onChange: (idx, reason) => {
                     try {

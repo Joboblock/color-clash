@@ -14,7 +14,7 @@
  * @param {(idx:number) => void} options.setIndex - Sets current starting color index (0-based).
  * @param {(idx:number, reason:'click'|'init') => void} [options.onChange] - Notified when index changes.
  * @param {() => boolean} [options.isMenuOpen] - If true, body background is tinted on change.
- * @param {string} [options.storageKey='colorCyclerIndex'] - LocalStorage key for persistence.
+ * @param {string} [options.storageKey='colorIndex'] - LocalStorage key for persistence.
  */
 function ColorCycler(options) {
 	const opts = options || {};
@@ -26,7 +26,7 @@ function ColorCycler(options) {
 	this.setIndex = ensureFn(opts.setIndex, function () { });
 	this.onChange = typeof opts.onChange === 'function' ? opts.onChange : null;
 	this.isMenuOpen = typeof opts.isMenuOpen === 'function' ? opts.isMenuOpen : () => false;
-	this.storageKey = typeof opts.storageKey === 'string' ? opts.storageKey : 'colorCyclerIndex';
+	this.storageKey = typeof opts.storageKey === 'string' ? opts.storageKey : 'colorIndex';
 
 	this._clickHandler = this._onClick.bind(this);
 
@@ -40,11 +40,17 @@ function ColorCycler(options) {
 	}
 
 	// Reflect current state
-	this._applyToCyclers();
-	this._applyBodyTint();
-	if (this.onChange) {
-		try { this.onChange(this.getIndex(), 'init'); } catch { /* ignore */ }
-	}
+	// Defer initial paint to ensure palette CSS variables are applied before reading computed styles.
+	const raf = (typeof requestAnimationFrame === 'function')
+		? requestAnimationFrame
+		: (fn) => setTimeout(fn, 0);
+	raf(() => {
+		try { this._applyToCyclers(); } catch { /* ignore */ }
+		try { this._applyBodyTint(); } catch { /* ignore */ }
+		if (this.onChange) {
+			try { this.onChange(this.getIndex(), 'init'); } catch { /* ignore */ }
+		}
+	});
 
 	// Wire events
 	if (this.mainEl) this.mainEl.addEventListener('click', this._clickHandler);

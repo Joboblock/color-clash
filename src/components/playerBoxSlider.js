@@ -98,6 +98,7 @@ PlayerBoxSlider.prototype._attachEvents = function () {
         const target = e.target.closest('.menu-color-box');
         if (target) return;
         self._isDragging = true;
+        self.rootEl.style.cursor = 'ew-resize';
         try { self.rootEl.setPointerCapture(e.pointerId); } catch { /* ignore */ }
         self._setCountFromPointer(e.clientX);
     };
@@ -107,9 +108,10 @@ PlayerBoxSlider.prototype._attachEvents = function () {
     };
     this._onPointerUp = function (e) {
         self._isDragging = false;
+        self.rootEl.style.cursor = 'pointer';
         try { self.rootEl.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
     };
-    this._onPointerCancel = function () { self._isDragging = false; };
+    this._onPointerCancel = function () { self._isDragging = false; self.rootEl.style.cursor = 'pointer'; };
     this._onPointerLeave = function (e) { if (self._isDragging) self._setCountFromPointer(e.clientX); };
 
     this.rootEl.addEventListener('pointerdown', this._onPointerDown);

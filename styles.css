@@ -881,8 +881,8 @@ button,
     position: relative;
     box-sizing: border-box;
     /* ensure padding stays inside width */
-    /* Make it clear the slider is horizontal */
-    cursor: ew-resize;
+    /* Default: pointer cursor for affordance */
+    cursor: pointer;
 }
 
 /* Fallback for browsers without subgrid support */

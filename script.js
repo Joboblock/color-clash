@@ -1708,7 +1708,7 @@ document.addEventListener('DOMContentLoaded', () => {
             [curRect.right, centerY]
         ];
         let candidates = [];
-        let minAngle = Math.PI / 2;
+        let minAngle = Math.PI * (70 / 180); // 70°
         for (const el of focusables) {
             if (el === focused) continue;
             const r = el.getBoundingClientRect();
@@ -2165,8 +2165,8 @@ document.addEventListener('DOMContentLoaded', () => {
             'ArrowDown': { vx: 0, vy: 1 }
         };
         const { vx, vy } = dirMap[mappedKey];
-        // Always pick the own cell with the smallest angle (<90°), tiebreaker by distance
-        let minAngle = Math.PI / 2; // 90°
+        // Always pick the own cell with the smallest angle (<minAngle°), tiebreaker by distance
+        let minAngle = Math.PI * (70 / 180); // 70°
         let minDist = Infinity;
         let bestCell = null;
         for (const cell of cells) {

@@ -13,16 +13,27 @@ export class AIStrengthTile {
      * @param {(val:number) => void} [opts.onStrengthChange] - Callback invoked when strength cycles.
      * @param {number} [opts.initialStrength=1] - Initial strength value (1..5).
      */
-    constructor({ previewCellEl, getPlayerColors, getStartingColorIndex, onStrengthChange, initialStrength = 1, updateValueCircles }) {
+    constructor({ previewCellEl, getPlayerColors, getStartingColorIndex, onStrengthChange, initialStrength = 1, updateValueCircles, storageKey = 'aiStrength' }) {
         this.previewCellEl = previewCellEl || null;
         this.getPlayerColors = typeof getPlayerColors === 'function' ? getPlayerColors : () => [];
         this.getStartingColorIndex = typeof getStartingColorIndex === 'function' ? getStartingColorIndex : () => 0;
         this.onStrengthChange = typeof onStrengthChange === 'function' ? onStrengthChange : null;
+        this.storageKey = typeof storageKey === 'string' && storageKey ? storageKey : 'aiStrength';
         this.strength = this._clampStrength(initialStrength);
+        // Restore persisted strength if present
+        try {
+            const raw = localStorage.getItem(this.storageKey);
+            const saved = raw == null ? null : parseInt(String(raw), 10);
+            if (Number.isInteger(saved)) this.strength = this._clampStrength(saved);
+        } catch { /* ignore */ }
         this.valueRenderer = typeof updateValueCircles === 'function' ? updateValueCircles : null;
         this._boundClick = () => this._cycleStrength();
         this._firstPaintDone = false; // Track whether we've passed an initial paint for animation timing
         this._init();
+    }
+
+    _persistStrength() {
+        try { localStorage.setItem(this.storageKey, String(this.strength)); } catch { /* ignore */ }
     }
 
     _clampStrength(v) {
@@ -69,6 +80,7 @@ export class AIStrengthTile {
 
     _cycleStrength() {
         this.strength = (this.strength % 5) + 1;
+        this._persistStrength();
         this.updatePreview();
         if (this.onStrengthChange) {
             try { this.onStrengthChange(this.strength); } catch { /* ignore */ }
@@ -80,6 +92,7 @@ export class AIStrengthTile {
         const nv = this._clampStrength(v);
         if (nv === this.strength) return;
         this.strength = nv;
+        this._persistStrength();
         this.updatePreview();
         if (this.onStrengthChange) {
             try { this.onStrengthChange(this.strength); } catch { /* ignore */ }

@@ -266,7 +266,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
         });
-    if (foundSelf) {
+        if (foundSelf) {
             // Store session info for reconnection when we're in a room
             if (myJoinedRoom && myRoomKey && myPlayerName) {
                 onlineConnection.storeSessionInfo({ roomKey: myRoomKey, playerName: myPlayerName });
@@ -526,7 +526,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // During initial placement, strict seq-driven order is used.
     // After initial placement, this advances via advanceTurnIndex() (skip eliminated players).
     let onlineTurnIndex = 0;
-	let onlineTurnTracker = null;
+    let onlineTurnTracker = null;
     // Defer online turn advancement until explosion processing finalizes eliminations.
     // When a move is applied in online mode, we stash who played + which seq.
     // processExplosions() flushes this once the chain ends.
@@ -581,11 +581,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const n = _stableOnlineCount();
         if (!n) return;
         const seq = Number(onlineTurnSeq) || 0;
-		if (!onlineTurnTracker || onlineTurnTracker.playerCount !== n) {
-			onlineTurnTracker = createOnlineTurnTracker(n);
-		}
-		// Align tracker to our next-to-play seq. For seq>playerCount it keeps internal state.
-		onlineTurnTracker.setSeq(seq, (typeof grid !== 'undefined' ? grid : null), activeColors());
+        if (!onlineTurnTracker || onlineTurnTracker.playerCount !== n) {
+            onlineTurnTracker = createOnlineTurnTracker(n);
+        }
+        // Align tracker to our next-to-play seq. For seq>playerCount it keeps internal state.
+        onlineTurnTracker.setSeq(seq, (typeof grid !== 'undefined' ? grid : null), activeColors());
 
         // Tracker answers "who acts next" without replaying history.
         onlineTurnIndex = onlineTurnTracker.currentPlayer;
@@ -644,9 +644,9 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`[Buffer] Draining seq ${nextSeq} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
             // Moves no longer include fromIndex/nextIndex; derive currentPlayer from our local seq pointer.
             onlineTurnSeq = nextSeq;
-			// During buffered application we may enter processing; keep UI updates consistent.
-			if (isProcessing) scheduleOnlineTurnUiRefresh();
-			else _setOnlineTurnFromSeq();
+            // During buffered application we may enter processing; keep UI updates consistent.
+            if (isProcessing) scheduleOnlineTurnUiRefresh();
+            else _setOnlineTurnFromSeq();
             // Apply with seq context and seq-based placement-phase forcing.
             const prevSeq = _applyingOnlineSeq;
             _applyingOnlineSeq = nextSeq;
@@ -669,8 +669,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 onlineTurnSeq = lastAppliedSeq;
                 // Advance online turn model once per applied move AFTER explosions finalize.
                 try { _scheduleOnlineTurnAdvance(currentPlayer, nextSeq); } catch { /* ignore */ }
-				if (isProcessing) scheduleOnlineTurnUiRefresh();
-				else _setOnlineTurnFromSeq();
+                if (isProcessing) scheduleOnlineTurnUiRefresh();
+                else _setOnlineTurnFromSeq();
                 console.log(`[Buffer] Updated lastAppliedSeq to ${lastAppliedSeq}`);
                 pendingMoves.delete(nextSeq);
                 appliedCount++;
@@ -736,8 +736,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.log(`[Move] Applying seq ${seq} at (${r},${c}) (myOnlineIndex=${myOnlineIndex}), lastAppliedSeq before=${lastAppliedSeq}`);
                     // Moves no longer include fromIndex/nextIndex; derive currentPlayer from local seq pointer.
                     onlineTurnSeq = seq;
-					if (isProcessing) scheduleOnlineTurnUiRefresh();
-					else _setOnlineTurnFromSeq();
+                    if (isProcessing) scheduleOnlineTurnUiRefresh();
+                    else _setOnlineTurnFromSeq();
                     const prevSeq = _applyingOnlineSeq;
                     _applyingOnlineSeq = seq;
                     let prevInitialFlag = null;
@@ -754,8 +754,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         lastAppliedSeq = seq + 1;
                         window.lastAppliedSeq = lastAppliedSeq;
                         onlineTurnSeq = lastAppliedSeq;
-                    // Advance online turn model once per applied move AFTER explosions finalize.
-                    try { _scheduleOnlineTurnAdvance(currentPlayer, seq + 1); } catch { /* ignore */ }
+                        // Advance online turn model once per applied move AFTER explosions finalize.
+                        try { _scheduleOnlineTurnAdvance(currentPlayer, seq + 1); } catch { /* ignore */ }
                         // Defer UI/turn indicator update until any processing ends.
                         scheduleOnlineTurnUiRefresh();
                         // If this move didn't trigger processing, flush immediately so "who's next" updates.
@@ -862,8 +862,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Ensure our 'next seq to apply' is at least seq+1.
                     if ((Number(lastAppliedSeq) || 0) < expectedNextSeq) lastAppliedSeq = expectedNextSeq;
                     onlineTurnSeq = lastAppliedSeq;
-					if (isProcessing) scheduleOnlineTurnUiRefresh();
-					else _setOnlineTurnFromSeq();
+                    if (isProcessing) scheduleOnlineTurnUiRefresh();
+                    else _setOnlineTurnFromSeq();
                     console.log(`[Move Ack] Seq ${seq} confirmed (own move, myOnlineIndex=${myOnlineIndex}). lastAppliedSeq now=${lastAppliedSeq}`);
                     pendingEchoSeq = null; // Clear pending echo
 
@@ -903,8 +903,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Ensure our local turn pointer matches our catch-up position.
         onlineTurnSeq = Number(lastAppliedSeq) || 0;
-		if (isProcessing) scheduleOnlineTurnUiRefresh();
-		else _setOnlineTurnFromSeq();
+        if (isProcessing) scheduleOnlineTurnUiRefresh();
+        else _setOnlineTurnFromSeq();
         updateStartButtonState();
     });
     onlineConnection.on('error', (msg) => {
@@ -1218,11 +1218,11 @@ document.addEventListener('DOMContentLoaded', () => {
             initialPlacements: Array.isArray(initialPlacements) ? initialPlacements.slice() : initialPlacements
         });
 
-    // Apply move locally first (set seq context so handleClick logs include it)
-    const prevSeqCtx = _applyingOnlineSeq;
-    _applyingOnlineSeq = Number(onlineTurnSeq) || 0;
-    const moveApplied = handleClick(row, col);
-    _applyingOnlineSeq = prevSeqCtx;
+        // Apply move locally first (set seq context so handleClick logs include it)
+        const prevSeqCtx = _applyingOnlineSeq;
+        _applyingOnlineSeq = Number(onlineTurnSeq) || 0;
+        const moveApplied = handleClick(row, col);
+        _applyingOnlineSeq = prevSeqCtx;
         console.log(`[Online Move/${source}] handleClick returned ${moveApplied}, lastAppliedSeq before increment: ${lastAppliedSeq}`);
 
         if (moveApplied) {
@@ -1237,8 +1237,8 @@ document.addEventListener('DOMContentLoaded', () => {
             onlineTurnSeq = seqToSend + 1;
             lastAppliedSeq = onlineTurnSeq;
             window.lastAppliedSeq = lastAppliedSeq;
-			// UI/turn indicator update will happen once processing finishes.
-			scheduleOnlineTurnUiRefresh();
+            // UI/turn indicator update will happen once processing finishes.
+            scheduleOnlineTurnUiRefresh();
 
             onlineConnection.sendMove({
                 row,
@@ -1472,10 +1472,10 @@ document.addEventListener('DOMContentLoaded', () => {
             subMode = menuKey; // main page handles sub-mode selection
         }
 
-		// When switching from Online -> Host, onlinePage.hide() will run.
-		// We do NOT want that transition to send an implicit leave.
-		const activeMenu = getMenuParam() || 'first';
-		const isOnlineToHost = activeMenu === 'online' && menuKey === 'host';
+        // When switching from Online -> Host, onlinePage.hide() will run.
+        // We do NOT want that transition to send an implicit leave.
+        const activeMenu = getMenuParam() || 'first';
+        const isOnlineToHost = activeMenu === 'online' && menuKey === 'host';
         pageRegistry.open(targetId, {
             subMode,
             onlineConnection,
@@ -1486,9 +1486,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // aiStrengthTile provided via mainPage components
             playerColors,
             startingColorIndex: getStartingColorIndex(),
-			leaveRoom: isOnlineToHost ? null : (roomName) => window.leaveRoom(roomName),
-			getMyJoinedRoom: isOnlineToHost ? null : (() => myJoinedRoom),
-			removeUrlRoomKey: isOnlineToHost ? null : removeUrlRoomKey
+            leaveRoom: isOnlineToHost ? null : (roomName) => window.leaveRoom(roomName),
+            getMyJoinedRoom: isOnlineToHost ? null : (() => myJoinedRoom),
+            removeUrlRoomKey: isOnlineToHost ? null : removeUrlRoomKey
         });
     }
 
@@ -1500,17 +1500,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (leavingOnlineScope) {
             try { hideConnBanner(); } catch { /* ignore */ }
 
-			// Send a normal leave message before closing the socket so the server
-			// handles this like an explicit player leave (menu exit).
-			try {
-				if (myJoinedRoom && typeof window.leaveRoom === 'function') {
-					window.leaveRoom(myJoinedRoom);
-				} else if (onlineConnection && typeof onlineConnection.leave === 'function') {
-					// If we don't know the room name, the server may infer current room from session.
-					onlineConnection.leave();
-				}
-			} catch { /* ignore */ }
-			try { onlineConnection.disconnect({ suppressReconnect: true }); } catch { /* ignore */ }
+            // Send a normal leave message before closing the socket so the server
+            // handles this like an explicit player leave (menu exit).
+            try {
+                if (myJoinedRoom && typeof window.leaveRoom === 'function') {
+                    window.leaveRoom(myJoinedRoom);
+                } else if (onlineConnection && typeof onlineConnection.leave === 'function') {
+                    // If we don't know the room name, the server may infer current room from session.
+                    onlineConnection.leave();
+                }
+            } catch { /* ignore */ }
+            try { onlineConnection.disconnect({ suppressReconnect: true }); } catch { /* ignore */ }
         }
         if (menuKey === 'online' || menuKey === 'host') onlineConnection.ensureConnected();
         setMenuParam(menuKey, true);
@@ -2295,8 +2295,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // reset game state arrays according to new sizes
         grid = [];
         initialPlacements = Array(playerCount).fill(false);
-    localMoveSeq = 0;
-    localTurnIndex = 0;
+        localMoveSeq = 0;
+        localTurnIndex = 0;
         gameWon = false;
         menuShownAfterWin = false;
         stopExplosionLoop();
@@ -2306,7 +2306,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // - Local / practice: strictly seq-driven (seq % players)
         // - Online: currentPlayer will be driven by received moves/handlers.
         if (!onlineGameActive) {
-			// Initial placement starts at player 0.
+            // Initial placement starts at player 0.
             currentPlayer = playerCount > 0 ? 0 : 0;
         } else {
             currentPlayer = computeStartPlayerIndex(gameColors);
@@ -2440,7 +2440,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         }
 
-    const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+        const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
         const cellColor = getPlayerColor(row, col);
 
         // Phase selection:
@@ -2556,18 +2556,18 @@ document.addEventListener('DOMContentLoaded', () => {
         // If no cells need to explode, end processing
         if (cellsToExplode.length === 0) {
             isProcessing = false;
-                // Online: now that eliminations are final, advance the turn model for the move we just applied.
-                if (onlineGameActive) {
-                    _flushOnlineTurnAdvance();
-                }
+            // Online: now that eliminations are final, advance the turn model for the move we just applied.
+            if (onlineGameActive) {
+                _flushOnlineTurnAdvance();
+            }
             if (initialPlacements.every(placement => placement)) {
                 checkWinCondition();
             }
             if (!gameWon) advanceSeqTurn();
-			// In online mode, update turn UI only after processing (and any eliminations) are finalized.
-			if (onlineGameActive) {
-				flushOnlineTurnUiRefresh();
-			}
+            // In online mode, update turn UI only after processing (and any eliminations) are finalized.
+            if (onlineGameActive) {
+                flushOnlineTurnUiRefresh();
+            }
             // Process any buffered online moves that were waiting for UI to finish
             if (onlineGameActive && typeof tryApplyBufferedMoves === 'function') {
                 tryApplyBufferedMoves();
@@ -3056,7 +3056,7 @@ document.addEventListener('DOMContentLoaded', () => {
             debug: aiDebug
         });
         if (result.scheduleGameEnd) { scheduleGameEnd(); return; }
-    if (result.requireAdvanceTurn) { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; advanceSeqTurn(); return; }
+        if (result.requireAdvanceTurn) { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; advanceSeqTurn(); return; }
         const move = result.chosen;
         if (aiDebug && result.debugInfo) {
             clearAIDebugUI();
@@ -3080,7 +3080,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
         }
-    if (move) handleClick(move.r, move.c); else { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; advanceSeqTurn(); }
+        if (move) handleClick(move.r, move.c); else { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; advanceSeqTurn(); }
     }
 
     //#endregion

@@ -240,11 +240,11 @@ export class OnlineConnection {
 	 * @private
 	 */
 	_resetPingTimer() {
-	// Any received packet resets the inactivity timer and ping-in-flight state
-	this._lastMessageTime = Date.now();
-	this._unansweredPings = 0;
-	this._pingInFlight = false;
-	this._pingSentTime = null;
+		// Any received packet resets the inactivity timer and ping-in-flight state
+		this._lastMessageTime = Date.now();
+		this._unansweredPings = 0;
+		this._pingInFlight = false;
+		this._pingSentTime = null;
 	}
 
 

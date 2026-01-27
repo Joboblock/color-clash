@@ -266,13 +266,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
         });
-        if (foundSelf) {
+    if (foundSelf) {
             // Store session info for reconnection when we're in a room
             if (myJoinedRoom && myRoomKey && myPlayerName) {
                 onlineConnection.storeSessionInfo({ roomKey: myRoomKey, playerName: myPlayerName });
             }
-            // Navigate to online menu when transitioning into a room (from none)
-            if (!window._wasInRoom && myJoinedRoom) navigateToMenu('online');
+            // Navigate to online menu when transitioning into a room (from none).
+            // Important: joining/hosting should NOT create an extra browser history entry.
+            // We still want the UI to switch to the online menu, just without pushState.
+            if (!window._wasInRoom && myJoinedRoom) {
+                try { setMenuParam('online', false); } catch { /* ignore */ }
+                try { showMenuFor('online'); } catch { /* ignore */ }
+            }
             window._wasInRoom = true;
         } else {
             // Client is no longer in any room - clear all membership state

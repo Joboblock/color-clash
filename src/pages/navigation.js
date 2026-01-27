@@ -59,7 +59,9 @@ export function updateUrlRoomKey(key) {
         const params = new URLSearchParams(window.location.search);
         params.set('key', key);
         const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-        window.history.replaceState({ ...(window.history.state || {}), menu: getMenuParam() || 'first' }, '', url);
+        // Replace current entry only (do NOT create a new history entry).
+        // Keep existing history state untouched so this cannot affect menu/back behavior.
+        window.history.replaceState(window.history.state, '', url);
     } catch { /* ignore */ }
 }
 
@@ -72,7 +74,8 @@ export function removeUrlRoomKey() {
         const params = new URLSearchParams(window.location.search);
         params.delete('key');
         const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
-        window.history.replaceState({ ...(window.history.state || {}), menu: getMenuParam() || 'first' }, '', url);
+        // Replace current entry only (do NOT create a new history entry).
+        window.history.replaceState(window.history.state, '', url);
     } catch { /* ignore */ }
 }
 
@@ -124,23 +127,8 @@ export function ensureHistoryStateInitialized() {
  * @returns {void}
  */
 export function applyStateFromUrl(ctx) {
-    // Sync room key in URL with current joined room state
-    try {
-        const currentRoom = ctx.getMyJoinedRoom && ctx.getMyJoinedRoom();
-        const params = new URLSearchParams(window.location.search);
-        const urlKey = params.get('key');
-
-        if (currentRoom && ctx.getRoomKeyForRoom) {
-            // User is in a room: ensure key is in URL
-            const roomKey = ctx.getRoomKeyForRoom(currentRoom);
-            if (roomKey && urlKey !== roomKey) {
-                updateUrlRoomKey(roomKey);
-            }
-        } else if (!currentRoom && urlKey) {
-            // User is not in a room: remove key from URL
-            removeUrlRoomKey();
-        }
-    } catch { /* ignore */ }
+    // Intentionally do NOT sync room membership into the URL from here.
+    // Room keys are updated by online join/rejoin events, and must not affect browser history.
 
     const params = new URLSearchParams(window.location.search);
     const typed = getMenuParam();

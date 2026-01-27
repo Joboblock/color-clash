@@ -1454,6 +1454,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Modular menu display now delegated to PageRegistry & page modules.
     function showMenuFor(menuKey) {
+        // If the user opens a menu mid-chain, ensure we leave performance mode.
+        // Guarded because performanceMode is declared later in the file.
+        try {
+            if (typeof performanceMode !== 'undefined') performanceMode = false;
+        } catch { /* ignore */ }
+
         let targetId = menuKey;
         let subMode = null;
         if (['local', 'host', 'practice'].includes(menuKey)) {

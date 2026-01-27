@@ -585,7 +585,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Tracker answers "who acts next" without replaying history.
         onlineTurnIndex = onlineTurnTracker.currentPlayer;
 
+        const prevPlayer = currentPlayer;
         currentPlayer = onlineTurnIndex;
+        if (!isProcessing && prevPlayer !== currentPlayer) {
+            saveFocusForPlayer(prevPlayer);
+        }
         const _turnColor = activeColors()[currentPlayer];
         document.body.className = _turnColor;
         try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
@@ -2106,6 +2110,39 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize AI preview after initial color application
     try { pageRegistry.get('main')?.components?.aiStrengthTile?.updatePreview(); } catch { /* ignore */ }
 
+    function getFocusPlayerIndex() {
+        if (onlineGameActive && Number.isInteger(myOnlineIndex) && myOnlineIndex >= 0) return myOnlineIndex;
+        if (practiceMode && typeof humanPlayer !== 'undefined') return humanPlayer;
+        return currentPlayer;
+    }
+
+    function saveFocusForPlayer(playerIndex) {
+        if (onlineGameActive || (typeof practiceMode !== 'undefined' && practiceMode)) return;
+        if (!Number.isInteger(playerIndex) || playerIndex < 0) return;
+        const focused = document.activeElement;
+        if (!focused || !focused.classList.contains('cell')) return;
+        const row = parseInt(focused.dataset.row, 10);
+        const col = parseInt(focused.dataset.col, 10);
+        if (!Number.isInteger(row) || !Number.isInteger(col)) return;
+        playerLastFocus[playerIndex] = { row, col };
+    }
+
+    function isLocalFocusTurn() {
+        if (onlineGameActive && Number.isInteger(myOnlineIndex) && myOnlineIndex >= 0) return currentPlayer === myOnlineIndex;
+        if (practiceMode && typeof humanPlayer !== 'undefined') return currentPlayer === humanPlayer;
+        return true;
+    }
+
+    function isInitialPlacementPhaseForFocus() {
+        if (onlineGameActive) {
+            const n = Array.isArray(onlinePlayers) ? onlinePlayers.length : playerCount;
+            const seq = Number(onlineTurnSeq);
+            return Number.isFinite(seq) && seq < n;
+        }
+        if (Array.isArray(initialPlacements)) return initialPlacements.includes(false);
+        return false;
+    }
+
     // Keyboard navigation for game grid
     document.addEventListener('keydown', (e) => {
         // Block grid navigation if ANY menu is open
@@ -2128,13 +2165,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!cells.length) return;
         // Helper: get cell at row,col
         const getCell = (row, col) => gridEl.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
-        // Helper: is cell owned by current player?
+        const focusPlayerIndex = getFocusPlayerIndex();
+        const allowAllCells = isInitialPlacementPhaseForFocus() && isLocalFocusTurn();
+        // Helper: is cell owned by focus player?
         const isOwnCell = (cell) => {
             if (!cell) return false;
-            // Initial placement: allow all cells
-            if (Array.isArray(initialPlacements) && initialPlacements.includes(false)) return true;
-            // Otherwise, check cell class for current player color
-            const colorKey = activeColors()[currentPlayer];
+            // Initial placement: allow all cells only when it's the local player's turn
+            if (allowAllCells) return true;
+            if (!Number.isInteger(focusPlayerIndex) || focusPlayerIndex < 0) return false;
+            // Otherwise, check cell class for focus player color
+            const colorKey = activeColors()[focusPlayerIndex];
             return cell.classList.contains(colorKey);
         };
         // Find currently focused cell
@@ -2316,6 +2356,7 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function advanceSeqTurn() {
         if (onlineGameActive) return;
+        const prevPlayer = currentPlayer;
         const prevSeq = Number(localMoveSeq) || 0;
         const nextSeq = prevSeq + 1;
         localMoveSeq = nextSeq;
@@ -2333,9 +2374,12 @@ document.addEventListener('DOMContentLoaded', () => {
             localTurnIndex = (nextIndex === null) ? currentPlayer : nextIndex;
             currentPlayer = localTurnIndex;
         }
+        if (!isProcessing && prevPlayer !== currentPlayer) {
+            saveFocusForPlayer(prevPlayer);
+        }
         document.body.className = activeColors()[currentPlayer];
         try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
-        clearCellFocus();
+        if (!onlineGameActive && !(typeof practiceMode !== 'undefined' && practiceMode)) clearCellFocus();
         updateGrid();
         restorePlayerFocus();
         maybeTriggerAIMove();
@@ -2385,9 +2429,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         }
 
-        const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
-        // Save last focused cell for current player
-        playerLastFocus[currentPlayer] = { row, col };
+    const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
         const cellColor = getPlayerColor(row, col);
 
         // Phase selection:
@@ -2770,18 +2812,13 @@ document.addEventListener('DOMContentLoaded', () => {
     try { pageRegistry.get('main')?.components?.aiStrengthTile?.setValueRenderer(updateValueCircles); } catch { /* ignore */ }
 
     /**
-     * Advance to the next active player and update body color; trigger AI in practice mode.
-     * @returns {void} updates currentPlayer and grid visuals.
-     */
-    // switchPlayer() replaced by seq-driven advanceSeqTurn().
-
-    /**
      * Restore focus to the last cell focused by the current player, if any.
      */
     function restorePlayerFocus() {
-        // Only restore focus for human player (practiceMode: currentPlayer === humanPlayer)
-        if (typeof practiceMode !== 'undefined' && practiceMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
-        const pos = playerLastFocus[currentPlayer];
+        if (onlineGameActive || (typeof practiceMode !== 'undefined' && practiceMode)) return;
+        const focusPlayerIndex = getFocusPlayerIndex();
+        if (!Number.isInteger(focusPlayerIndex) || focusPlayerIndex < 0) return;
+        const pos = playerLastFocus[focusPlayerIndex];
         if (pos) {
             const cell = document.querySelector(`.cell[data-row="${pos.row}"][data-col="${pos.col}"]`);
             if (cell) cell.focus();

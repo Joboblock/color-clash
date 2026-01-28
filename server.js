@@ -199,8 +199,8 @@ wss.on('connection', (ws) => {
         }
         // --- PACKET VALIDATION ---
         // Helper: get room info for this ws
-        // First, find the sessionId for this ws by searching through connectionMeta
-        const { meta } = findSessionByWs(ws);
+    // First, find the sessionId for this ws by searching through connectionMeta
+    const { sessionId: clientSessionId, meta } = findSessionByWs(ws);
         const roomName = meta?.roomName;
         const room = roomName ? rooms[roomName] : undefined;
         const isInRoom = !!roomName && !!room;
@@ -208,8 +208,9 @@ wss.on('connection', (ws) => {
 
         // Define packet type groups
     const gamePackets = new Set(['move', 'ping']);
-        const roomPackets = new Set(['leave', 'start_req', 'start_ack', 'color_ans']);
-        const outOfGamePackets = new Set(['host', 'join', 'join_by_key', 'list', 'roomlist']);
+    const roomPackets = new Set(['leave', 'start_req', 'start_ack', 'color_ans']);
+    // Out-of-game packets that normally operate from the lobby. 'list' is handled separately below.
+    const outOfGamePackets = new Set(['host', 'join', 'join_by_key']);
         // restore_session is allowed at any time (it's specifically for reconnecting to started games)
 
         // 1. Game packets from clients not in a started room
@@ -224,6 +225,17 @@ wss.on('connection', (ws) => {
         }
         // 2. Room packets from clients not in a room
         if (roomPackets.has(msg.type) && !isInRoom) {
+            // If the client sent a 'leave' while not in a room, respond with the latest roomlist
+            // (echoing any provided roomlistUuid) instead of an error so the client UI can reconcile state.
+            if (msg.type === 'leave') {
+                const perClientExtras = new Map();
+                perClientExtras.set(ws, {
+                    roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
+                });
+                broadcastRoomList(perClientExtras);
+                return;
+            }
+            // Other room packets (start_req/start_ack/color_ans) are still invalid when not in a room
             sendPayload(ws, {
                 type: 'error',
                 error: `Invalid packet: ${msg.type} packet sent while not in a room`,
@@ -232,14 +244,32 @@ wss.on('connection', (ws) => {
             });
             return;
         }
-        // 3. Out-of-game/room packets from clients in a started room
+        // 3. Out-of-game/room packets from clients in a started room or already in a room
         if (outOfGamePackets.has(msg.type) && (isGameStarted || isInRoom)) {
-            sendPayload(ws, {
-                type: 'error',
-                error: `Invalid packet: ${msg.type} packet sent while in a started room`,
-                packet: msg,
-                room: roomName
-            });
+            // Instead of returning an error popup for clients that tried to host/join while
+            // already in a room (or while a game started), respond with an enriched roomlist
+            // so the client UI can reconcile its current membership. Include the incoming
+            // roomlistUuid when provided.
+            const perClientExtras = new Map();
+            if (meta && meta.roomName && rooms[meta.roomName]) {
+                const r = rooms[meta.roomName];
+                perClientExtras.set(ws, {
+                    room: meta.roomName,
+                    roomKey: r.roomKey,
+                    maxPlayers: r.maxPlayers,
+                    player: meta.name,
+                    sessionId: clientSessionId,
+                    players: r.participants.filter(p => p.connected).map(p => ({ name: p.name, sessionId: p.sessionId })),
+                    gridSize: Number.isFinite(r.desiredGridSize) ? r.desiredGridSize : undefined,
+                    started: !!(r.game && r.game.started),
+                    roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
+                });
+            } else {
+                perClientExtras.set(ws, {
+                    roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
+                });
+            }
+            broadcastRoomList(perClientExtras);
             return;
         }
 
@@ -329,7 +359,8 @@ wss.on('connection', (ws) => {
                 sessionId: clientSessionId,
                 players: room.participants.filter(p => p.connected).map(p => ({ name: p.name, sessionId: p.sessionId })),
                 gridSize: Number.isFinite(room.desiredGridSize) ? room.desiredGridSize : undefined,
-                started: !!(room.game && room.game.started)
+                started: !!(room.game && room.game.started),
+                roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
             });
             broadcastRoomList(perClientExtras);
 
@@ -359,9 +390,24 @@ wss.on('connection', (ws) => {
 
             return;
         } else if (msg.type === 'host') {
-            // Block host if already in any room (started or not)
-            const { meta: metaExisting } = findSessionByWs(ws);
+            // If client is already in a room, reply with an enriched roomlist to confirm
+            // their current membership instead of silently returning.
+            const { sessionId: existingSessionId, meta: metaExisting } = findSessionByWs(ws);
             if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
+                const cur = rooms[metaExisting.roomName];
+                const perClientExtras = new Map();
+                perClientExtras.set(ws, {
+                    room: metaExisting.roomName,
+                    roomKey: cur.roomKey,
+                    maxPlayers: cur.maxPlayers,
+                    player: metaExisting.name,
+                    sessionId: existingSessionId,
+                    players: cur.participants.filter(p => p.connected).map(p => ({ name: p.name, sessionId: p.sessionId })),
+                    gridSize: Number.isFinite(cur.desiredGridSize) ? cur.desiredGridSize : undefined,
+                    started: !!(cur.game && cur.game.started),
+                    roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
+                });
+                broadcastRoomList(perClientExtras);
                 return;
             }
             // Compute a unique room name using the same pattern as player names
@@ -425,7 +471,8 @@ wss.on('connection', (ws) => {
                 sessionId: newSessionId,
                 players: [{ name: playerName, sessionId: newSessionId }],
                 gridSize: requestedGrid !== null ? requestedGrid : undefined,
-                started: false
+                started: false,
+                roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
             });
             broadcastRoomList(perClientExtras);
         } else if (msg.type === 'join' && msg.roomName) {
@@ -486,7 +533,8 @@ wss.on('connection', (ws) => {
                     sessionId: newSessionId,
                     players: room.participants.filter(p => p.connected).map(p => ({ name: p.name, sessionId: p.sessionId })),
                     gridSize: Number.isFinite(room.desiredGridSize) ? room.desiredGridSize : undefined,
-                    started: !!(room.game && room.game.started)
+                    started: !!(room.game && room.game.started),
+                    roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
                 });
                 broadcastRoomList(perClientExtras);
             }
@@ -509,7 +557,21 @@ wss.on('connection', (ws) => {
             // Remove from existing room if any, but only if not already in the target room
             const { sessionId: existingSessionId, meta: metaExisting } = findSessionByWs(ws);
             if (metaExisting && metaExisting.roomName === roomName) {
-                // Already in the target room, do nothing
+                // Already in the target room: send enriched roomlist to confirm membership
+                const cur = rooms[roomName];
+                const perClientExtras = new Map();
+                perClientExtras.set(ws, {
+                    room: roomName,
+                    roomKey: cur.roomKey,
+                    maxPlayers: cur.maxPlayers,
+                    player: metaExisting.name,
+                    sessionId: existingSessionId,
+                    players: cur.participants.filter(p => p.connected).map(p => ({ name: p.name, sessionId: p.sessionId })),
+                    gridSize: Number.isFinite(cur.desiredGridSize) ? cur.desiredGridSize : undefined,
+                    started: !!(cur.game && cur.game.started),
+                    roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
+                });
+                broadcastRoomList(perClientExtras);
                 return;
             }
             if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
@@ -556,13 +618,18 @@ wss.on('connection', (ws) => {
                     sessionId: newSessionId,
                     players: room.participants.filter(p => p.connected).map(p => ({ name: p.name, sessionId: p.sessionId })),
                     gridSize: Number.isFinite(room.desiredGridSize) ? room.desiredGridSize : undefined,
-                    started: !!(room.game && room.game.started)
+                    started: !!(room.game && room.game.started),
+                    roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
                 });
                 broadcastRoomList(perClientExtras);
             }
             // ...existing code...
         } else if (msg.type === 'list') {
-            sendPayload(ws, { type: 'roomlist', rooms: getRoomList() });
+            const roomlistUuid = (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined;
+            const perClientExtras = new Map();
+            perClientExtras.set(ws, { roomlistUuid });
+            // broadcastRoomList will include per-client enrichment for clients in a room
+            broadcastRoomList(perClientExtras);
         } else if (msg.type === 'start_req') {
             // Only the host can start; use their current room from sessionId in meta
             // Find meta by looking for this ws in connectionMeta
@@ -1126,6 +1193,28 @@ wss.on('connection', (ws) => {
                 broadcastRoomList();
                 return;
             }
+
+            // If the client provided a roomKey, only execute the leave if it matches
+            // the room the client is currently in. Otherwise, respond with a roomlist
+            // confirmation (like 'list' or invalid host/join while already in a room).
+            const requestedRoomKey = (typeof msg.roomKey === 'string' && msg.roomKey) ? String(msg.roomKey) : null;
+            if (requestedRoomKey && String(room.roomKey || '') !== requestedRoomKey) {
+                const perClientExtras = new Map();
+                perClientExtras.set(ws, {
+                    room: roomName,
+                    roomKey: room.roomKey,
+                    maxPlayers: room.maxPlayers,
+                    player: meta.name,
+                    sessionId: senderSessionId,
+                    players: room.participants.filter(p => p.connected).map(p => ({ name: p.name, sessionId: p.sessionId })),
+                    gridSize: Number.isFinite(room.desiredGridSize) ? room.desiredGridSize : undefined,
+                    started: !!(room.game && room.game.started),
+                    roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
+                });
+                broadcastRoomList(perClientExtras);
+                return;
+            }
+
             room.participants = room.participants.filter(p => p.sessionId !== senderSessionId);
             connectionMeta.delete(senderSessionId);
             if (room.participants.length === 0) {
@@ -1134,7 +1223,17 @@ wss.on('connection', (ws) => {
                 delete rooms[roomName];
                 if (oldKey) roomKeys.delete(oldKey);
             }
-            broadcastRoomList();
+
+            // Echo roomlistUuid back to the leaver (if provided) via a per-client roomlist.
+            const roomlistUuid = (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined;
+            if (roomlistUuid) {
+                const perClientExtras = new Map();
+                // No specific room entry needs enrichment here; we only want to send the uuid.
+                perClientExtras.set(ws, { roomlistUuid });
+                broadcastRoomList(perClientExtras);
+            } else {
+                broadcastRoomList();
+            }
         } else if (msg.type === 'ping') {
             // Ping now carries client's next expected move sequence number.
             // If the client is behind, send the missing moves.
@@ -1327,6 +1426,7 @@ function broadcastRoomList(perClientExtras) {
     wss.clients.forEach(client => {
         if (client.readyState !== 1) return;
         let rooms = baseRooms;
+        let roomlistUuid = undefined;
         // Check if this client is in any room via connectionMeta
         const { sessionId: clientSessionId, meta } = findSessionByWs(client);
 
@@ -1338,12 +1438,17 @@ function broadcastRoomList(perClientExtras) {
         // If this client has extra info (e.g. host/join confirmation), merge it into their room entry
         if (perClientExtras && perClientExtras.has(client)) {
             const extras = perClientExtras.get(client);
+            // Allow sending a per-client correlation UUID without necessarily enriching a room entry.
+            if (extras && typeof extras.roomlistUuid === 'string' && extras.roomlistUuid) {
+                roomlistUuid = String(extras.roomlistUuid);
+            }
             if (extras && extras.room && baseRooms[extras.room]) {
                 if (rooms === baseRooms) rooms = { ...baseRooms };
                 rooms[extras.room] = { ...rooms[extras.room], ...extras };
             }
         }
-        const list = JSON.stringify({ type: 'roomlist', rooms });
+        const payload = roomlistUuid ? { type: 'roomlist', rooms, roomlistUuid } : { type: 'roomlist', rooms };
+        const list = JSON.stringify(payload);
         try { client.send(list); } catch (err) { console.error('[Server] Failed to broadcast roomlist to client', err); }
     });
 }

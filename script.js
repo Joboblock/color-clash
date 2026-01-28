@@ -1093,7 +1093,20 @@ document.addEventListener('DOMContentLoaded', () => {
     // Expose to onlinePage via context (used there)
     window.leaveRoom = function leaveRoom(roomName) {
         if (!clientFullyInitialized) return;
-        const doLeave = () => { onlineConnection.leave(roomName); };
+        // Explicit user-triggered leave should include roomKey for server-side validation.
+        // We'll prefer the roomKey stored in the roomlist entry for our current room.
+        const doLeave = () => {
+            try {
+                const rooms = window.lastRoomList || {};
+                const key = rooms && roomName && rooms[roomName] && rooms[roomName].roomKey ? rooms[roomName].roomKey : null;
+                if (key && typeof onlineConnection.leaveByKey === 'function') {
+                    onlineConnection.leaveByKey({ roomName, roomKey: key });
+                    return;
+                }
+            } catch { /* ignore */ }
+            // Fallback to legacy leave if key is not available.
+            onlineConnection.leave(roomName);
+        };
         const doLeaveOnce = () => { doLeave(); onlineConnection.off('open', doLeaveOnce); };
         onlineConnection.ensureConnected();
         if (onlineConnection.isConnected()) doLeave(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doLeaveOnce); }

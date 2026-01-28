@@ -108,6 +108,8 @@ export class OnlineConnection {
 		this._isRestoringSession = false;
 		// UUID for the current logical start attempt; must persist across start_req retries.
 		this._pendingStartUuid = null;
+		// Correlation UUID for roomlist responses; only the most recent UUID is accepted.
+		this._roomlistExpectedUuid = null;
 		// UUID for the currently active game instance (used to detect restarts).
 		this._activeGameStartUuid = null;
 		this._blockedMoves = [];
@@ -318,6 +320,23 @@ export class OnlineConnection {
 	}
 
 	/**
+	 * Stamp a fresh correlation UUID on a request that expects a roomlist response.
+	 * Only roomlist packets with this UUID (or no UUID at all) will be processed.
+	 * @private
+	 * @param {object} packet
+	 * @returns {object}
+	 */
+	_withRoomlistUuid(packet) {
+		try {
+			const uuid = this._generateSessionId();
+			this._roomlistExpectedUuid = uuid;
+			return { ...(packet || {}), roomlistUuid: uuid };
+		} catch {
+			return packet;
+		}
+	}
+
+	/**
 	 * Check if any packets are currently being retried.
 	 * @returns {boolean}
 	 */
@@ -424,13 +443,13 @@ export class OnlineConnection {
 				const clientSeq = (typeof window !== 'undefined' && Number.isInteger(window.lastAppliedSeq))
 					? window.lastAppliedSeq
 					: 0;
-				const restorePacket = {
+				const restorePacket = this._withRoomlistUuid({
 					type: 'restore_session',
 					roomKey: this._sessionInfo.roomKey,
 					playerName: this._sessionInfo.playerName,
 					sessionId: this._sessionInfo.sessionId,
 					seq: clientSeq
-				};
+				});
 				// Use retry logic for restore_session to handle packet loss
 				this._sendWithRetry('restore_session', restorePacket, 'restore_status');
 				return;
@@ -541,11 +560,23 @@ export class OnlineConnection {
 					this._emit('info', msg);
 					break;
 				case 'roomlist': {
-					// Ignore roomlist packets while trying to restore session
-					if (this._isRestoringSession) {
-						console.log('[Client] ⏭️ Ignoring roomlist while restoring session');
-						break;
-					}
+					// Accept all roomlist packets that *do not* carry a uuid (broadcast pushes).
+					// If a uuid is present, only accept it when it matches the most recent
+					// request that expects a roomlist response.
+					try {
+						const incoming = (msg && typeof msg.roomlistUuid === 'string') ? msg.roomlistUuid : null;
+						if (incoming) {
+							if (!this._roomlistExpectedUuid || incoming !== this._roomlistExpectedUuid) {
+								console.log('[Client] ⛔ Ignoring roomlist with unexpected uuid', {
+									expected: this._roomlistExpectedUuid ? String(this._roomlistExpectedUuid).slice(0, 8) : null,
+									got: String(incoming).slice(0, 8)
+								});
+								break;
+							}
+							// Matched expected uuid: clear expectation
+							this._roomlistExpectedUuid = null;
+						}
+					} catch { /* ignore */ }
 					const rooms = msg.rooms || {};
 					this._emit('roomlist', rooms);
 					break;
@@ -861,7 +892,7 @@ export class OnlineConnection {
 
 	/** Request latest room list. */
 	requestRoomList() {
-		const packet = { type: 'list' };
+		const packet = this._withRoomlistUuid({ type: 'list' });
 		this._sendWithRetry('list', packet, 'roomlist');
 	}
 
@@ -891,7 +922,7 @@ export class OnlineConnection {
 		if (!this._sessionInfo.sessionId) {
 			this._sessionInfo.sessionId = this._generateSessionId();
 		}
-		this._sendPayload({ type: 'host', roomName, maxPlayers, gridSize, debugName, sessionId: this._sessionInfo.sessionId });
+		this._sendPayload(this._withRoomlistUuid({ type: 'host', roomName, maxPlayers, gridSize, debugName, sessionId: this._sessionInfo.sessionId }));
 	}
 
 	/** Join an existing room by name.
@@ -904,7 +935,7 @@ export class OnlineConnection {
 		if (!this._sessionInfo.sessionId) {
 			this._sessionInfo.sessionId = this._generateSessionId();
 		}
-		this._sendPayload({ type: 'join', roomName, debugName, sessionId: this._sessionInfo.sessionId });
+		this._sendPayload(this._withRoomlistUuid({ type: 'join', roomName, debugName, sessionId: this._sessionInfo.sessionId }));
 	}
 
 	/** Join a room using its key.
@@ -920,7 +951,7 @@ export class OnlineConnection {
 		}
 		// Mark that we're waiting for a join_by_key response to avoid redundant roomlist request
 		this._pendingJoinByKey = true;
-		const packet = { type: 'join_by_key', roomKey, debugName, sessionId: this._sessionInfo.sessionId };
+		const packet = this._withRoomlistUuid({ type: 'join_by_key', roomKey, debugName, sessionId: this._sessionInfo.sessionId });
 		this._sendWithRetry(`join_by_key:${roomKey}`, packet, 'roomlist');
 	}
 
@@ -930,7 +961,18 @@ export class OnlineConnection {
 	leave(roomName) {
 		this.setGameInactive();
 		this._clearSessionInfo(); // Clear session on explicit leave
-		this._sendPayload({ type: 'leave', roomName });
+		this._sendPayload(this._withRoomlistUuid({ type: 'leave', roomName }));
+	}
+
+	/**
+	 * Leave a room explicitly confirmed by roomKey (used for user-click leave).
+	 * Server will only execute the leave if the client is actually in that roomKey.
+	 * @param {{roomName?:string, roomKey:string}} p
+	 */
+	leaveByKey({ roomName, roomKey }) {
+		this.setGameInactive();
+		this._clearSessionInfo();
+		this._sendPayload(this._withRoomlistUuid({ type: 'leave', roomName, roomKey }));
 	}
 
 	/**

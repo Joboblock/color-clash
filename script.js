@@ -935,7 +935,7 @@ document.addEventListener('DOMContentLoaded', () => {
             clearCellFocus();
             setMenuParam('online', false);
             showMenuFor('online');
-            exitFullscreenIfPossible();
+            // Keep fullscreen when navigating back into menus.
         } catch { /* ignore */ }
     });
 
@@ -1958,7 +1958,6 @@ document.addEventListener('DOMContentLoaded', () => {
             computeSelectedColors,
             recreateGrid,
             createEdgeCircles: () => createEdgeCircles(playerCount, getEdgeCircleState()),
-            exitFullscreenIfPossible,
             setHidden,
             pageRegistry,
             playerColors,
@@ -2090,9 +2089,19 @@ document.addEventListener('DOMContentLoaded', () => {
             stopExplosionLoop();
             clearCellFocus();
             const targetMenu = onlineGameActive ? 'online' : (practiceMode ? 'practice' : 'local');
+            // If the previous menu entry matches the target menu, reuse it by stepping back
+            // instead of creating a duplicate history entry.
+            try {
+                const lastMenu = menuHistoryStack.length ? menuHistoryStack[menuHistoryStack.length - 1] : null;
+                const inGameState = !getMenuParam();
+                if (inGameState && lastMenu === targetMenu) {
+                    window.history.back();
+                    return;
+                }
+            } catch { /* ignore */ }
             setMenuParam(targetMenu, false);
             showMenuFor(targetMenu);
-            exitFullscreenIfPossible();
+            // Keep fullscreen when navigating back into menus.
         }, delayGameEnd);
     }
 

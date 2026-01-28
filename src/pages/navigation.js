@@ -147,7 +147,7 @@ export function applyStateFromUrl(ctx) {
             } catch { /* ignore */ }
         }
         try { (ctx.playerBoxSlider || ctx.menuColorCycle || ctx.startBtn)?.focus(); } catch { /* ignore */ }
-        ctx.exitFullscreenIfPossible();
+        //ctx.exitFullscreenIfPossible();
         return;
     }
 

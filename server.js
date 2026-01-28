@@ -1277,6 +1277,26 @@ wss.on('connection', (ws) => {
     // Greet new connections
     try { sendPayload(ws, { type: 'info', version: APP_VERSION }); } catch { /* ignore */ }
 
+    // When a started game loses its last connected player (all have disconnected),
+    // we should not keep any stale per-turn expectations around. If someone later
+    // rejoins or restarts, the authoritative order will be re-established via
+    // start/rejoin messages; keeping old turnIndex/move buffers can cause the
+    // server to reject the first post-reconnect move as "out of order".
+    function resetExpectedOrderForRoom(room) {
+        try {
+            if (!room || !room.game) return;
+            if (!room.game.started) return;
+            // Reset only order/expectation-related fields; keep gridState so a rejoin
+            // can still catch up if it happens within the grace window.
+            room.game.turnIndex = 0;
+            room.game.moveSeq = 0;
+            if (Array.isArray(room.game.recentMoves)) room.game.recentMoves = [];
+            if (room._lastSeqByName && typeof room._lastSeqByName.clear === 'function') {
+                room._lastSeqByName.clear();
+            }
+        } catch { /* ignore */ }
+    }
+
     ws.on('close', () => {
         console.error('[Client] 🔌 Disconnected');
         // Find the sessionId for this ws
@@ -1339,6 +1359,9 @@ wss.on('connection', (ws) => {
                 // Check if all participants are now disconnected - if so, schedule room deletion
                 const anyConnected = room.participants.some(p => p.connected);
                 if (!anyConnected && !room._roomDeletionTimer) {
+                    // Nobody is connected anymore; clear any stale expected-order state now.
+                    // If a client reconnects, the game state will be reconciled via restore/ping.
+                    resetExpectedOrderForRoom(room);
                     console.log(`[Disconnect] All players disconnected from room ${roomName}, scheduling room deletion`);
                     room._roomDeletionTimer = setTimeout(() => {
                         console.log(`[Disconnect] Timeout: Deleting empty room ${roomName}`);

@@ -867,6 +867,23 @@ export class OnlineConnection {
 		this._sendWithRetry('list', packet, 'roomlist');
 	}
 
+	/**
+	 * Send an immediate ping packet (manual trigger, e.g., on rejoin).
+	 */
+	sendPingNow() {
+		const seq = (typeof window !== 'undefined' && Number.isInteger(window.lastAppliedSeq))
+			? window.lastAppliedSeq
+			: 0;
+		if (!this.isConnected()) {
+			this.ensureConnected();
+		}
+		if (!this.isConnected()) return;
+		this._unansweredPings = Math.max(0, this._unansweredPings || 0) + 1;
+		this._pingInFlight = true;
+		this._pingSentTime = Date.now();
+		this._sendPayload({ type: 'ping', seq });
+	}
+
 	/** Host a new room.
 	 * @param {{roomName:string, maxPlayers:number, gridSize?:number, debugName?:string}} p
 	 */

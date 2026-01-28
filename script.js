@@ -16,7 +16,7 @@ import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLO
 // Edge circles component
 import { createEdgeCircles, updateEdgeCirclesActive, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
 // Navigation and routing
-import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, removeMenuParam, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
+import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
 import { APP_VERSION } from './src/version.js';
 
 // PLAYER_NAME_LENGTH now imported from nameUtils.js
@@ -404,8 +404,17 @@ document.addEventListener('DOMContentLoaded', () => {
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
 
-            // Remove menu parameter from URL when game starts
-            removeMenuParam();
+            // Remove menu parameter from URL when game starts (push history like local/practice)
+            try {
+                const params = new URLSearchParams(window.location.search);
+                params.delete('menu');
+                const newUrl = params.toString()
+                    ? `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`
+                    : `${window.location.pathname}${window.location.hash || ''}`;
+                window.history.pushState({ ...(window.history.state || {}), mode: 'online' }, '', newUrl);
+            } catch {
+                window.history.pushState({ ...(window.history.state || {}), mode: 'online' }, '', window.location.pathname + window.location.hash);
+            }
 
             // Enable session restoration during active game
             onlineConnection.setGameActive();
@@ -503,8 +512,17 @@ document.addEventListener('DOMContentLoaded', () => {
             updateGrid();
             try { createEdgeCircles(p, getEdgeCircleState()); } catch { /* ignore */ }
 
-            // Remove menu parameter from URL when game starts
-            removeMenuParam();
+            // Remove menu parameter from URL when game starts (push history like local/practice)
+            try {
+                const params = new URLSearchParams(window.location.search);
+                params.delete('menu');
+                const newUrl = params.toString()
+                    ? `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`
+                    : `${window.location.pathname}${window.location.hash || ''}`;
+                window.history.pushState({ ...(window.history.state || {}), mode: 'online' }, '', newUrl);
+            } catch {
+                window.history.pushState({ ...(window.history.state || {}), mode: 'online' }, '', window.location.pathname + window.location.hash);
+            }
 
             // Enable session restoration during active game
             onlineConnection.setGameActive();
@@ -1114,6 +1132,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     updateGrid();
                     try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+                    // Prompt server catch-up immediately after rejoin.
+                    try {
+                        const sendRejoinPing = () => {
+                            if (onlineConnection && typeof onlineConnection.sendPingNow === 'function') {
+                                onlineConnection.sendPingNow();
+                            }
+                        };
+                        const sendRejoinPingOnce = () => {
+                            sendRejoinPing();
+                            onlineConnection.off('open', sendRejoinPingOnce);
+                        };
+                        onlineConnection.ensureConnected();
+                        if (onlineConnection.isConnected()) sendRejoinPing();
+                        else onlineConnection.on('open', sendRejoinPingOnce);
+                    } catch { /* ignore */ }
                 } catch { /* ignore */ }
                 return;
             }

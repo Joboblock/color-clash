@@ -5,8 +5,6 @@ import {
 	PACKET_DELAY_MIN_MS,
 	PACKET_DELAY_MAX_MS,
 	PACKET_DISCONNECT_RATE,
-	// Back-compat
-	PACKET_LOSS_RATE
 } from '../config/index.js';
 /**
 /**
@@ -797,7 +795,7 @@ export class OnlineConnection {
 	_sendPayload(obj) {
 		// Simulate packet drop/delay/disconnect (debug)
 		const type = obj && typeof obj === 'object' ? obj.type : undefined;
-		const dropRate = typeof PACKET_DROP_RATE === 'number' ? PACKET_DROP_RATE : PACKET_LOSS_RATE;
+	const dropRate = PACKET_DROP_RATE;
 		const delayRate = typeof PACKET_DELAY_RATE === 'number' ? PACKET_DELAY_RATE : 0;
 		if (Math.random() < dropRate) {
 			console.warn('[Client] 🔥 Simulated packet loss:', type, obj);

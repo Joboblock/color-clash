@@ -19,7 +19,6 @@ import {
     PACKET_DELAY_RATE,
     PACKET_DELAY_MIN_MS,
     PACKET_DELAY_MAX_MS,
-    PACKET_LOSS_RATE,
     PACKET_DISCONNECT_RATE
 } from './src/config/index.js';
 
@@ -147,7 +146,7 @@ const connectionMeta = new Map();
 function sendPayload(ws, payload) {
     // Simulate packet drop/delay (debug)
     const type = payload && typeof payload === 'object' ? payload.type : undefined;
-    const dropRate = typeof PACKET_DROP_RATE === 'number' ? PACKET_DROP_RATE : PACKET_LOSS_RATE;
+    const dropRate = PACKET_DROP_RATE;
     const delayRate = typeof PACKET_DELAY_RATE === 'number' ? PACKET_DELAY_RATE : 0;
     if (Math.random() < dropRate) {
         console.warn('[Server] 🔥 Simulated packet loss:', type, payload);

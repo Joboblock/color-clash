@@ -280,8 +280,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             window._wasInRoom = true;
         } else {
-            // Client is no longer in any room - clear all membership state
-            if (myJoinedRoom || myRoomKey) {
+            // Client is no longer in any room (according to this roomlist).
+            // IMPORTANT: During an active online game or while session restoration is in progress,
+            // roomlist packets can be transient/out-of-order (and uuid-gated on the client).
+            // Clearing membership here would incorrectly bump the UI back to the Online menu.
+            const isRestoring = (() => {
+                try { return !!(onlineConnection && typeof onlineConnection.isRestoringSession === 'function' && onlineConnection.isRestoringSession()); } catch { return false; }
+            })();
+            if ((onlineGameActive || isRestoring) && (myJoinedRoom || myRoomKey)) {
+                // Keep the last known membership until we get a definitive signal (restore_status failure,
+                // explicit leave, or a stable roomlist once we're back in the lobby).
+                window._wasInRoom = true;
+            } else if (myJoinedRoom || myRoomKey) {
                 // Leaving a room should not cause future rooms to ignore their first 'start'.
                 try {
                     if (typeof window !== 'undefined') {
@@ -300,7 +310,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.myRoomPlayers = myRoomPlayers;
                 removeUrlRoomKey();
             }
-            window._wasInRoom = false;
+            if (!(onlineGameActive || isRestoring)) {
+                window._wasInRoom = false;
+            }
         }
         const rlView = pageRegistry.get('online')?.components?.roomListView;
         try { rlView && rlView.render(rooms); } catch { /* ignore */ }

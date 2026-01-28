@@ -1277,25 +1277,10 @@ wss.on('connection', (ws) => {
     // Greet new connections
     try { sendPayload(ws, { type: 'info', version: APP_VERSION }); } catch { /* ignore */ }
 
-    // When a started game loses its last connected player (all have disconnected),
-    // we should not keep any stale per-turn expectations around. If someone later
-    // rejoins or restarts, the authoritative order will be re-established via
-    // start/rejoin messages; keeping old turnIndex/move buffers can cause the
-    // server to reject the first post-reconnect move as "out of order".
-    function resetExpectedOrderForRoom(room) {
-        try {
-            if (!room || !room.game) return;
-            if (!room.game.started) return;
-            // Reset only order/expectation-related fields; keep gridState so a rejoin
-            // can still catch up if it happens within the grace window.
-            room.game.turnIndex = 0;
-            room.game.moveSeq = 0;
-            if (Array.isArray(room.game.recentMoves)) room.game.recentMoves = [];
-            if (room._lastSeqByName && typeof room._lastSeqByName.clear === 'function') {
-                room._lastSeqByName.clear();
-            }
-        } catch { /* ignore */ }
-    }
+    // Note: During the 30s rejoin grace window for started games, we intentionally
+    // keep move sequencing/history intact even if all players disconnect.
+    // Resetting moveSeq/recentMoves here can desync clients that reconnect with a
+    // higher lastAppliedSeq (server would report serverSeq=0 and reject new moves).
 
     ws.on('close', () => {
         console.error('[Client] 🔌 Disconnected');
@@ -1359,22 +1344,28 @@ wss.on('connection', (ws) => {
                 // Check if all participants are now disconnected - if so, schedule room deletion
                 const anyConnected = room.participants.some(p => p.connected);
                 if (!anyConnected && !room._roomDeletionTimer) {
-                    // Nobody is connected anymore; clear any stale expected-order state now.
-                    // If a client reconnects, the game state will be reconciled via restore/ping.
-                    resetExpectedOrderForRoom(room);
                     console.log(`[Disconnect] All players disconnected from room ${roomName}, scheduling room deletion`);
                     room._roomDeletionTimer = setTimeout(() => {
                         console.log(`[Disconnect] Timeout: Deleting empty room ${roomName}`);
                         const oldKey = room.roomKey;
                         delete rooms[roomName];
                         if (oldKey) roomKeys.delete(oldKey);
+                        // Room was a started game; don't push roomlist changes to outsiders.
+                        // (There shouldn't be any connected participants at this point, but keep it consistent.)
+                        broadcastRoomList(undefined, { targetRoomName: roomName });
                     }, 30000); // 30 second grace period for all players to rejoin
                 }
             }
         }
 
         connectionMeta.delete(senderSessionId);
-        broadcastRoomList();
+        // Privacy: don't push roomlist updates caused by a started room to outsiders.
+        // Participants still receive the updated roomlist; outsiders can always request via 'list'.
+        if (isGameStarted) {
+            broadcastRoomList(undefined, { targetRoomName: roomName });
+        } else {
+            broadcastRoomList();
+        }
     });
 });
 
@@ -1441,22 +1432,46 @@ function pickUniqueRoomName(raw) {
 }
 
 /**
- * Broadcasts the room list to all clients, with optional per-client enrichment.
+ * Broadcasts the room list, with optional per-client enrichment.
+ *
+ * By default it sends to all connected clients. When `targetRoomName` is provided,
+ * it sends only to currently-connected participants of that room.
+ *
  * @param {Map<WebSocket,object>} [perClientExtras] - Map of ws -> extra fields to merge into their room entry
+ * @param {{targetRoomName?: string|null}} [opts]
  */
-function broadcastRoomList(perClientExtras) {
+function broadcastRoomList(perClientExtras, opts = {}) {
     const baseRooms = getRoomList();
+    const targetRoomName = (opts && typeof opts.targetRoomName === 'string' && opts.targetRoomName)
+        ? String(opts.targetRoomName)
+        : null;
+    const targetRoom = targetRoomName ? rooms[targetRoomName] : null;
+
+    /** @type {Set<WebSocket>|null} */
+    let targetSockets = null;
+    if (targetRoomName && targetRoom && Array.isArray(targetRoom.participants)) {
+        targetSockets = new Set(
+            targetRoom.participants
+                .filter(p => p && p.connected && p.ws && p.ws.readyState === 1)
+                .map(p => p.ws)
+        );
+    } else if (targetRoomName) {
+        // Target specified but room doesn't exist -> nothing to send.
+        targetSockets = new Set();
+    }
+
     wss.clients.forEach(client => {
         if (client.readyState !== 1) return;
-        let rooms = baseRooms;
+        if (targetSockets && !targetSockets.has(client)) return;
+        let roomListPayload = baseRooms;
         let roomlistUuid = undefined;
         // Check if this client is in any room via connectionMeta
         const { sessionId: clientSessionId, meta } = findSessionByWs(client);
 
         if (meta && meta.roomName && baseRooms[meta.roomName]) {
             // Clone rooms and enrich with client's player info
-            rooms = { ...baseRooms };
-            rooms[meta.roomName] = { ...baseRooms[meta.roomName], player: meta.name, sessionId: clientSessionId };
+            roomListPayload = { ...roomListPayload };
+            roomListPayload[meta.roomName] = { ...roomListPayload[meta.roomName], player: meta.name, sessionId: clientSessionId };
         }
         // If this client has extra info (e.g. host/join confirmation), merge it into their room entry
         if (perClientExtras && perClientExtras.has(client)) {
@@ -1466,11 +1481,13 @@ function broadcastRoomList(perClientExtras) {
                 roomlistUuid = String(extras.roomlistUuid);
             }
             if (extras && extras.room && baseRooms[extras.room]) {
-                if (rooms === baseRooms) rooms = { ...baseRooms };
-                rooms[extras.room] = { ...rooms[extras.room], ...extras };
+                if (roomListPayload === baseRooms) roomListPayload = { ...roomListPayload };
+                roomListPayload[extras.room] = { ...roomListPayload[extras.room], ...extras };
             }
         }
-        const payload = roomlistUuid ? { type: 'roomlist', rooms, roomlistUuid } : { type: 'roomlist', rooms };
+        const payload = roomlistUuid
+            ? { type: 'roomlist', rooms: roomListPayload, roomlistUuid }
+            : { type: 'roomlist', rooms: roomListPayload };
         const list = JSON.stringify(payload);
         try { client.send(list); } catch (err) { console.error('[Server] Failed to broadcast roomlist to client', err); }
     });

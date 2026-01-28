@@ -1058,7 +1058,11 @@ export class OnlineConnection {
 				console.debug('[Client][Send Payload]', packet);
 			}
 		} catch { /* ignore */ }
-		this._sendWithRetry(moveKey, packet, 'move');
+		// Retries should continue until we receive an explicit confirmation for our move.
+		// The server sends `move_ack` back to the sender.
+		// (Separately, when we receive any subsequent `move`, higher-level logic also
+		// cancels older pending moves because the game has advanced.)
+		this._sendWithRetry(moveKey, packet, 'move_ack');
 	}
 
 	/**

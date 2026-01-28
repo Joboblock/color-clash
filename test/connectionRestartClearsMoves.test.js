@@ -11,7 +11,7 @@ function seedPendingMove(conn) {
 		retryTimer,
 		backoffMs: 500,
 		retryCount: 1,
-		expectedResponseType: 'move'
+		expectedResponseType: 'move_ack'
 	});
 	return { key, retryTimer };
 }

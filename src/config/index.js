@@ -52,8 +52,8 @@ export const OnlineParams = Object.freeze({
     PACKET_DROP_RATE: 0.250,           // probability to drop a packet outright
     PACKET_DELAY_RATE: 0.250,          // probability to delay a packet
     PACKET_DELAY_MIN_MS: 150,          // min artificial delay when delaying packets
-    PACKET_DELAY_MAX_MS: 5000,         // max artificial delay when delaying packets
-    PACKET_DISCONNECT_RATE: 0.250,     // probability to force a disconnect on a move packet (debug)
+    PACKET_DELAY_MAX_MS: 500,         // max artificial delay when delaying packets
+    PACKET_DISCONNECT_RATE: 0.025,     // probability to force a disconnect on a move packet (debug)
     // Back-compat aliases (prefer PACKET_DROP_RATE / PACKET_DELAY_RATE going forward)
     WS_PROD_BASE_URL: 'wss://color-clash-192172087961.europe-west1.run.app/ws' // production service endpoint
 });

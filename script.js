@@ -281,15 +281,16 @@ document.addEventListener('DOMContentLoaded', () => {
             window._wasInRoom = true;
         } else {
             // Client is no longer in any room (according to this roomlist).
-            // IMPORTANT: During an active online game or while session restoration is in progress,
-            // roomlist packets can be transient/out-of-order (and uuid-gated on the client).
-            // Clearing membership here would incorrectly bump the UI back to the Online menu.
+            // IMPORTANT: During session restoration, roomlist packets can be transient/out-of-order
+            // (and uuid-gated on the client). Clearing membership here would incorrectly bump the UI
+            // back to the Online menu while we're still restoring.
             const isRestoring = (() => {
                 try { return !!(onlineConnection && typeof onlineConnection.isRestoringSession === 'function' && onlineConnection.isRestoringSession()); } catch { return false; }
             })();
-            if ((onlineGameActive || isRestoring) && (myJoinedRoom || myRoomKey)) {
-                // Keep the last known membership until we get a definitive signal (restore_status failure,
-                // explicit leave, or a stable roomlist once we're back in the lobby).
+            if (isRestoring && (myJoinedRoom || myRoomKey)) {
+                // Keep the last known membership until restoration completes.
+                // If restoration fails, OnlineConnection should flip restoring=false and/or we will
+                // soon receive a stable roomlist that does not include us.
                 window._wasInRoom = true;
             } else if (myJoinedRoom || myRoomKey) {
                 // Leaving a room should not cause future rooms to ignore their first 'start'.
@@ -310,7 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.myRoomPlayers = myRoomPlayers;
                 removeUrlRoomKey();
             }
-            if (!(onlineGameActive || isRestoring)) {
+            if (!isRestoring) {
                 window._wasInRoom = false;
             }
         }

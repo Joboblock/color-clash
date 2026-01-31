@@ -2801,16 +2801,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const existingCount = existingCircles.length;
 
-        // Special case: AI strength preview should always "spawn" from center
-        // so reuse of existing circles shouldn't animate from their previous positions.
-        // Reset existing circles to centered, invisible state as starting point.
-        const isAIPreview = !!innerCircle.closest('#aiStrengthTile');
-        if (isAIPreview) {
-            for (const c of existingCircles) {
-                c.style.setProperty('--tx', 0);
-                c.style.setProperty('--ty', 0);
-                c.style.opacity = '0';
-            }
+        // Ensure transitions reliably restart even when reusing existing circles.
+        // We explicitly reset existing circles to the "start" state (centered, opacity 0)
+        // before applying the final positions in the next animation frame.
+        for (const c of existingCircles) {
+            c.style.setProperty('--tx', 0);
+            c.style.setProperty('--ty', 0);
+            c.style.opacity = '0';
         }
 
         if (causedByExplosion) {
@@ -2863,16 +2860,14 @@ document.addEventListener('DOMContentLoaded', () => {
             valueCircle._removalTimer = tid;
         }
 
+        // Force the browser to commit the "start" state before we apply final positions/opacity.
+        // This prevents style batching from skipping transitions when updates happen repeatedly.
+        if (newElements.length) {
+            void innerCircle.offsetWidth;
+        }
+
         // One RAF to trigger all transitions together.
-        // For the AI preview tile specifically, we also force a layout flush before applying
-        // the "final" state so repeated keyboard triggers (Enter/Space) reliably restart
-        // the transition even when the element stays focused.
         requestAnimationFrame(() => {
-            if (isAIPreview && newElements.length) {
-                // Force the browser to commit the "start" state (centered, opacity 0)
-                // before we apply final positions/opacity.
-                void newElements[0].el.offsetWidth;
-            }
             for (const item of newElements) {
                 const { el, x, y } = item;
                 // compute percent relative to the *element's own width*, as translate(%) uses the element box

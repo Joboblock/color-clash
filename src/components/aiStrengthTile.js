@@ -28,7 +28,8 @@ export class AIStrengthTile {
         } catch { /* ignore */ }
         this.valueRenderer = typeof updateValueCircles === 'function' ? updateValueCircles : null;
         this._boundClick = () => this._cycleStrength();
-        this._firstPaintDone = false; // Track whether we've passed an initial paint for animation timing
+    // Previously used for animation timing; retained no longer needed now that the
+    // global value-circle renderer handles transition restarts.
         this._init();
     }
 
@@ -107,15 +108,7 @@ export class AIStrengthTile {
     setValueRenderer(fn) {
         if (typeof fn === 'function') {
             this.valueRenderer = fn;
-            // Use a single RAF on first injection so the browser commits an initial paint before animating.
-            if (!this._firstPaintDone) {
-                requestAnimationFrame(() => {
-                    this.updatePreview();
-                    this._firstPaintDone = true;
-                });
-            } else {
-                this.updatePreview();
-            }
+            this.updatePreview();
         }
     }
 

@@ -232,7 +232,7 @@ wss.on('connection', (ws) => {
                 perClientExtras.set(ws, {
                     roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
                 });
-                broadcastRoomList(perClientExtras);
+                broadcastRoomList(perClientExtras, { targetedOnly: true });
                 return;
             }
             // Other room packets (start_req/start_ack/color_ans) are still invalid when not in a room
@@ -269,7 +269,7 @@ wss.on('connection', (ws) => {
                     roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
                 });
             }
-            broadcastRoomList(perClientExtras);
+            broadcastRoomList(perClientExtras, { targetedOnly: true });
             return;
         }
 
@@ -362,7 +362,7 @@ wss.on('connection', (ws) => {
                 started: !!(room.game && room.game.started),
                 roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
             });
-            broadcastRoomList(perClientExtras);
+            broadcastRoomList(perClientExtras, { targetedOnly: true });
 
             // If game is active, send catch-up data
             if (room.game && room.game.started) {
@@ -407,7 +407,7 @@ wss.on('connection', (ws) => {
                     started: !!(cur.game && cur.game.started),
                     roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
                 });
-                broadcastRoomList(perClientExtras);
+                broadcastRoomList(perClientExtras, { targetedOnly: true });
                 return;
             }
             // Compute a unique room name using the same pattern as player names
@@ -474,7 +474,9 @@ wss.on('connection', (ws) => {
                 started: false,
                 roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
             });
-            broadcastRoomList(perClientExtras);
+            broadcastRoomList(perClientExtras, { targetedOnly: true });
+            // Also broadcast to everyone else because hosting changes lobby state.
+            broadcastRoomList();
         } else if (msg.type === 'join' && msg.roomName) {
             const room = rooms[msg.roomName];
             if (!room) {
@@ -536,8 +538,10 @@ wss.on('connection', (ws) => {
                     started: !!(room.game && room.game.started),
                     roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
                 });
-                broadcastRoomList(perClientExtras);
+                broadcastRoomList(perClientExtras, { targetedOnly: true });
             }
+            // Broadcast lobby change to all clients.
+            broadcastRoomList();
         } else if (msg.type === 'join_by_key' && typeof msg.roomKey === 'string') {
             const key = String(msg.roomKey);
             const roomName = roomKeys.get(key);
@@ -571,7 +575,7 @@ wss.on('connection', (ws) => {
                     started: !!(cur.game && cur.game.started),
                     roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
                 });
-                broadcastRoomList(perClientExtras);
+                broadcastRoomList(perClientExtras, { targetedOnly: true });
                 return;
             }
             if (metaExisting && metaExisting.roomName && rooms[metaExisting.roomName]) {
@@ -621,15 +625,17 @@ wss.on('connection', (ws) => {
                     started: !!(room.game && room.game.started),
                     roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
                 });
-                broadcastRoomList(perClientExtras);
+                broadcastRoomList(perClientExtras, { targetedOnly: true });
             }
+            // Broadcast lobby change to all clients.
+            broadcastRoomList();
             // ...existing code...
         } else if (msg.type === 'list') {
             const roomlistUuid = (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined;
             const perClientExtras = new Map();
             perClientExtras.set(ws, { roomlistUuid });
             // broadcastRoomList will include per-client enrichment for clients in a room
-            broadcastRoomList(perClientExtras);
+            broadcastRoomList(perClientExtras, { targetedOnly: true });
         } else if (msg.type === 'start_req') {
             // Only the host can start; use their current room from sessionId in meta
             // Find meta by looking for this ws in connectionMeta
@@ -1211,7 +1217,7 @@ wss.on('connection', (ws) => {
                     started: !!(room.game && room.game.started),
                     roomlistUuid: (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined
                 });
-                broadcastRoomList(perClientExtras);
+                broadcastRoomList(perClientExtras, { targetedOnly: true });
                 return;
             }
 
@@ -1226,13 +1232,15 @@ wss.on('connection', (ws) => {
 
             // Echo roomlistUuid back to the leaver (if provided) via a per-client roomlist.
             const roomlistUuid = (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined;
+            // Always broadcast lobby change to all clients.
+            broadcastRoomList();
+            // Additionally, if the client provided a roomlistUuid, echo it back only to them
+            // so they can correlate the leave action.
             if (roomlistUuid) {
                 const perClientExtras = new Map();
                 // No specific room entry needs enrichment here; we only want to send the uuid.
                 perClientExtras.set(ws, { roomlistUuid });
-                broadcastRoomList(perClientExtras);
-            } else {
-                broadcastRoomList();
+                broadcastRoomList(perClientExtras, { targetedOnly: true });
             }
         } else if (msg.type === 'ping') {
             // Ping now carries client's next expected move sequence number.
@@ -1438,7 +1446,7 @@ function pickUniqueRoomName(raw) {
  * it sends only to currently-connected participants of that room.
  *
  * @param {Map<WebSocket,object>} [perClientExtras] - Map of ws -> extra fields to merge into their room entry
- * @param {{targetRoomName?: string|null}} [opts]
+ * @param {{targetRoomName?: string|null, targetedOnly?: boolean}} [opts]
  */
 function broadcastRoomList(perClientExtras, opts = {}) {
     const baseRooms = getRoomList();
@@ -1462,6 +1470,8 @@ function broadcastRoomList(perClientExtras, opts = {}) {
 
     wss.clients.forEach(client => {
         if (client.readyState !== 1) return;
+        // When targetedOnly is enabled, only send to clients explicitly listed in perClientExtras
+        if (opts && opts.targetedOnly && perClientExtras && !perClientExtras.has(client)) return;
         if (targetSockets && !targetSockets.has(client)) return;
         let roomListPayload = baseRooms;
         let roomlistUuid = undefined;

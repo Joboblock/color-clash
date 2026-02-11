@@ -476,7 +476,7 @@ wss.on('connection', (ws) => {
             });
             broadcastRoomList(perClientExtras, { targetedOnly: true });
             // Also broadcast to everyone else because hosting changes lobby state.
-            broadcastRoomList();
+            broadcastRoomList(undefined, { excludeSockets: new Set([ws]) });
         } else if (msg.type === 'join' && msg.roomName) {
             const room = rooms[msg.roomName];
             if (!room) {
@@ -540,8 +540,8 @@ wss.on('connection', (ws) => {
                 });
                 broadcastRoomList(perClientExtras, { targetedOnly: true });
             }
-            // Broadcast lobby change to all clients.
-            broadcastRoomList();
+            // Broadcast lobby change to all clients (excluding the triggering client).
+            broadcastRoomList(undefined, { excludeSockets: new Set([ws]) });
         } else if (msg.type === 'join_by_key' && typeof msg.roomKey === 'string') {
             const key = String(msg.roomKey);
             const roomName = roomKeys.get(key);
@@ -627,8 +627,8 @@ wss.on('connection', (ws) => {
                 });
                 broadcastRoomList(perClientExtras, { targetedOnly: true });
             }
-            // Broadcast lobby change to all clients.
-            broadcastRoomList();
+            // Broadcast lobby change to all clients (excluding the triggering client).
+            broadcastRoomList(undefined, { excludeSockets: new Set([ws]) });
             // ...existing code...
         } else if (msg.type === 'list') {
             const roomlistUuid = (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined;
@@ -1196,7 +1196,7 @@ wss.on('connection', (ws) => {
             const room = rooms[roomName];
             if (!room) {
                 connectionMeta.delete(senderSessionId);
-                broadcastRoomList();
+                broadcastRoomList(undefined, { excludeSockets: new Set([ws]) });
                 return;
             }
 
@@ -1232,8 +1232,8 @@ wss.on('connection', (ws) => {
 
             // Echo roomlistUuid back to the leaver (if provided) via a per-client roomlist.
             const roomlistUuid = (typeof msg.roomlistUuid === 'string' && msg.roomlistUuid) ? String(msg.roomlistUuid) : undefined;
-            // Always broadcast lobby change to all clients.
-            broadcastRoomList();
+            // Always broadcast lobby change to all clients (excluding the leaver).
+            broadcastRoomList(undefined, { excludeSockets: new Set([ws]) });
             // Additionally, if the client provided a roomlistUuid, echo it back only to them
             // so they can correlate the leave action.
             if (roomlistUuid) {
@@ -1446,7 +1446,7 @@ function pickUniqueRoomName(raw) {
  * it sends only to currently-connected participants of that room.
  *
  * @param {Map<WebSocket,object>} [perClientExtras] - Map of ws -> extra fields to merge into their room entry
- * @param {{targetRoomName?: string|null, targetedOnly?: boolean}} [opts]
+ * @param {{targetRoomName?: string|null, targetedOnly?: boolean, excludeSockets?: Set<WebSocket>}} [opts]
  */
 function broadcastRoomList(perClientExtras, opts = {}) {
     const baseRooms = getRoomList();
@@ -1470,6 +1470,7 @@ function broadcastRoomList(perClientExtras, opts = {}) {
 
     wss.clients.forEach(client => {
         if (client.readyState !== 1) return;
+        if (opts && opts.excludeSockets && opts.excludeSockets.has(client)) return;
         // When targetedOnly is enabled, only send to clients explicitly listed in perClientExtras
         if (opts && opts.targetedOnly && perClientExtras && !perClientExtras.has(client)) return;
         if (targetSockets && !targetSockets.has(client)) return;

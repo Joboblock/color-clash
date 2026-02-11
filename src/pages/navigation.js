@@ -39,6 +39,7 @@ export function setMenuParam(menuKey, push = true) {
     // Preserve room key param if present while navigating menus
     const existingKey = (new URLSearchParams(window.location.search)).get('key');
     if (existingKey) params.set('key', existingKey);
+    else params.delete('key');
     const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
     if (push) {
         window.history.pushState({ menu: menuKey }, '', url);
@@ -56,6 +57,10 @@ export function setMenuParam(menuKey, push = true) {
  */
 export function updateUrlRoomKey(key) {
     try {
+        if (typeof key !== 'string' || !key.trim()) {
+            removeUrlRoomKey();
+            return;
+        }
         const params = new URLSearchParams(window.location.search);
         params.set('key', key);
         const url = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;

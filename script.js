@@ -1905,9 +1905,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Host the room when clicking the start button in host mode
             hostRoom();
         }
-        // Host menu: if in host mode, clicking the Host button should also allow back navigation to online menu
+        // Host menu: return to the online menu without dropping the room key from the URL.
         if (mode === 'host' && mainMenu && mainMenu.dataset.mode === 'host') {
-            window.history.back();
+            try { onlineConnection.ensureConnected(); } catch { /* ignore */ }
+            try { setMenuParam('online', false); } catch { /* ignore */ }
+            try { showMenuFor('online'); } catch { /* ignore */ }
         }
         else if (mode === 'practice') {
             const params = new URLSearchParams(window.location.search);

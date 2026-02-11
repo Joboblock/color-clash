@@ -31,6 +31,21 @@ export const onlinePage = {
 				hideConnBanner && hideConnBanner();
 			}
 		} catch {/* ignore */ }
+		try {
+			if (onlineConnection) {
+				const history = Array.isArray(ctx?.menuHistoryStack) ? ctx.menuHistoryStack : [];
+				const prevMenu = history.length > 1 ? history[history.length - 2] : null;
+				const shouldRequestList = prevMenu === 'first' || prevMenu === null;
+				if (shouldRequestList) {
+					const requestList = () => {
+						try { onlineConnection.off && onlineConnection.off('open', requestList); } catch {/* ignore */ }
+						onlineConnection.requestRoomList && onlineConnection.requestRoomList();
+					};
+					if (onlineConnection.isConnected && onlineConnection.isConnected()) requestList();
+					else onlineConnection.on && onlineConnection.on('open', requestList);
+				}
+			}
+		} catch {/* ignore */ }
 	},
 	hide(ctx) {
 		const { hideConnBanner, leaveRoom, getMyJoinedRoom, removeUrlRoomKey } = ctx || {};

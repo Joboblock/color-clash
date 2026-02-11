@@ -1542,6 +1542,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showConnBanner,
             hideConnBanner,
             setMainMenuMode,
+            menuHistoryStack,
             // aiStrengthTile provided via mainPage components
             playerColors,
             startingColorIndex: getStartingColorIndex(),

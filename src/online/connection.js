@@ -469,14 +469,6 @@ export class OnlineConnection {
 			}
 
 			this._emit('open');
-			// Don't request room list if:
-			// 1. We're waiting for a join_by_key response
-			// 2. We're in an active game (reconnecting after ping timeout, session already restored or in progress)
-			const shouldRequestList = !this._pendingJoinByKey && !this._inActiveGame;
-			console.log('[Client] WS Opened. Request list:', shouldRequestList, '(pendingJoinByKey:', this._pendingJoinByKey, ', inActiveGame:', this._inActiveGame, ')');
-			if (shouldRequestList) {
-				this.requestRoomList();
-			}
 		};
 		ws.onmessage = (evt) => {
 			let msg; try { msg = JSON.parse(evt.data); } catch { return; }

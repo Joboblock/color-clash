@@ -2401,7 +2401,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // highlight invalid positions with new layout
         highlightInvalidInitialPositions();
-        document.body.className = activeColors()[currentPlayer];
+        const menuOpen = (typeof isAnyMenuOpen === 'function') ? isAnyMenuOpen() : false;
+        if (!menuOpen) {
+            document.body.className = activeColors()[currentPlayer];
+        }
         // Sync active circle emphasis after grid rebuild
         try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
 
@@ -2424,7 +2427,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // Ensure humanPlayer index is valid for current playerCount
             // (humanPlayer is 0 by design; defensive check)
             currentPlayer = Math.min(humanPlayer, playerCount - 1);
-            document.body.className = activeColors()[currentPlayer];
+            if (!menuOpen) {
+                document.body.className = activeColors()[currentPlayer];
+            }
             updateGrid();
             // Trigger AI if the first randomly chosen currentPlayer isn't the human
             maybeTriggerAIMove();

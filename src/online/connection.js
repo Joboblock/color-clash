@@ -392,6 +392,12 @@ export class OnlineConnection {
 	isConnected() { return !!(this._ws && this._ws.readyState === WebSocket.OPEN); }
 
 	/**
+	 * Whether a join_by_key request is currently pending.
+	 * @returns {boolean}
+	 */
+	isJoinByKeyPending() { return !!this._pendingJoinByKey; }
+
+	/**
 	 * Whether session restoration is currently in progress.
 	 * @returns {boolean}
 	 */
@@ -884,6 +890,10 @@ export class OnlineConnection {
 
 	/** Request latest room list. */
 	requestRoomList() {
+		if (this._pendingJoinByKey) {
+			this._log('Skipping roomlist request while join_by_key is pending');
+			return;
+		}
 		const packet = this._withRoomlistUuid({ type: 'list' });
 		this._sendWithRetry('list', packet, 'roomlist');
 	}

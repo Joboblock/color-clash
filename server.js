@@ -205,6 +205,13 @@ wss.on('connection', (ws) => {
         const room = roomName ? rooms[roomName] : undefined;
         const isInRoom = !!roomName && !!room;
         const isGameStarted = !!(room && room.game && room.game.started);
+        const isStartPacketSentToClient = !!(
+            room &&
+            room._startAcks &&
+            room._startAcks.colorsCollected &&
+            room._startAcks.colorsAcksExpectedIds &&
+            room._startAcks.colorsAcksExpectedIds.has(clientSessionId)
+        );
 
         // Define packet type groups
     const gamePackets = new Set(['move', 'ping']);
@@ -215,6 +222,9 @@ wss.on('connection', (ws) => {
 
         // 1. Game packets from clients not in a started room
         if (gamePackets.has(msg.type) && !isGameStarted) {
+            if (msg.type === 'ping' && isInRoom && isStartPacketSentToClient) {
+                // Allow ping during start handshake after this client received a start packet.
+            } else {
             sendPayload(ws, {
                 type: 'error',
                 error: `Invalid packet: ${msg.type} packet sent while not in a started room`,
@@ -222,6 +232,7 @@ wss.on('connection', (ws) => {
                 room: roomName || null
             });
             return;
+            }
         }
         // 2. Room packets from clients not in a room
         if (roomPackets.has(msg.type) && !isInRoom) {
@@ -1141,6 +1152,7 @@ wss.on('connection', (ws) => {
                 const otherParticipants = room.participants.filter(p => p.sessionId !== room._startAcks.hostSessionId);
                 room._startAcks.colorsAcksExpected = otherParticipants.length;
                 room._startAcks.colorsAcksReceived = new Set(); // Track by sessionId
+                room._startAcks.colorsAcksExpectedIds = new Set(otherParticipants.map(p => p.sessionId));
 
                 const colorsPayload = JSON.stringify({ type: 'start', room: meta.roomName, players, colors: assigned, gridSize, startUuid: room._startAcks.startUuid });
                 console.log(`[Start Ack] 📤 Sending colors to ${otherParticipants.length} non-host clients`);

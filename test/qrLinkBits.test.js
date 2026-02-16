@@ -5,6 +5,7 @@ import { encodeLinkToBits } from '../src/qrCode/linkToBits.js';
 import { smallestVersionForLink } from '../src/qrCode/versionCalc.js';
 import { buildByteModeBitStream } from '../src/qrCode/bytePadding.js';
 import { buildInterleavedCodewords } from '../src/qrCode/reedSolomonECC.js';
+import { buildFixedPattern } from '../src/qrCode/patternBuilder.js';
 
 test('qr: encode link to 8-bit lines', () => {
     const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
@@ -125,4 +126,25 @@ test('qr: step 4 interleave + ecc', () => {
 
     assert.deepEqual(interleavedHex, expectedHex);
     assert.equal(interleavedBits, expectedBits);
+});
+
+test('qr: fixed pattern basics', () => {
+    const grid = buildFixedPattern({ version: 4 });
+    assert.equal(grid.length, 33);
+    assert.equal(grid[0].length, 33);
+    assert.equal(grid[0][0], true);
+    assert.equal(grid[1][1], false);
+    assert.equal(grid[3][3], true);
+    assert.equal(grid[7][7], false);
+    assert.equal(grid[6][8], true);
+    assert.equal(grid[8][6], true);
+    assert.equal(grid[0][25], false);
+    assert.equal(grid[25][0], false);
+    assert.equal(grid[26][26], true);
+    assert.equal(grid[25][25], false);
+    assert.equal(grid[24][24], true);
+    assert.equal(grid[8][0], false);
+    assert.equal(grid[8][32], false);
+    assert.equal(grid[25][8], false);
+    assert.equal(grid[32][8], false);
 });

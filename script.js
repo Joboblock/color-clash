@@ -18,7 +18,8 @@ import { smallestVersionForLink } from './src/qrCode/versionCalc.js';
 import { buildFixedPattern, patternToLogLines } from './src/qrCode/patternBuilder.js';
 import { buildByteModeBitStream } from './src/qrCode/bytePadding.js';
 import { buildInterleavedCodewords } from './src/qrCode/reedSolomonECC.js';
-import { placeDataBits } from './src/qrCode/dataPlacement.js';
+import { placeDataBits, fillNullModules } from './src/qrCode/dataPlacement.js';
+import { applyMaskPattern } from './src/qrCode/maskPatterns.js';
 // Edge circles component
 import { createEdgeCircles, updateEdgeCirclesActive, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
 // Navigation and routing
@@ -33,6 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('[QR] link bytes:\n' + qrBytes.join('\n'));
     console.log('[QR] smallest version (L):', qrVersion);
     const qrPattern = buildFixedPattern({ version: qrVersion });
+    const reservedGrid = qrPattern.map(row => row.slice());
     console.log('[QR] fixed pattern:\n' + patternToLogLines(qrPattern).join('\n'));
     const { codewords } = buildByteModeBitStream(qrLink, qrVersion);
     const { interleavedBits } = buildInterleavedCodewords({
@@ -43,6 +45,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const { usedBits } = placeDataBits(qrPattern, interleavedBits);
     console.log('[QR] zigzag placed bits:', usedBits);
     console.log('[QR] data pattern:\n' + patternToLogLines(qrPattern).join('\n'));
+    fillNullModules(qrPattern, false);
+    applyMaskPattern(qrPattern, reservedGrid, 2);
+    console.log('[QR] masked pattern (2):\n' + patternToLogLines(qrPattern).join('\n'));
 
     let serverVersion = null;
 

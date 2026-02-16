@@ -29,3 +29,15 @@ export function placeDataBits(grid, bitStream) {
 
     return { grid, usedBits: bitIndex, remainingBits: bitStream.slice(bitIndex) };
 }
+
+export function fillNullModules(grid, fillValue = false) {
+    if (!Array.isArray(grid)) return grid;
+    for (let r = 0; r < grid.length; r++) {
+        for (let c = 0; c < grid[r].length; c++) {
+            if (grid[r][c] === null) {
+                grid[r][c] = fillValue;
+            }
+        }
+    }
+    return grid;
+}

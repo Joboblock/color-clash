@@ -6,7 +6,8 @@ import { smallestVersionForLink } from '../src/qrCode/versionCalc.js';
 import { buildByteModeBitStream } from '../src/qrCode/bytePadding.js';
 import { buildInterleavedCodewords } from '../src/qrCode/reedSolomonECC.js';
 import { buildFixedPattern } from '../src/qrCode/patternBuilder.js';
-import { placeDataBits } from '../src/qrCode/dataPlacement.js';
+import { placeDataBits, fillNullModules } from '../src/qrCode/dataPlacement.js';
+import { applyMaskPattern } from '../src/qrCode/maskPatterns.js';
 
 test('qr: encode link to 8-bit lines', () => {
     const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
@@ -163,6 +164,37 @@ test('qr: zigzag placement fills grid', () => {
     const { usedBits, remainingBits } = placeDataBits(grid, interleavedBits);
     assert.equal(usedBits, interleavedBits.length);
     assert.equal(remainingBits.length, 0);
+    fillNullModules(grid, false);
     const nullCount = grid.flat().filter((cell) => cell === null).length;
-    assert.equal(nullCount, 7);
+    assert.equal(nullCount, 0);
+});
+
+test('qr: mask pattern 2 toggles data only', () => {
+    const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
+    const grid = buildFixedPattern({ version: 4 });
+    const reservedGrid = grid.map((row) => row.slice());
+    const { codewords } = buildByteModeBitStream(link, 4);
+    const { interleavedBits } = buildInterleavedCodewords({
+        dataCodewords: codewords,
+        version: 4,
+        eccLevel: 'L'
+    });
+
+    placeDataBits(grid, interleavedBits);
+    fillNullModules(grid, false);
+
+    let target = null;
+    for (let r = 0; r < grid.length && !target; r++) {
+        for (let c = 0; c < grid.length; c++) {
+            if (reservedGrid[r][c] === null && c % 3 === 0 && grid[r][c] !== null) {
+                target = { r, c, value: grid[r][c] };
+                break;
+            }
+        }
+    }
+
+    assert.ok(target);
+    applyMaskPattern(grid, reservedGrid, 2);
+    assert.equal(grid[target.r][target.c], !target.value);
+    assert.equal(grid[0][0], true);
 });

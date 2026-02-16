@@ -58,6 +58,13 @@ export function smallestVersionForByteLength(byteLength) {
     return null;
 }
 
+export function getVersionCapacityBytes(version) {
+    if (!Number.isInteger(version) || version <= 0 || version >= QR_BYTE_CAPACITY_L.length) {
+        return null;
+    }
+    return QR_BYTE_CAPACITY_L[version] ?? null;
+}
+
 export function smallestVersionForLink(link) {
     const bytes = encodeLinkToBits(link);
     return smallestVersionForByteLength(bytes.length);

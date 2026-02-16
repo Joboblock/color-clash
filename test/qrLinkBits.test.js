@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { encodeLinkToBits } from '../src/qrCode/linkToBits.js';
 import { smallestVersionForLink } from '../src/qrCode/versionCalc.js';
+import { buildByteModeBitStream } from '../src/qrCode/bytePadding.js';
 
 test('qr: encode link to 8-bit lines', () => {
     const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
@@ -84,4 +85,15 @@ test('qr: smallest version (L) fits link', () => {
     const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
     const version = smallestVersionForLink(link);
     assert.equal(version, 4);
+});
+
+test('qr: step 3 concatenation + padding', () => {
+    const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
+    const { bitStream, codewords } = buildByteModeBitStream(link, 4);
+    const expectedBitStream = '0100010000110110100001110100011101000111000001110011001110100010111100101111011010100110111101100010011011110110001001101100011011110110001101101011001011100110011101101001011101000110100001110101011000100010111001101001011011110010111101100011011011110110110001101111011100100010110101100011011011000110000101110011011010000010111100111111011011010110010101101110011101010011110101101111011011100110110001101001011011100110010100100110011010110110010101111001001111010111010001011010001101000110111100110111011110000111100000110100011100010111011100001110110000010001111011000001000111101100000100011110110000010001111011000001000111101100';
+
+    assert.equal(bitStream, expectedBitStream);
+    assert.equal(codewords.length, 80);
+    assert.deepEqual(codewords.slice(0, 2), ['01000100', '00110110']);
+    assert.deepEqual(codewords.slice(-2), ['00010001', '11101100']);
 });

@@ -1,0 +1,31 @@
+export function placeDataBits(grid, bitStream) {
+    if (!Array.isArray(grid) || typeof bitStream !== 'string') {
+        return { grid, usedBits: 0, remainingBits: bitStream };
+    }
+
+    const size = grid.length;
+    let bitIndex = 0;
+
+    for (let col = size - 1; col >= 0; col -= 2) {
+        if (col === 6) col -= 1;
+        const isUpward = ((size - 1 - col) / 2) % 2 === 0;
+        const rowStart = isUpward ? size - 1 : 0;
+        const rowEnd = isUpward ? -1 : size;
+        const rowStep = isUpward ? -1 : 1;
+
+        for (let row = rowStart; row !== rowEnd; row += rowStep) {
+            for (let offset = 0; offset < 2; offset++) {
+                const c = col - offset;
+                if (c < 0) continue;
+                if (grid[row][c] !== null) continue;
+                if (bitIndex >= bitStream.length) {
+                    return { grid, usedBits: bitIndex, remainingBits: '' };
+                }
+                grid[row][c] = bitStream[bitIndex] === '1';
+                bitIndex += 1;
+            }
+        }
+    }
+
+    return { grid, usedBits: bitIndex, remainingBits: bitStream.slice(bitIndex) };
+}

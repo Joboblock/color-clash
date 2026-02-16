@@ -6,6 +6,7 @@ import { smallestVersionForLink } from '../src/qrCode/versionCalc.js';
 import { buildByteModeBitStream } from '../src/qrCode/bytePadding.js';
 import { buildInterleavedCodewords } from '../src/qrCode/reedSolomonECC.js';
 import { buildFixedPattern } from '../src/qrCode/patternBuilder.js';
+import { placeDataBits } from '../src/qrCode/dataPlacement.js';
 
 test('qr: encode link to 8-bit lines', () => {
     const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
@@ -147,4 +148,21 @@ test('qr: fixed pattern basics', () => {
     assert.equal(grid[8][32], false);
     assert.equal(grid[25][8], false);
     assert.equal(grid[32][8], false);
+});
+
+test('qr: zigzag placement fills grid', () => {
+    const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
+    const grid = buildFixedPattern({ version: 4 });
+    const { codewords } = buildByteModeBitStream(link, 4);
+    const { interleavedBits } = buildInterleavedCodewords({
+        dataCodewords: codewords,
+        version: 4,
+        eccLevel: 'L'
+    });
+
+    const { usedBits, remainingBits } = placeDataBits(grid, interleavedBits);
+    assert.equal(usedBits, interleavedBits.length);
+    assert.equal(remainingBits.length, 0);
+    const nullCount = grid.flat().filter((cell) => cell === null).length;
+    assert.equal(nullCount, 7);
 });

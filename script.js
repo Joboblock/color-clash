@@ -16,6 +16,9 @@ import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLO
 import { encodeLinkToBits } from './src/qrCode/linkToBits.js';
 import { smallestVersionForLink } from './src/qrCode/versionCalc.js';
 import { buildFixedPattern, patternToLogLines } from './src/qrCode/patternBuilder.js';
+import { buildByteModeBitStream } from './src/qrCode/bytePadding.js';
+import { buildInterleavedCodewords } from './src/qrCode/reedSolomonECC.js';
+import { placeDataBits } from './src/qrCode/dataPlacement.js';
 // Edge circles component
 import { createEdgeCircles, updateEdgeCirclesActive, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
 // Navigation and routing
@@ -31,6 +34,15 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('[QR] smallest version (L):', qrVersion);
     const qrPattern = buildFixedPattern({ version: qrVersion });
     console.log('[QR] fixed pattern:\n' + patternToLogLines(qrPattern).join('\n'));
+    const { codewords } = buildByteModeBitStream(qrLink, qrVersion);
+    const { interleavedBits } = buildInterleavedCodewords({
+        dataCodewords: codewords,
+        version: qrVersion,
+        eccLevel: 'L'
+    });
+    const { usedBits } = placeDataBits(qrPattern, interleavedBits);
+    console.log('[QR] zigzag placed bits:', usedBits);
+    console.log('[QR] data pattern:\n' + patternToLogLines(qrPattern).join('\n'));
 
     let serverVersion = null;
 

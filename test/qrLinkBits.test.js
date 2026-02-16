@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { encodeLinkToBits } from '../src/qrCode/linkToBits.js';
 import { smallestVersionForLink } from '../src/qrCode/versionCalc.js';
 import { buildByteModeBitStream } from '../src/qrCode/bytePadding.js';
+import { buildInterleavedCodewords } from '../src/qrCode/reedSolomonECC.js';
 
 test('qr: encode link to 8-bit lines', () => {
     const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
@@ -96,4 +97,32 @@ test('qr: step 3 concatenation + padding', () => {
     assert.equal(codewords.length, 80);
     assert.deepEqual(codewords.slice(0, 2), ['01000100', '00110110']);
     assert.deepEqual(codewords.slice(-2), ['00010001', '11101100']);
+});
+
+test('qr: step 4 interleave + ecc', () => {
+    const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
+    const { codewords } = buildByteModeBitStream(link, 4);
+    const { interleavedHex, interleavedBits } = buildInterleavedCodewords({
+        dataCodewords: codewords,
+        version: 4,
+        eccLevel: 'L'
+    });
+
+    const expectedHex = [
+        '44', '36', '87', '47', '47', '07', '33', 'A2', 'F2', 'F6',
+        'A6', 'F6', '26', 'F6', '26', 'C6', 'F6', '36', 'B2', 'E6',
+        '76', '97', '46', '87', '56', '22', 'E6', '96', 'F2', 'F6',
+        '36', 'F6', 'C6', 'F7', '22', 'D6', '36', 'C6', '17', '36',
+        '82', 'F3', 'F6', 'D6', '56', 'E7', '53', 'D6', 'F6', 'E6',
+        'C6', '96', 'E6', '52', '66', 'B6', '57', '93', 'D7', '45',
+        'A3', '46', 'F3', '77', '87', '83', '47', '17', '70', 'EC',
+        '11', 'EC', '11', 'EC', '11', 'EC', '11', 'EC', '11', 'EC',
+        '1E', '8F', 'B8', '3F', '78', '15', 'CC', '0F', 'AD', 'D6',
+        'E9', '2D', '52', '99', 'E3', 'CF', '54', '9F', '33', '3C'
+    ];
+
+    const expectedBits = '01000100001101101000011101000111010001110000011100110011101000101111001011110110101001101111011000100110111101100010011011000110111101100011011010110010111001100111011010010111010001101000011101010110001000101110011010010110111100101111011000110110111101101100011011110111001000101101011000110110110001100001011100110110100000101111001111110110110101100101011011100111010100111101011011110110111001101100011010010110111001100101001001100110101101100101011110010011110101110100010110100011010001101111001101110111100001111000001101000111000101110111000011101100000100011110110000010001111011000001000111101100000100011110110000010001111011000001111010001111101110000011111101111000000101011100110000001111101011011101011011101001001011010101001010011001111000111100111101010100100111110011001100111100';
+
+    assert.deepEqual(interleavedHex, expectedHex);
+    assert.equal(interleavedBits, expectedBits);
 });

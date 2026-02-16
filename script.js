@@ -14,6 +14,7 @@ import { createOnlineTurnTracker } from './src/online/onlineTurn.js';
 import { computeAIMove } from './src/ai/engine.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
 import { encodeLinkToBits } from './src/qrCode/linkToBits.js';
+import { smallestVersionForLink } from './src/qrCode/versionCalc.js';
 // Edge circles component
 import { createEdgeCircles, updateEdgeCirclesActive, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
 // Navigation and routing
@@ -24,7 +25,9 @@ import { APP_VERSION } from './src/version.js';
 document.addEventListener('DOMContentLoaded', () => {
     const qrLink = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
     const qrBytes = encodeLinkToBits(qrLink);
+    const qrVersion = smallestVersionForLink(qrLink);
     console.log('[QR] link bytes:\n' + qrBytes.join('\n'));
+    console.log('[QR] smallest version (L):', qrVersion);
 
     let serverVersion = null;
 

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { encodeLinkToBits } from '../src/qrCode/linkToBits.js';
+import { smallestVersionForLink } from '../src/qrCode/versionCalc.js';
 
 test('qr: encode link to 8-bit lines', () => {
     const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
@@ -77,4 +78,10 @@ test('qr: encode link to 8-bit lines', () => {
 
     const result = encodeLinkToBits(link);
     assert.deepEqual(result, expected);
+});
+
+test('qr: smallest version (L) fits link', () => {
+    const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
+    const version = smallestVersionForLink(link);
+    assert.equal(version, 4);
 });

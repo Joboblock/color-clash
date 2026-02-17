@@ -13,13 +13,6 @@ import { advanceTurnIndex } from './src/game/turnCalc.js';
 import { createOnlineTurnTracker } from './src/online/onlineTurn.js';
 import { computeAIMove } from './src/ai/engine.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
-import { encodeLinkToBits } from './src/qrCode/linkToBits.js';
-import { smallestVersionForLink } from './src/qrCode/versionCalc.js';
-import { buildFixedPattern, patternToLogLines } from './src/qrCode/patternBuilder.js';
-import { buildByteModeBitStream } from './src/qrCode/bytePadding.js';
-import { buildInterleavedCodewords } from './src/qrCode/reedSolomonECC.js';
-import { placeDataBits, fillNullModules } from './src/qrCode/dataPlacement.js';
-import { applyMaskPattern } from './src/qrCode/maskPatterns.js';
 // Edge circles component
 import { createEdgeCircles, updateEdgeCirclesActive, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
 // Navigation and routing
@@ -28,53 +21,7 @@ import { APP_VERSION } from './src/version.js';
 
 // PLAYER_NAME_LENGTH now imported from nameUtils.js
 document.addEventListener('DOMContentLoaded', () => {
-    const qrLink = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
-    const qrBytes = encodeLinkToBits(qrLink);
-    const qrVersion = smallestVersionForLink(qrLink);
-    console.log('[QR] link bytes:\n' + qrBytes.join('\n'));
-    console.log('[QR] smallest version (L):', qrVersion);
-    const qrPattern = buildFixedPattern({ version: qrVersion });
-    const reservedGrid = qrPattern.map(row => row.slice());
-    console.log('[QR] fixed pattern:\n' + patternToLogLines(qrPattern).join('\n'));
-    const { codewords } = buildByteModeBitStream(qrLink, qrVersion);
-    const { interleavedBits } = buildInterleavedCodewords({
-        dataCodewords: codewords,
-        version: qrVersion,
-        eccLevel: 'L'
-    });
-    const { usedBits } = placeDataBits(qrPattern, interleavedBits);
-    console.log('[QR] zigzag placed bits:', usedBits);
-    console.log('[QR] data pattern:\n' + patternToLogLines(qrPattern).join('\n'));
-    fillNullModules(qrPattern, false);
-    applyMaskPattern(qrPattern, reservedGrid, 2);
-    renderQrOverlay(patternToLogLines(qrPattern));
-    console.log('[QR] masked pattern (2):\n' + patternToLogLines(qrPattern).join('\n'));
-
     let serverVersion = null;
-
-    function renderQrOverlay(lines) {
-        if (!Array.isArray(lines) || !lines.length) return;
-        const existing = document.getElementById('qrOverlay');
-        if (existing) existing.remove();
-
-        const overlay = document.createElement('div');
-        overlay.id = 'qrOverlay';
-        const matrix = document.createElement('div');
-        matrix.className = 'qr-matrix';
-        matrix.style.setProperty('--qr-size', String(lines.length));
-
-        for (const line of lines) {
-            for (const char of line) {
-                const cell = document.createElement('div');
-                const isBlack = char === '#';
-                cell.className = `qr-cell ${isBlack ? 'qr-cell--black' : 'qr-cell--white'}`;
-                matrix.appendChild(cell);
-            }
-        }
-
-        overlay.appendChild(matrix);
-        document.body.appendChild(overlay);
-    }
 
     function initVersionOverlay() {
         const overlay = document.createElement('div');

@@ -2,6 +2,7 @@
 // Adds menu close button component for first + online menus.
 
 import { MenuCloseButton } from '../components/menuCloseButton.js';
+import { QrCodeButton } from '../components/qrCodeButton.js';
 
 export const firstPage = {
 	id: 'first',
@@ -12,6 +13,7 @@ export const firstPage = {
 		const menuTopRightBtn = document.getElementById('menuTopRightBtn');
 		const onlineTopRightBtn = document.getElementById('onlineTopRightBtn');
 		let closeButtons = null;
+		let qrCodeButton = null;
 		try {
 			closeButtons = new MenuCloseButton({
 				buttons: [menuTopRightBtn, onlineTopRightBtn],
@@ -21,7 +23,14 @@ export const firstPage = {
 				menuHistoryStack: ctx.menuHistoryStack || []
 			});
 		} catch {/* ignore */ }
-		this.components = { closeButtons };
+		try {
+			const qrCodeBtn = document.getElementById('qrCodeBtn');
+			qrCodeButton = new QrCodeButton({
+				buttons: qrCodeBtn,
+				getLink: () => window.location.href
+			});
+		} catch {/* ignore */ }
+		this.components = { closeButtons, qrCodeButton };
 	},
 	show(ctx) {
 		try {

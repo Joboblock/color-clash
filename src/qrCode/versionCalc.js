@@ -65,7 +65,25 @@ export function getVersionCapacityBytes(version) {
     return QR_BYTE_CAPACITY_L[version] ?? null;
 }
 
+function byteCountBitWidth(version) {
+    return version >= 1 && version <= 9 ? 8 : version <= 26 ? 16 : 16;
+}
+
 export function smallestVersionForLink(link) {
     const bytes = encodeLinkToBits(link);
-    return smallestVersionForByteLength(bytes.length);
+    const byteLength = bytes.length;
+    if (!Number.isFinite(byteLength)) return null;
+
+    for (let version = 1; version < QR_BYTE_CAPACITY_L.length; version++) {
+        const capacityBytes = QR_BYTE_CAPACITY_L[version];
+        if (!capacityBytes) continue;
+        const capacityBits = capacityBytes * 8;
+        const headerBits = 4 + byteCountBitWidth(version);
+        const totalBits = headerBits + byteLength * 8;
+        if (totalBits <= capacityBits) {
+            return version;
+        }
+    }
+
+    return null;
 }

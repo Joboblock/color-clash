@@ -6,9 +6,11 @@ export function placeDataBits(grid, bitStream) {
     const size = grid.length;
     let bitIndex = 0;
 
-    for (let col = size - 1; col >= 0; col -= 2) {
+    let pairIndex = 0;
+    for (let col = size - 1; col > 0; col -= 2) {
         if (col === 6) col -= 1;
-        const isUpward = ((size - 1 - col) / 2) % 2 === 0;
+        const isUpward = pairIndex % 2 === 0;
+        pairIndex += 1;
         const rowStart = isUpward ? size - 1 : 0;
         const rowEnd = isUpward ? -1 : size;
         const rowStep = isUpward ? -1 : 1;

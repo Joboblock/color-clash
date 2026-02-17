@@ -8,6 +8,40 @@
     font-display: swap;
 }
 
+#qrOverlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 20000;
+}
+
+#qrOverlay .qr-matrix {
+    --qr-cell-size: 8px;
+    display: grid;
+    grid-template-columns: repeat(var(--qr-size), var(--qr-cell-size));
+    grid-auto-rows: var(--qr-cell-size);
+    background: #fff;
+    padding: 12px;
+    border-radius: 8px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+#qrOverlay .qr-cell {
+    width: var(--qr-cell-size);
+    height: var(--qr-cell-size);
+}
+
+#qrOverlay .qr-cell--black {
+    background: #000;
+}
+
+#qrOverlay .qr-cell--white {
+    background: #fff;
+}
+
 .edge-circles-container {
     position: fixed;
     inset: 0;

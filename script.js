@@ -47,9 +47,34 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('[QR] data pattern:\n' + patternToLogLines(qrPattern).join('\n'));
     fillNullModules(qrPattern, false);
     applyMaskPattern(qrPattern, reservedGrid, 2);
+    renderQrOverlay(patternToLogLines(qrPattern));
     console.log('[QR] masked pattern (2):\n' + patternToLogLines(qrPattern).join('\n'));
 
     let serverVersion = null;
+
+    function renderQrOverlay(lines) {
+        if (!Array.isArray(lines) || !lines.length) return;
+        const existing = document.getElementById('qrOverlay');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'qrOverlay';
+        const matrix = document.createElement('div');
+        matrix.className = 'qr-matrix';
+        matrix.style.setProperty('--qr-size', String(lines.length));
+
+        for (const line of lines) {
+            for (const char of line) {
+                const cell = document.createElement('div');
+                const isBlack = char === '#';
+                cell.className = `qr-cell ${isBlack ? 'qr-cell--black' : 'qr-cell--white'}`;
+                matrix.appendChild(cell);
+            }
+        }
+
+        overlay.appendChild(matrix);
+        document.body.appendChild(overlay);
+    }
 
     function initVersionOverlay() {
         const overlay = document.createElement('div');

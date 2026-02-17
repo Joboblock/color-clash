@@ -56,14 +56,58 @@ function drawAlignmentPattern(grid, centerRow, centerCol) {
 	}
 }
 
-function getAlignmentCenters(version, size) {
+const ALIGNMENT_CENTER_TABLE = [
+	null,
+	[],
+	[6, 18],
+	[6, 22],
+	[6, 26],
+	[6, 30],
+	[6, 34],
+	[6, 22, 38],
+	[6, 24, 42],
+	[6, 26, 46],
+	[6, 28, 50],
+	[6, 30, 54],
+	[6, 32, 58],
+	[6, 34, 62],
+	[6, 26, 46, 66],
+	[6, 26, 48, 70],
+	[6, 26, 50, 74],
+	[6, 30, 54, 78],
+	[6, 30, 56, 82],
+	[6, 30, 58, 86],
+	[6, 34, 62, 90],
+	[6, 28, 50, 72, 94],
+	[6, 26, 50, 74, 98],
+	[6, 30, 54, 78, 102],
+	[6, 28, 54, 80, 106],
+	[6, 32, 58, 84, 110],
+	[6, 30, 58, 86, 114],
+	[6, 34, 62, 90, 118],
+	[6, 26, 50, 74, 98, 122],
+	[6, 30, 54, 78, 102, 126],
+	[6, 26, 52, 78, 104, 130],
+	[6, 30, 56, 82, 108, 134],
+	[6, 34, 60, 86, 112, 138],
+	[6, 30, 58, 86, 114, 142],
+	[6, 34, 62, 90, 118, 146],
+	[6, 30, 54, 78, 102, 126, 150],
+	[6, 24, 50, 76, 102, 128, 154],
+	[6, 28, 54, 80, 106, 132, 158],
+	[6, 32, 58, 84, 110, 136, 162],
+	[6, 26, 54, 82, 110, 138, 166],
+	[6, 30, 58, 86, 114, 142, 170]
+];
+
+function getAlignmentCenters(version) {
 	if (!Number.isInteger(version) || version <= 1) return [];
-	return [6, size - 7];
+	return ALIGNMENT_CENTER_TABLE[version] ?? [];
 }
 
 function drawAlignmentPatterns(grid, version) {
 	const size = grid.length;
-	const centers = getAlignmentCenters(version, size);
+	const centers = getAlignmentCenters(version);
 	for (const row of centers) {
 		for (const col of centers) {
 			const inTopLeft = row <= 8 && col <= 8;
@@ -134,6 +178,40 @@ function drawFormatBits(grid, eccLevel, maskId) {
 	setCellIfNull(grid, size - 8, 8, true);
 }
 
+function computeVersionBits(version) {
+	if (!Number.isInteger(version) || version < 7) return null;
+	const versionBits = version & 0x3f;
+	let data = versionBits << 12;
+	const generator = 0x1f25;
+	for (let i = 17; i >= 12; i--) {
+		if ((data >> i) & 1) {
+			data ^= generator << (i - 12);
+		}
+	}
+	const remainder = data & 0xfff;
+	const bitsValue = (versionBits << 12) | remainder;
+	const bits = [];
+	for (let i = 17; i >= 0; i--) {
+		bits.push(((bitsValue >> i) & 1) === 1);
+	}
+	return bits;
+}
+
+function drawVersionBits(grid, version) {
+	const size = grid.length;
+	const bits = computeVersionBits(version);
+	if (!bits) return;
+	let index = 0;
+	for (let r = 0; r < 6; r++) {
+		for (let c = 0; c < 3; c++) {
+			const value = bits[17 - index];
+			setCell(grid, r, size - 11 + c, value);
+			setCell(grid, size - 11 + c, r, value);
+			index += 1;
+		}
+	}
+}
+
 export function buildFixedPattern({ version, size, eccLevel = 'L', maskId = 2 } = {}) {
 	const finalSize = Number.isInteger(size) ? size : (Number.isInteger(version) ? 21 + 4 * (version - 1) : 21);
 	const grid = createEmptyGrid(finalSize);
@@ -146,6 +224,7 @@ export function buildFixedPattern({ version, size, eccLevel = 'L', maskId = 2 } 
 
 	drawAlignmentPatterns(grid, Number.isInteger(version) ? version : 1);
 	drawFormatBits(grid, eccLevel, maskId);
+	drawVersionBits(grid, Number.isInteger(version) ? version : 1);
 
 	return grid;
 }

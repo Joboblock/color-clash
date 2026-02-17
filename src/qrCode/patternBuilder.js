@@ -75,29 +75,66 @@ function drawAlignmentPatterns(grid, version) {
 	}
 }
 
-function drawDummyFormatBits(grid) {
+const FORMAT_ECL_BITS = {
+	L: 1,
+	M: 0,
+	Q: 3,
+	H: 2
+};
+
+export function computeFormatBits(eccLevel = 'L', maskId = 0) {
+	const eclBits = FORMAT_ECL_BITS[eccLevel] ?? 1;
+	const formatInfo = ((eclBits & 0x3) << 3) | (maskId & 0x7);
+	let data = formatInfo << 10;
+	const generator = 0x537;
+	for (let i = 14; i >= 10; i--) {
+		if ((data >> i) & 1) {
+			data ^= generator << (i - 10);
+		}
+	}
+	const remainder = data & 0x3ff;
+	const bitsValue = ((formatInfo << 10) | remainder) ^ 0x5412;
+	const bits = [];
+	for (let i = 14; i >= 0; i--) {
+		bits.push(((bitsValue >> i) & 1) === 1);
+	}
+	return bits;
+}
+
+function drawFormatBits(grid, eccLevel, maskId) {
 	const size = grid.length;
+	const bits = computeFormatBits(eccLevel, maskId);
 	const topLeftCoords = [
 		[8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5], [8, 7], [8, 8],
 		[7, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8]
 	];
 
 	const topRightCoords = [];
-	for (let c = size - 8; c < size; c++) {
+	for (let c = size - 1; c >= size - 8; c--) {
 		topRightCoords.push([8, c]);
 	}
 
 	const bottomLeftCoords = [];
-	for (let r = size - 8; r < size; r++) {
+	for (let r = size - 7; r < size; r++) {
 		bottomLeftCoords.push([r, 8]);
 	}
 
-	[...topLeftCoords, ...topRightCoords, ...bottomLeftCoords].forEach(([r, c]) => {
-		setCellIfNull(grid, r, c, false);
+	topLeftCoords.forEach(([r, c], idx) => {
+		setCell(grid, r, c, bits[idx]);
 	});
+	for (let i = 0; i < topRightCoords.length; i++) {
+		const [r, c] = topRightCoords[i];
+		setCell(grid, r, c, bits[14 - i]);
+	}
+	for (let i = 0; i < bottomLeftCoords.length; i++) {
+		const [r, c] = bottomLeftCoords[i];
+		setCell(grid, r, c, bits[6 - i]);
+	}
+
+	setCellIfNull(grid, size - 8, 8, true);
 }
 
-export function buildFixedPattern({ version, size } = {}) {
+export function buildFixedPattern({ version, size, eccLevel = 'L', maskId = 2 } = {}) {
 	const finalSize = Number.isInteger(size) ? size : (Number.isInteger(version) ? 21 + 4 * (version - 1) : 21);
 	const grid = createEmptyGrid(finalSize);
 
@@ -108,7 +145,7 @@ export function buildFixedPattern({ version, size } = {}) {
 	drawFinderPattern(grid, finalSize - 8, 0, { separatorTop: true, separatorLeft: false });
 
 	drawAlignmentPatterns(grid, Number.isInteger(version) ? version : 1);
-	drawDummyFormatBits(grid);
+	drawFormatBits(grid, eccLevel, maskId);
 
 	return grid;
 }

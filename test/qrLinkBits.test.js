@@ -5,7 +5,7 @@ import { encodeLinkToBits } from '../src/qrCode/linkToBits.js';
 import { smallestVersionForLink } from '../src/qrCode/versionCalc.js';
 import { buildByteModeBitStream } from '../src/qrCode/bytePadding.js';
 import { buildInterleavedCodewords } from '../src/qrCode/reedSolomonECC.js';
-import { buildFixedPattern } from '../src/qrCode/patternBuilder.js';
+import { buildFixedPattern, computeFormatBits } from '../src/qrCode/patternBuilder.js';
 import { placeDataBits, fillNullModules } from '../src/qrCode/dataPlacement.js';
 import { applyMaskPattern } from '../src/qrCode/maskPatterns.js';
 
@@ -132,6 +132,12 @@ test('qr: step 4 interleave + ecc', () => {
 
 test('qr: fixed pattern basics', () => {
     const grid = buildFixedPattern({ version: 4 });
+    const bits = computeFormatBits('L', 2);
+    const size = grid.length;
+    const topLeftCoords = [
+        [8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5], [8, 7], [8, 8],
+        [7, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8]
+    ];
     assert.equal(grid.length, 33);
     assert.equal(grid[0].length, 33);
     assert.equal(grid[0][0], true);
@@ -145,10 +151,14 @@ test('qr: fixed pattern basics', () => {
     assert.equal(grid[26][26], true);
     assert.equal(grid[25][25], false);
     assert.equal(grid[24][24], true);
-    assert.equal(grid[8][0], false);
-    assert.equal(grid[8][32], false);
-    assert.equal(grid[25][8], false);
-    assert.equal(grid[32][8], false);
+    assert.equal(grid[8][0], bits[0]);
+    assert.equal(grid[8][32], bits[14]);
+    assert.equal(grid[size - 7][8], bits[7]);
+    assert.equal(grid[32][8], bits[0]);
+    assert.equal(grid[size - 8][8], true);
+    topLeftCoords.forEach(([r, c], idx) => {
+        assert.equal(grid[r][c], bits[idx]);
+    });
 });
 
 test('qr: zigzag placement fills grid', () => {

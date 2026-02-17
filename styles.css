@@ -514,7 +514,8 @@ button,
     aspect-ratio: 1 / 1;
 }
 
-.menu-color-box::after {
+#menuColorCycle::after,
+#onlineMenuColorCycle::after {
     content: '';
     position: absolute;
     /* Inner circle inset proportional to box size to keep ring thickness consistent */
@@ -1249,6 +1250,12 @@ body.magenta {
 
 /* Top-right menu close button style */
 .menu-color-box.menu-close-btn {
+    background-color: var(--cell-bg);
+    position: relative;
+}
+
+/* QR code button: same base chrome as close button, without the X glyph */
+.menu-color-box.qr-code-btn {
     background-color: var(--cell-bg);
     position: relative;
 }

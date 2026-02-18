@@ -1524,6 +1524,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (typeof performanceMode !== 'undefined') performanceMode = false;
         } catch { /* ignore */ }
 
+        try { pageRegistry.get('first')?.components?.qrCodeButton?.hideOverlay?.(); } catch { /* ignore */ }
+
         let targetId = menuKey;
         let subMode = null;
         if (['local', 'host', 'practice'].includes(menuKey)) {

@@ -27,14 +27,16 @@ export class QrCodeButton {
         this._onClick = this._onClick.bind(this);
         this._closeOnPointer = this._closeOnPointer.bind(this);
         this._closeOnKey = this._closeOnKey.bind(this);
+        this._suppressClick = this._suppressClick.bind(this);
         this._overlayLastFocused = null;
+        this._suppressNextClick = false;
         this._wire();
     }
 
     _wire() {
         for (const btn of this.buttons) {
             try {
-                btn.classList.add('menu-color-box', 'qr-code-btn');
+                btn.classList.add('menu-box', 'qr-code-btn');
                 btn.classList.remove('menu-close-btn');
                 if (!btn.getAttribute('aria-label')) btn.setAttribute('aria-label', 'QR code');
                 if (!btn.getAttribute('title')) btn.setAttribute('title', 'QR code');
@@ -103,18 +105,25 @@ export class QrCodeButton {
     }
 
     _clearOverlayHandlers() {
-        window.removeEventListener('pointerdown', this._closeOnPointer, true);
+        window.removeEventListener('pointerup', this._closeOnPointer, true);
         window.removeEventListener('keydown', this._closeOnKey, true);
+        window.removeEventListener('click', this._suppressClick, true);
     }
 
-    _hideOverlay() {
+    _hideOverlay(suppressClick = false) {
         const existing = document.getElementById('qrOverlay');
         if (existing) existing.remove();
         this._clearOverlayHandlers();
+        this._suppressNextClick = !!suppressClick;
+        if (this._suppressNextClick) window.addEventListener('click', this._suppressClick, true);
         if (this._overlayLastFocused && typeof this._overlayLastFocused.focus === 'function') {
             try { this._overlayLastFocused.focus({ preventScroll: true }); } catch { /* ignore */ }
         }
         this._overlayLastFocused = null;
+    }
+
+    hideOverlay() {
+        if (document.getElementById('qrOverlay')) this._hideOverlay();
     }
 
     _showOverlay() {
@@ -123,7 +132,7 @@ export class QrCodeButton {
         this._renderQrOverlay(this._buildQrOverlayLines());
         this._clearOverlayHandlers();
         setTimeout(() => {
-            window.addEventListener('pointerdown', this._closeOnPointer, true);
+            window.addEventListener('pointerup', this._closeOnPointer, true);
             window.addEventListener('keydown', this._closeOnKey, true);
         }, 0);
     }
@@ -141,7 +150,17 @@ export class QrCodeButton {
         try { event.preventDefault(); } catch { /* ignore */ }
         try { event.stopImmediatePropagation(); } catch { /* ignore */ }
         try { event.stopPropagation(); } catch { /* ignore */ }
-        this._hideOverlay();
+        // Touchscreens are weird
+        this._hideOverlay(event?.pointerType === 'touch');
+    }
+
+    _suppressClick(event) {
+        if (!this._suppressNextClick) return;
+        try { event.preventDefault(); } catch { /* ignore */ }
+        try { event.stopImmediatePropagation(); } catch { /* ignore */ }
+        try { event.stopPropagation(); } catch { /* ignore */ }
+        this._suppressNextClick = false;
+        window.removeEventListener('click', this._suppressClick, true);
     }
 
     _closeOnKey(event) {

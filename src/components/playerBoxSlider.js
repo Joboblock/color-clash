@@ -95,7 +95,7 @@ PlayerBoxSlider.prototype._attachEvents = function () {
     const self = this;
     this._onPointerDown = function (e) {
         // Ignore pointer events that originate on the color cycler
-        const target = e.target.closest('.menu-color-box');
+        const target = e.target.closest('.menu-box');
         if (target) return;
         self._isDragging = true;
         self.rootEl.style.cursor = 'ew-resize';

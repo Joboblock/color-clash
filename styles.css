@@ -458,7 +458,7 @@ body {
 
 /* Grid handles alignment; no extra margin needed for the color cycler */
 
-.menu-color-box {
+.menu-box {
     width: 100%;
     /* fill grid column */
     aspect-ratio: 1 / 1;
@@ -490,7 +490,7 @@ button,
     -webkit-user-select: none;
 }
 
-.menu-color-box:focus-visible {
+.menu-box:focus-visible {
     outline: var(--focus-ring-width) solid var(--focus-ring-color);
     outline-offset: var(--focus-ring-offset);
 }
@@ -509,7 +509,7 @@ button,
 }
 
 /* When inside the slider, the color cycler visually matches a player box */
-.player-box-slider .menu-color-box {
+.player-box-slider .menu-box {
     width: 100%;
     aspect-ratio: 1 / 1;
 }
@@ -558,7 +558,7 @@ button,
 }
 
 /* Place cycler in first row, first column */
-.menu-grid .menu-color-box {
+.menu-grid .menu-box {
     grid-column: 1;
     grid-row: 1;
     align-self: end;
@@ -1006,7 +1006,7 @@ button,
 /* Ensure the color cycler and AI preview show pointer, not ew-resize, when hovered */
 #playerBoxSlider #menuColorCycle,
 .player-box-slider #menuColorCycle,
-.player-box-slider .menu-color-box,
+.player-box-slider .menu-box,
 #aiPreviewCell {
     cursor: pointer;
 }
@@ -1249,18 +1249,25 @@ body.magenta {
 }
 
 /* Top-right menu close button style */
-.menu-color-box.menu-close-btn {
+.menu-box.menu-close-btn {
     background-color: var(--cell-bg);
     position: relative;
 }
 
 /* QR code button: same base chrome as close button, without the X glyph */
-.menu-color-box.qr-code-btn {
+.menu-box.qr-code-btn {
     background-color: var(--cell-bg);
     position: relative;
 }
 
-.menu-color-box.menu-close-btn::before {
+.menu-box.qr-code-btn::before {
+    content: '';
+    position: absolute;
+    inset: 18%;
+    background: url('assets/qr_icon.svg') center/contain no-repeat;
+}
+
+.menu-box.menu-close-btn::before {
     content: '';
     position: absolute;
     left: 50%;
@@ -1272,7 +1279,7 @@ body.magenta {
     transform: translate(-50%, -50%) rotate(45deg);
 }
 
-.menu-color-box.menu-close-btn::after {
+.menu-box.menu-close-btn::after {
     content: '';
     position: absolute;
     left: 50%;

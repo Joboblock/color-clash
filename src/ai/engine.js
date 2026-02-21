@@ -348,7 +348,7 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  *    - Immediate material gain (difference in total owned value).
  *    - Explosion count (for tie‑breaking / heuristic flavor).
  *    - Runaway flag (detected explosion loop exceeding a bounded iteration).
- * 3. Order candidates by (immediateGain DESC, explosions DESC) and keep the
+ * 3. Order candidates by (immediateGain DESC, atk DESC, def DESC) and keep the
  *    top K (dataRespectK) for deeper search.
  * 4. For each of the top K, perform a minimax search (depth = aiDepth-1) where
  *    coalition opponents attempt to minimize the AI's advantage. Alpha‑beta
@@ -388,7 +388,8 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  *   debugInfo?: {
  *     chosen: {r:number,c:number,src:number,expl:number,gain:number,atk?:number,def?:number,winPlies?:number} | null,
  *     ordered: Array<{r:number,c:number,src:number,expl:number,gain:number,atk?:number,def?:number,winPlies?:number}>,
- *     topK: number
+ *     topK: number,
+ *     stepsPerSec?: number
  *   }
  * }} Result object: either a chosen move or flags instructing caller to advance/end.
  */
@@ -404,21 +405,25 @@ export function computeAIMove(state, config) {
 		return { chosen: null, requireAdvanceTurn: true, scheduleGameEnd: !initialPlacements[playerIndex] };
 	}
 	const evaluated = [];
+	const beforeTotal = totalOwnedOnGrid(grid, playerIndex, activeColors, gridSize);
 	for (const cand of candidates) {
 		const res = applyMoveAndSim(grid, initialPlacements, playerIndex, cand.r, cand.c, cand.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, maxExplosionsToAssumeLoop);
+		const atkDef = computeAtkDefForGrid(res.grid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
 		evaluated.push({
 			r: cand.r,
 			c: cand.c,
 			isInitial: cand.isInitial,
 			srcVal: cand.srcVal,
-			immediateGain: (res.runaway ? Infinity : (totalOwnedOnGrid(res.grid, playerIndex, activeColors, gridSize) - totalOwnedOnGrid(grid, playerIndex, activeColors, gridSize))),
+			immediateGain: (res.runaway ? Infinity : (totalOwnedOnGrid(res.grid, playerIndex, activeColors, gridSize) - beforeTotal)),
 			explosions: res.explosionCount,
+			atk: atkDef.atk,
+			def: atkDef.def,
 			resultGrid: res.grid,
 			resultInitial: res.simInitial,
 			runaway: res.runaway
 		});
 	}
-	evaluated.sort((a, b) => b.immediateGain - a.immediateGain || b.explosions - a.explosions);
+	evaluated.sort((a, b) => (b.immediateGain - a.immediateGain) || (b.atk - a.atk) || (b.def - a.def));
 	const topK = evaluated.slice(0, Math.min(dataRespectK, evaluated.length));
 	const depthOpts = { gridSize, activeColors, dataRespectK, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount };
 	let effectiveDepth = 1;
@@ -530,6 +535,7 @@ export function computeAIMove(state, config) {
 		const branches = totalBranches;
 		const endTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 		const elapsedMs = endTime - startTime;
+		const stepsPerSec = (typeof branches === 'number' && elapsedMs > 0) ? (branches / (elapsedMs / 1000)) : undefined;
 		const currentAtkDef = computeAtkDefForGrid(grid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
 		result.debugInfo = {
 			chosen: chosen ? {
@@ -540,6 +546,7 @@ export function computeAIMove(state, config) {
 			branches,
 			topK: topK.length,
 			elapsedMs,
+			stepsPerSec,
 			currentAtk: currentAtkDef.atk,
 			currentDef: currentAtkDef.def
 		};

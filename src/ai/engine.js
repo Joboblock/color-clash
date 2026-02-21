@@ -183,6 +183,28 @@ function generateCoalitionCandidatesOnSim(simGrid, simInitialPlacements, focusPl
 	return out;
 }
 
+function computeAtkDefForGrid(simGrid, gridSize, activeColors, cellExplodeThreshold, playerIndex) {
+	const aiColor = activeColors()[playerIndex];
+	const nearVal = cellExplodeThreshold - 1;
+	let def = 0;
+	let atk = 0;
+	for (let r = 0; r < gridSize; r++) {
+		for (let c = 0; c < gridSize; c++) {
+			const cell = simGrid[r][c];
+			if (cell.player === aiColor) {
+				if (cell.value === nearVal) def++;
+				const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+				for (const [ar, ac] of adj) {
+					if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+					const adjCell = simGrid[ar][ac];
+					if (adjCell.player && adjCell.player !== aiColor && cell.value > adjCell.value) atk++;
+				}
+			}
+		}
+	}
+	return { atk, def };
+}
+
 /**
  * Apply a move on a cloned grid (initial or increment) and simulate explosions.
  * @param {Array<Array<{value:number,player:string}>>} simGridInput - input simulated grid.
@@ -436,23 +458,11 @@ export function computeAIMove(state, config) {
 			cand.netResult = (typeof cand.searchScore === 'number' ? cand.searchScore : cand.immediateGain);
 			continue;
 		}
-		const rg = cand.finalGrid || cand.resultGrid; const aiColor = activeColors()[playerIndex]; const nearVal = cellExplodeThreshold - 1; let def = 0, atk = 0;
-		const playerColor = activeColors()[0]; // assume humanPlayer === 0
-		for (let r = 0; r < gridSize; r++) {
-			for (let c = 0; c < gridSize; c++) {
-				const cell = rg[r][c];
-				if (cell.player === aiColor) {
-					if (cell.value === nearVal) def++;
-					const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
-					for (const [ar, ac] of adj) {
-						if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
-						const adjCell = rg[ar][ac];
-						if (adjCell.player === playerColor && cell.value > adjCell.value) atk++;
-					}
-				}
-			}
-		}
-		cand.def = def; cand.atk = atk; cand.netResult = (typeof cand.searchScore === 'number' ? cand.searchScore : cand.immediateGain);
+		const rg = cand.finalGrid || cand.resultGrid;
+		const atkDef = computeAtkDefForGrid(rg, gridSize, activeColors, cellExplodeThreshold, playerIndex);
+		cand.def = atkDef.def;
+		cand.atk = atkDef.atk;
+		cand.netResult = (typeof cand.searchScore === 'number' ? cand.searchScore : cand.immediateGain);
 	}
 	const winning = topK.filter(c => c.searchScore === Infinity);
 	let chosen;
@@ -520,6 +530,7 @@ export function computeAIMove(state, config) {
 		const branches = totalBranches;
 		const endTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 		const elapsedMs = endTime - startTime;
+		const currentAtkDef = computeAtkDefForGrid(grid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
 		result.debugInfo = {
 			chosen: chosen ? {
 				r: chosen.r, c: chosen.c, src: chosen.srcVal, expl: chosen.explosions, gain: chosen.searchScore, atk: chosen.atk, def: chosen.def, winPlies: chosen.winPlies
@@ -528,7 +539,9 @@ export function computeAIMove(state, config) {
 			steps,
 			branches,
 			topK: topK.length,
-			elapsedMs
+			elapsedMs,
+			currentAtk: currentAtkDef.atk,
+			currentDef: currentAtkDef.def
 		};
 	}
 	return result;

@@ -429,6 +429,12 @@ export function computeAIMove(state, config) {
 		prevTotal = totalBranches;
 	}
 	for (const cand of topK) {
+		if (cand.runaway && cand.searchScore === Infinity) {
+			cand.def = undefined;
+			cand.atk = undefined;
+			cand.netResult = (typeof cand.searchScore === 'number' ? cand.searchScore : cand.immediateGain);
+			continue;
+		}
 		const rg = cand.finalGrid || cand.resultGrid; const aiColor = activeColors()[playerIndex]; const nearVal = cellExplodeThreshold - 1; let def = 0, atk = 0;
 		const playerColor = activeColors()[0]; // assume humanPlayer === 0
 		for (let r = 0; r < gridSize; r++) {

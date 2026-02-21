@@ -376,6 +376,7 @@ export function computeAIMove(state, config) {
 	const maxExplosionsToAssumeLoop = gridSize * 3;
 	const computationBudget = Math.pow(5, aiDepth);
 
+	const startTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 	const candidates = generateCandidatesOnSim(grid, initialPlacements, playerIndex, gridSize, activeColors, invalidInitialPositions);
 	if (!candidates.length) {
 		return { chosen: null, requireAdvanceTurn: true, scheduleGameEnd: !initialPlacements[playerIndex] };
@@ -517,6 +518,8 @@ export function computeAIMove(state, config) {
 		}
 		const steps = (chosen && chosen.searchScore === Infinity && typeof chosen.winPlies === 'number') ? chosen.winPlies : effectiveDepth;
 		const branches = totalBranches;
+		const endTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+		const elapsedMs = endTime - startTime;
 		result.debugInfo = {
 			chosen: chosen ? {
 				r: chosen.r, c: chosen.c, src: chosen.srcVal, expl: chosen.explosions, gain: chosen.searchScore, atk: chosen.atk, def: chosen.def, winPlies: chosen.winPlies
@@ -524,7 +527,8 @@ export function computeAIMove(state, config) {
 			ordered: ordered.map(c => ({ r: c.r, c: c.c, src: c.srcVal, expl: c.explosions, gain: c.searchScore, atk: c.atk, def: c.def, winPlies: c.winPlies })),
 			steps,
 			branches,
-			topK: topK.length
+			topK: topK.length,
+			elapsedMs
 		};
 	}
 	return result;

@@ -210,6 +210,17 @@ function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, mo
 }
 
 /**
+ * Count total nodes explored for a given search depth (used to fit a budget).
+ * @param {Array<Array<{value:number,player:string}>>} simGridInput
+ * @param {boolean[]} simInitialPlacementsInput
+ * @param {number} moverIndex
+ * @param {number} depth
+ * @param {number} focusPlayerIndex
+ * @param {Object} opts
+ * @returns {number}
+ */
+
+/**
  * Evaluate future plies using minimax with alpha-beta pruning for a focus player.
  * @param {Array<Array<{value:number,player:string}>>} simGridInput - simulated grid.
  * @param {boolean[]} simInitialPlacementsInput - initial placement flags.
@@ -363,6 +374,7 @@ export function computeAIMove(state, config) {
 	const { grid, initialPlacements, playerIndex, playerCount, gridSize, activeColors, invalidInitialPositions } = state;
 	const { maxCellValue, initialPlacementValue, dataRespectK, aiDepth, cellExplodeThreshold, debug } = config;
 	const maxExplosionsToAssumeLoop = gridSize * 3;
+	const computationBudget = Math.pow(5, aiDepth);
 
 	const candidates = generateCandidatesOnSim(grid, initialPlacements, playerIndex, gridSize, activeColors, invalidInitialPositions);
 	if (!candidates.length) {
@@ -385,23 +397,36 @@ export function computeAIMove(state, config) {
 	}
 	evaluated.sort((a, b) => b.immediateGain - a.immediateGain || b.explosions - a.explosions);
 	const topK = evaluated.slice(0, Math.min(dataRespectK, evaluated.length));
-	for (const cand of topK) {
-		if (cand.runaway) {
-			cand.searchScore = (cand.immediateGain === Infinity) ? Infinity : -Infinity;
-			if (cand.searchScore === Infinity) cand.winPlies = 1;
-			cand.finalGrid = cand.resultGrid;
-			cand.branchCount = 1;
-		} else {
-			const nextMover = -1;
-			const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextMover, aiDepth - 1, -Infinity, Infinity, playerIndex, playerIndex, {
-				gridSize, activeColors, dataRespectK, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount
-			});
-			const before = totalOwnedOnGrid(grid, playerIndex, activeColors, gridSize);
-			cand.searchScore = (evalRes.value === Infinity || evalRes.value === -Infinity) ? evalRes.value : (evalRes.value - before);
-			if (evalRes.value === Infinity && typeof evalRes.stepsToInfinity === 'number') cand.winPlies = evalRes.stepsToInfinity;
-			cand.finalGrid = evalRes.bestGrid || cand.resultGrid;
-			cand.branchCount = evalRes.branchCount;
+	const depthOpts = { gridSize, activeColors, dataRespectK, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount };
+	let effectiveDepth = 1;
+	let totalBranches = 0;
+	let prevTotal = -1;
+	const depthCounts = [];
+	let stopReason = 'budget';
+	for (let depth = 1; depth <= computationBudget; depth++) {
+		totalBranches = 0;
+		for (const cand of topK) {
+			if (cand.runaway) {
+				cand.searchScore = (cand.immediateGain === Infinity) ? Infinity : -Infinity;
+				if (cand.searchScore === Infinity) cand.winPlies = 1;
+				cand.finalGrid = cand.resultGrid;
+				cand.branchCount = 1;
+			} else {
+				const nextMover = -1;
+				const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextMover, Math.max(0, depth - 1), -Infinity, Infinity, playerIndex, playerIndex, depthOpts);
+				const before = totalOwnedOnGrid(grid, playerIndex, activeColors, gridSize);
+				cand.searchScore = (evalRes.value === Infinity || evalRes.value === -Infinity) ? evalRes.value : (evalRes.value - before);
+				if (evalRes.value === Infinity && typeof evalRes.stepsToInfinity === 'number') cand.winPlies = evalRes.stepsToInfinity;
+				cand.finalGrid = evalRes.bestGrid || cand.resultGrid;
+				cand.branchCount = evalRes.branchCount;
+			}
+			totalBranches += (typeof cand.branchCount === 'number' ? cand.branchCount : 1);
 		}
+		depthCounts.push({ depth, count: totalBranches });
+		effectiveDepth = depth;
+		if (totalBranches >= computationBudget) { stopReason = 'budget'; break; }
+		if (totalBranches === prevTotal) { stopReason = 'plateau'; break; }
+		prevTotal = totalBranches;
 	}
 	for (const cand of topK) {
 		const rg = cand.finalGrid || cand.resultGrid; const aiColor = activeColors()[playerIndex]; const nearVal = cellExplodeThreshold - 1; let def = 0, atk = 0;
@@ -450,6 +475,18 @@ export function computeAIMove(state, config) {
 		scheduleGameEnd: !chosen && !initialPlacements[playerIndex]
 	};
 	if (debug) {
+		try {
+			console.log('[AI debug] budget', {
+				aiDepth,
+				computationBudget,
+				effectiveDepth,
+				stopReason,
+				dataRespectK,
+				topK: topK.length,
+				totalBranches,
+				depthCounts
+			});
+		} catch { /* ignore */ }
 		let ordered = topK.slice();
 		if (winning.length) {
 			ordered = ordered.slice().sort((a, b) => {
@@ -472,8 +509,8 @@ export function computeAIMove(state, config) {
 				ordered.unshift(chosenEntry);
 			}
 		}
-		const steps = (chosen && chosen.searchScore === Infinity && typeof chosen.winPlies === 'number') ? chosen.winPlies : aiDepth;
-		const branches = topK.reduce((sum, cand) => sum + (typeof cand.branchCount === 'number' ? cand.branchCount : 1), 0);
+		const steps = (chosen && chosen.searchScore === Infinity && typeof chosen.winPlies === 'number') ? chosen.winPlies : effectiveDepth;
+		const branches = totalBranches;
 		result.debugInfo = {
 			chosen: chosen ? {
 				r: chosen.r, c: chosen.c, src: chosen.srcVal, expl: chosen.explosions, gain: chosen.searchScore, atk: chosen.atk, def: chosen.def, winPlies: chosen.winPlies

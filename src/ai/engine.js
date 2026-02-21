@@ -35,7 +35,7 @@
  */
 
 /** @typedef {{r:number,c:number,isInitial:boolean,srcVal:number,sortKey:number}} Candidate */
-/** @typedef {{r:number,c:number,isInitial:boolean,srcVal:number,explosions:number,immediateGain:number,resultGrid:any,resultInitial:boolean[],runaway:boolean,searchScore?:number,winPlies?:number,atk?:number,def?:number,netResult?:number}} Evaluated */
+/** @typedef {{r:number,c:number,isInitial:boolean,srcVal:number,explosions:number,immediateGain:number,resultGrid:any,resultInitial:boolean[],runaway:boolean,searchScore?:number,winPlies?:number,atk?:number,def?:number,netResult?:number,finalGrid?:any}} Evaluated */
 
 /**
  * Deep-copy a simulated grid structure to avoid mutation across branches.
@@ -219,7 +219,7 @@ function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, mo
  * @param {number} beta - beta value.
  * @param {number} maximizingPlayerIndex - maximizing player.
  * @param {number} focusPlayerIndex - player to evaluate for.
- * @returns {{value:number, runaway:boolean, stepsToInfinity?:number}} evaluation score for focus player and plies to +/-Infinity if detected.
+ * @returns {{value:number, runaway:boolean, stepsToInfinity?:number, bestGrid:Array<Array<{value:number,player:string}>>}} evaluation score for focus player and plies to +/-Infinity if detected.
  */
 function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts) {
 	const { gridSize, activeColors, dataRespectK, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount } = opts;
@@ -241,12 +241,12 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 			}
 		}
 		if (hasAny && activePlayers === 1) {
-			if (soleIdx === focusPlayerIndex) return { value: Infinity, runaway: true, stepsToInfinity: 0 };
-			return { value: -Infinity, runaway: true, stepsToInfinity: 0 };
+			if (soleIdx === focusPlayerIndex) return { value: Infinity, runaway: true, stepsToInfinity: 0, bestGrid: simGridInput };
+			return { value: -Infinity, runaway: true, stepsToInfinity: 0, bestGrid: simGridInput };
 		}
 	}
 	if (depth === 0) {
-		return { value: totalOwnedOnGrid(simGridInput, focusPlayerIndex, activeColors, gridSize), runaway: false };
+		return { value: totalOwnedOnGrid(simGridInput, focusPlayerIndex, activeColors, gridSize), runaway: false, bestGrid: simGridInput };
 	}
 	const simGrid = deepCloneGrid(simGridInput, gridSize);
 	const simInitial = simInitialPlacementsInput.slice();
@@ -276,24 +276,28 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 	evaluated.sort((a, b) => isFocusTurn ? (b.value - a.value) : (a.value - b.value));
 	const topCandidates = evaluated.slice(0, Math.min(dataRespectK, evaluated.length));
 	const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
-	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestSteps;
+	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestSteps; let bestGrid = simGridInput;
 	for (const entry of topCandidates) {
-		if (entry.value === Infinity) return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1 };
-		if (entry.value === -Infinity) return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1 };
+		if (entry.value === Infinity) return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid };
+		if (entry.value === -Infinity) return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid };
 		const child = minimaxEvaluate(entry.resultGrid, entry.simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts);
 		const value = child.value; const childSteps = typeof child.stepsToInfinity === 'number' ? child.stepsToInfinity + 1 : undefined;
 		if (isFocusTurn) {
-			if (value > bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (childSteps < bestSteps)))) { bestValue = value; bestSteps = childSteps; }
+			if (value > bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (childSteps < bestSteps)))) {
+				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
+			}
 			alpha = Math.max(alpha, bestValue);
 			if (alpha >= beta) break;
 		} else {
-			if (value < bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (childSteps > bestSteps)))) { bestValue = value; bestSteps = childSteps; }
+			if (value < bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (childSteps > bestSteps)))) {
+				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
+			}
 			beta = Math.min(beta, bestValue);
 			if (beta <= alpha) break;
 		}
 	}
 	const isInf = (bestValue === Infinity || bestValue === -Infinity);
-	return { value: bestValue, runaway: isInf, stepsToInfinity: isInf ? bestSteps : undefined };
+	return { value: bestValue, runaway: isInf, stepsToInfinity: isInf ? bestSteps : undefined, bestGrid };
 }
 
 /**
@@ -384,6 +388,7 @@ export function computeAIMove(state, config) {
 		if (cand.runaway) {
 			cand.searchScore = (cand.immediateGain === Infinity) ? Infinity : -Infinity;
 			if (cand.searchScore === Infinity) cand.winPlies = 1;
+			cand.finalGrid = cand.resultGrid;
 		} else {
 			const nextMover = -1;
 			const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextMover, aiDepth - 1, -Infinity, Infinity, playerIndex, playerIndex, {
@@ -392,7 +397,27 @@ export function computeAIMove(state, config) {
 			const before = totalOwnedOnGrid(grid, playerIndex, activeColors, gridSize);
 			cand.searchScore = (evalRes.value === Infinity || evalRes.value === -Infinity) ? evalRes.value : (evalRes.value - before);
 			if (evalRes.value === Infinity && typeof evalRes.stepsToInfinity === 'number') cand.winPlies = evalRes.stepsToInfinity;
+			cand.finalGrid = evalRes.bestGrid || cand.resultGrid;
 		}
+	}
+	for (const cand of topK) {
+		const rg = cand.finalGrid || cand.resultGrid; const aiColor = activeColors()[playerIndex]; const nearVal = cellExplodeThreshold - 1; let def = 0, atk = 0;
+		const playerColor = activeColors()[0]; // assume humanPlayer === 0
+		for (let r = 0; r < gridSize; r++) {
+			for (let c = 0; c < gridSize; c++) {
+				const cell = rg[r][c];
+				if (cell.player === aiColor) {
+					if (cell.value === nearVal) def++;
+					const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+					for (const [ar, ac] of adj) {
+						if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+						const adjCell = rg[ar][ac];
+						if (adjCell.player === playerColor && cell.value > adjCell.value) atk++;
+					}
+				}
+			}
+		}
+		cand.def = def; cand.atk = atk; cand.netResult = (typeof cand.searchScore === 'number' ? cand.searchScore : cand.immediateGain);
 	}
 	const winning = topK.filter(c => c.searchScore === Infinity);
 	let chosen;
@@ -401,26 +426,6 @@ export function computeAIMove(state, config) {
 		const fastest = winning.filter(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY) === minPlies);
 		chosen = fastest.length ? fastest[Math.floor(Math.random() * fastest.length)] : winning[0];
 	} else {
-		// Compute atk/def/netResult only when not instant win path
-		for (const cand of topK) {
-			const rg = cand.resultGrid; const aiColor = activeColors()[playerIndex]; const nearVal = cellExplodeThreshold - 1; let def = 0, atk = 0;
-			const playerColor = activeColors()[0]; // assume humanPlayer === 0
-			for (let r = 0; r < gridSize; r++) {
-				for (let c = 0; c < gridSize; c++) {
-					const cell = rg[r][c];
-					if (cell.player === aiColor) {
-						if (cell.value === nearVal) def++;
-						const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
-						for (const [ar, ac] of adj) {
-							if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
-							const adjCell = rg[ar][ac];
-							if (adjCell.player === playerColor && cell.value > adjCell.value) atk++;
-						}
-					}
-				}
-			}
-			cand.def = def; cand.atk = atk; cand.netResult = (typeof cand.searchScore === 'number' ? cand.searchScore : cand.immediateGain);
-		}
 		topK.sort((a, b) => (b.netResult - a.netResult) || (b.atk - a.atk) || (b.def - a.def));
 		const bestNet = topK[0] ? topK[0].netResult : -Infinity;
 		const bestByNet = topK.filter(t => t.netResult === bestNet);
@@ -442,11 +447,35 @@ export function computeAIMove(state, config) {
 		scheduleGameEnd: !chosen && !initialPlacements[playerIndex]
 	};
 	if (debug) {
+		let ordered = topK.slice();
+		if (winning.length) {
+			ordered = ordered.slice().sort((a, b) => {
+				if (a.searchScore === Infinity && b.searchScore === Infinity) {
+					const aPlies = typeof a.winPlies === 'number' ? a.winPlies : Number.POSITIVE_INFINITY;
+					const bPlies = typeof b.winPlies === 'number' ? b.winPlies : Number.POSITIVE_INFINITY;
+					return aPlies - bPlies;
+				}
+				if (a.searchScore === Infinity) return -1;
+				if (b.searchScore === Infinity) return 1;
+				return (b.netResult - a.netResult) || (b.atk - a.atk) || (b.def - a.def);
+			});
+		} else {
+			ordered = ordered.slice().sort((a, b) => (b.netResult - a.netResult) || (b.atk - a.atk) || (b.def - a.def));
+		}
+		if (chosen) {
+			const chosenIdx = ordered.findIndex(c => c.r === chosen.r && c.c === chosen.c && c.isInitial === chosen.isInitial);
+			if (chosenIdx > 0) {
+				const [chosenEntry] = ordered.splice(chosenIdx, 1);
+				ordered.unshift(chosenEntry);
+			}
+		}
+		const steps = (chosen && chosen.searchScore === Infinity && typeof chosen.winPlies === 'number') ? chosen.winPlies : aiDepth;
 		result.debugInfo = {
 			chosen: chosen ? {
 				r: chosen.r, c: chosen.c, src: chosen.srcVal, expl: chosen.explosions, gain: chosen.searchScore, atk: chosen.atk, def: chosen.def, winPlies: chosen.winPlies
 			} : null,
-			ordered: topK.map(c => ({ r: c.r, c: c.c, src: c.srcVal, expl: c.explosions, gain: c.searchScore, atk: c.atk, def: c.def, winPlies: c.winPlies })),
+			ordered: ordered.map(c => ({ r: c.r, c: c.c, src: c.srcVal, expl: c.explosions, gain: c.searchScore, atk: c.atk, def: c.def, winPlies: c.winPlies })),
+			steps,
 			topK: topK.length
 		};
 	}

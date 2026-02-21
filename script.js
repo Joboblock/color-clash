@@ -3104,9 +3104,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (existing) existing.remove();
         const panel = document.createElement('div'); panel.id = 'aiDebugPanel';
         const title = document.createElement('h4'); title.textContent = `AI dataRespect — player ${currentPlayer} (${activeColors()[currentPlayer]})`; panel.appendChild(title);
-        const summary = document.createElement('div'); summary.innerHTML = `<strong>chosen gain:</strong> ${info.chosen ? info.chosen.gain : '—'} &nbsp; <strong>expl:</strong> ${info.chosen ? info.chosen.expl : '—'}`; panel.appendChild(summary);
+        const formatVal = (val) => (typeof val === 'number' ? val : '-');
+        const stepsVal = (typeof info.steps === 'number' ? info.steps : '-');
+        const summary = document.createElement('div'); summary.innerHTML = `<strong>chosen gain:</strong> ${info.chosen ? formatVal(info.chosen.gain) : '-'} &nbsp; <strong>steps:</strong> ${stepsVal}`; panel.appendChild(summary);
         const listTitle = document.createElement('div'); listTitle.style.marginTop = '8px'; listTitle.innerHTML = `<em>candidates (top ${info.topK}) ordered by AI gain:</em>`; panel.appendChild(listTitle);
-        const pre = document.createElement('pre'); pre.textContent = info.ordered.map((e, i) => `${i + 1}. (${e.r},${e.c}) src:${e.src} expl:${e.expl} gain:${e.gain} atk:${e.atk} def:${e.def}`).join('\n'); panel.appendChild(pre);
+        const pre = document.createElement('pre');
+        pre.textContent = info.ordered.map((e, i) => `${i + 1}. (${e.r},${e.c}) src:${formatVal(e.src)} expl:${formatVal(e.expl)} gain:${formatVal(e.gain)} atk:${formatVal(e.atk)} def:${formatVal(e.def)}`).join('\n');
+        panel.appendChild(pre);
         document.body.appendChild(panel);
     }
 

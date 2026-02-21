@@ -8,6 +8,7 @@ import { buildInterleavedCodewords } from '../src/qrCode/reedSolomonECC.js';
 import { buildFixedPattern, computeFormatBits } from '../src/qrCode/patternBuilder.js';
 import { placeDataBits, fillNullModules } from '../src/qrCode/dataPlacement.js';
 import { applyMaskPattern } from '../src/qrCode/maskPatterns.js';
+import { buildQrCodeMatrix } from '../src/qrCode/index.js';
 
 test('qr: encode link to 8-bit lines', () => {
     const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
@@ -207,4 +208,27 @@ test('qr: mask pattern 2 toggles data only', () => {
     applyMaskPattern(grid, reservedGrid, 2);
     assert.equal(grid[target.r][target.c], !target.value);
     assert.equal(grid[0][0], true);
+});
+
+test('qr: buildQrCodeMatrix matches pipeline output', () => {
+    const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';
+    const qrMatrix = buildQrCodeMatrix(link);
+    assert.ok(Array.isArray(qrMatrix));
+    assert.equal(qrMatrix.length, 33);
+    assert.equal(qrMatrix[0].length, 33);
+
+    const version = smallestVersionForLink(link);
+    const grid = buildFixedPattern({ version });
+    const reservedGrid = grid.map((row) => row.slice());
+    const { codewords } = buildByteModeBitStream(link, version);
+    const { interleavedBits } = buildInterleavedCodewords({
+        dataCodewords: codewords,
+        version,
+        eccLevel: 'L'
+    });
+    placeDataBits(grid, interleavedBits);
+    fillNullModules(grid, false);
+    applyMaskPattern(grid, reservedGrid, 2);
+
+    assert.deepEqual(qrMatrix, grid);
 });

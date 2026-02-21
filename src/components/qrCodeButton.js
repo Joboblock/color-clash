@@ -1,12 +1,6 @@
 // ES Module: QrCodeButton
 // Encapsulates behavior, accessibility, and QR overlay rendering for the QR code menu button.
-import { encodeLinkToBits } from '../qrCode/linkToBits.js';
-import { smallestVersionForLink } from '../qrCode/versionCalc.js';
-import { buildFixedPattern, patternToLogLines } from '../qrCode/patternBuilder.js';
-import { buildByteModeBitStream } from '../qrCode/bytePadding.js';
-import { buildInterleavedCodewords } from '../qrCode/reedSolomonECC.js';
-import { placeDataBits, fillNullModules } from '../qrCode/dataPlacement.js';
-import { applyMaskPattern } from '../qrCode/maskPatterns.js';
+import { buildQrCodeMatrix } from '../qrCode/index.js';
 
 /**
  * @typedef {Object} QrCodeButtonOptions
@@ -58,26 +52,9 @@ export class QrCodeButton {
 
     _buildQrOverlayLines() {
         const qrLink = this._getLink();
-        const qrBytes = encodeLinkToBits(qrLink);
-        const qrVersion = smallestVersionForLink(qrLink);
-        console.log('[QR] link bytes:\n' + qrBytes.join('\n'));
-        console.log('[QR] smallest version (L):', qrVersion);
-        const qrPattern = buildFixedPattern({ version: qrVersion });
-        const reservedGrid = qrPattern.map(row => row.slice());
-        console.log('[QR] fixed pattern:\n' + patternToLogLines(qrPattern).join('\n'));
-        const { codewords } = buildByteModeBitStream(qrLink, qrVersion);
-        const { interleavedBits } = buildInterleavedCodewords({
-            dataCodewords: codewords,
-            version: qrVersion,
-            eccLevel: 'L'
-        });
-        const { usedBits } = placeDataBits(qrPattern, interleavedBits);
-        console.log('[QR] zigzag placed bits:', usedBits);
-        console.log('[QR] data pattern:\n' + patternToLogLines(qrPattern).join('\n'));
-        fillNullModules(qrPattern, false);
-        applyMaskPattern(qrPattern, reservedGrid, 2);
-        console.log('[QR] masked pattern (2):\n' + patternToLogLines(qrPattern).join('\n'));
-        return patternToLogLines(qrPattern);
+        const matrix = buildQrCodeMatrix(qrLink);
+        if (!Array.isArray(matrix) || !matrix.length) return [];
+        return matrix.map((row) => row.map((cell) => (cell ? '#' : '0')).join(''));
     }
 
     _renderQrOverlay(lines) {

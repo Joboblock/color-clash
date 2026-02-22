@@ -434,7 +434,6 @@ export function computeAIMove(state, config) {
 			runaway: res.runaway
 		});
 	}
-	evaluated.sort((a, b) => (b.immediateGain - a.immediateGain) || (b.atk - a.atk) || (b.def - a.def));
 	const allCandidates = evaluated.slice();
 	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount };
 	let effectiveDepth = 1;

@@ -172,7 +172,7 @@ export function applyStateFromUrl(ctx) {
     const ad = parseInt(params.get('ai_depth') || '', 10);
     if (!Number.isNaN(ad) && ad >= 1) {
         try {
-            if (ctx.setAiDepth) ctx.setAiDepth(Math.max(1, ad));
+            if (ctx.setAiStrength) ctx.setAiStrength(Math.max(1, ad));
         } catch { /* ignore */ }
     }
     if (ctx.setGameColors) {

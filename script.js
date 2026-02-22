@@ -1930,7 +1930,7 @@ document.addEventListener('DOMContentLoaded', () => {
             practiceMode = true;
             try {
                 const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
-                aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
+                aiStrength = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
             } catch { /* ignore */ }
             recreateGrid(s, p);
             createEdgeCircles(p, getEdgeCircleState());
@@ -1971,7 +1971,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Apply the chosen AI depth immediately for this session
             try {
                 const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
-                aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
+                aiStrength = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
             } catch { /* ignore */ }
             recreateGrid(s, p);
             // Enter fullscreen on mobile after hiding menu and setting up game
@@ -2029,7 +2029,7 @@ document.addEventListener('DOMContentLoaded', () => {
             menuColorCycle,
             startBtn,
             setPracticeMode: (val) => { practiceMode = val; },
-            setAiDepth: (val) => { aiDepth = val; },
+            setAiStrength: (val) => { aiStrength = val; },
             setGameColors: (val) => { gameColors = val; },
             getMyJoinedRoom: () => myJoinedRoom,
             getRoomKeyForRoom: (roomName) => (roomName === myJoinedRoom) ? myRoomKey : null,
@@ -3061,7 +3061,7 @@ document.addEventListener('DOMContentLoaded', () => {
     //#region Practice / AI helpers (dataRespect + debug)
     // AI parameters (core logic now in src/ai/engine.js)
     const aiDebug = true;
-    let aiDepth = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_depth')) || 4);
+    let aiStrength = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_depth')) || 4);
 
 
     /**
@@ -3140,7 +3140,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }, {
             maxCellValue,
             initialPlacementValue,
-            aiDepth,
+            aiStrength,
             cellExplodeThreshold,
             debug: aiDebug
         });

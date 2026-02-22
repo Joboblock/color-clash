@@ -17,7 +17,7 @@
  *   config: {
  *     maxCellValue: number,
  *     initialPlacementValue: number,
- *     aiDepth: number,                // plies to search
+ *     aiStrength: number,             // plies to search
  *     cellExplodeThreshold: number,   // near-explosion threshold (value - 1 used)
  *     gridSize: number,               // redundancy for convenience
  *     debug?: boolean
@@ -348,7 +348,7 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  *    - Explosion count (for tie‑breaking / heuristic flavor).
  *    - Runaway flag (detected explosion loop exceeding a bounded iteration).
  * 3. Order candidates by (immediateGain DESC, atk DESC, def DESC).
- * 4. For each candidate, perform a minimax search (depth = aiDepth-1) where
+ * 4. For each candidate, perform a minimax search (depth = aiStrength-1) where
  *    coalition opponents attempt to minimize the AI's advantage. Alpha‑beta
  *    pruning trims branches early.
  * 5. If any branch yields a forced win (Infinity gain), choose the fastest
@@ -374,7 +374,7 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  * @param {Object} config - AI configuration and tuning parameters.
  * @param {number} config.maxCellValue - Upper cap for cell values (prevents runaway growth).
  * @param {number} config.initialPlacementValue - Value assigned on an initial placement.
- * @param {number} config.aiDepth - Total search depth (plies) including root.
+ * @param {number} config.aiStrength - Total search depth (plies) including root.
  * @param {number} config.cellExplodeThreshold - Threshold at/above which a cell explodes (used for heuristics).
  * @param {boolean} [config.debug] - If true, attaches ordered candidate metadata for external UI/debug panels.
  *
@@ -391,9 +391,9 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  */
 export function computeAIMove(state, config) {
 	const { grid, initialPlacements, playerIndex, playerCount, gridSize, activeColors, invalidInitialPositions } = state;
-	const { maxCellValue, initialPlacementValue, aiDepth, cellExplodeThreshold, debug } = config;
+	const { maxCellValue, initialPlacementValue, aiStrength, cellExplodeThreshold, debug } = config;
 	const maxExplosionsToAssumeLoop = gridSize * 3;
-	const computationBudget = Math.pow(5, aiDepth);
+	const computationBudget = Math.pow(5, aiStrength);
 
 	const startTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 	const candidates = generateCandidatesOnSim(grid, initialPlacements, playerIndex, gridSize, activeColors, invalidInitialPositions);
@@ -424,10 +424,8 @@ export function computeAIMove(state, config) {
 	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount };
 	let effectiveDepth = 1;
 	let totalBranches = 0;
-	let prevTotal = -1;
 	const depthCounts = [];
-	let stopReason = 'budget';
-	for (let depth = 1; depth <= computationBudget; depth++) {
+	for (let depth = 1; totalBranches < computationBudget; depth++) {
 		totalBranches = 0;
 		for (const cand of allCandidates) {
 			if (cand.runaway) {
@@ -448,9 +446,6 @@ export function computeAIMove(state, config) {
 		}
 		depthCounts.push({ depth, count: totalBranches });
 		effectiveDepth = depth;
-		if (totalBranches >= computationBudget) { stopReason = 'budget'; break; }
-		if (totalBranches === prevTotal) { stopReason = 'plateau'; break; }
-		prevTotal = totalBranches;
 	}
 	for (const cand of allCandidates) {
 		if (cand.runaway && cand.searchScore === Infinity) {
@@ -495,10 +490,9 @@ export function computeAIMove(state, config) {
 	if (debug) {
 		try {
 			console.log('[AI debug] budget', {
-				aiDepth,
+				aiStrength,
 				computationBudget,
 				effectiveDepth,
-				stopReason,
 				totalBranches,
 				depthCounts
 			});

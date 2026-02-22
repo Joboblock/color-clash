@@ -167,7 +167,7 @@ export function applyStateFromUrl(ctx) {
     if (onlineMenu) ctx.setHidden(onlineMenu, true);
     // Enable practice mode if any AI-related parameter exists in the URL
     if (ctx.setPracticeMode) {
-        ctx.setPracticeMode(params.has('ai_depth') || params.has('ai_k'));
+        ctx.setPracticeMode(params.has('ai_depth'));
     }
     const ad = parseInt(params.get('ai_depth') || '', 10);
     if (!Number.isNaN(ad) && ad >= 1) {

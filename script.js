@@ -1364,7 +1364,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Detect practice mode via URL param
     const urlParams = new URLSearchParams(window.location.search);
     // Practice mode is enabled if any AI-related parameter is present in the URL
-    const isPracticeMode = urlParams.has('ai_depth') || urlParams.has('ai_k');
+    const isPracticeMode = urlParams.has('ai_depth');
 
     /**
      * Broad mobile detection using feature hints (coarse pointer, touch points, UA hints).
@@ -3061,7 +3061,6 @@ document.addEventListener('DOMContentLoaded', () => {
     //#region Practice / AI helpers (dataRespect + debug)
     // AI parameters (core logic now in src/ai/engine.js)
     const aiDebug = true;
-    const dataRespectK = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_k')) || 25);
     let aiDepth = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_depth')) || 4);
 
 
@@ -3120,9 +3119,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const summary3 = document.createElement('div');
         summary3.innerHTML = `<strong>time:</strong> ${elapsedVal} &nbsp; <strong>speed:</strong> ${speedVal}`;
         panel.appendChild(summary3);
-        const listTitle = document.createElement('div'); listTitle.style.marginTop = '8px'; listTitle.innerHTML = `<em>candidates (top ${info.topK}) ordered by AI gain:</em>`; panel.appendChild(listTitle);
+        const listTitle = document.createElement('div'); listTitle.style.marginTop = '8px'; listTitle.innerHTML = `<em>candidates ordered by AI gain:</em>`; panel.appendChild(listTitle);
         const pre = document.createElement('pre');
-        pre.textContent = info.ordered.map((e, i) => `${i + 1}. (${e.r},${e.c}) src:${formatVal(e.src)} expl:${formatVal(e.expl)} gain:${formatVal(e.gain)} atk:${formatVal(e.atk)} def:${formatVal(e.def)}`).join('\n');
+        const ordered = Array.isArray(info.ordered) ? info.ordered.slice(0, 16) : [];
+        pre.textContent = ordered.map((e, i) => `${i + 1}. (${e.r},${e.c}) src:${formatVal(e.src)} expl:${formatVal(e.expl)} gain:${formatVal(e.gain)} atk:${formatVal(e.atk)} def:${formatVal(e.def)}`).join('\n');
         panel.appendChild(pre);
         document.body.appendChild(panel);
     }
@@ -3140,7 +3140,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }, {
             maxCellValue,
             initialPlacementValue,
-            dataRespectK,
             aiDepth,
             cellExplodeThreshold,
             debug: aiDebug

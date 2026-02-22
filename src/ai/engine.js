@@ -17,7 +17,6 @@
  *   config: {
  *     maxCellValue: number,
  *     initialPlacementValue: number,
- *     dataRespectK: number,           // branch factor limit
  *     aiDepth: number,                // plies to search
  *     cellExplodeThreshold: number,   // near-explosion threshold (value - 1 used)
  *     gridSize: number,               // redundancy for convenience
@@ -28,7 +27,7 @@
  *   chosen: { r:number, c:number, isInitial:boolean, srcVal:number } | null,
  *   requireAdvanceTurn: boolean,      // true if AI should advance turn (no move)
  *   scheduleGameEnd: boolean,         // true if game end should be scheduled
- *   debugInfo?: { ordered:Array<DebugEntry>, topK:number, chosen?:DebugChosen }
+ *   debugInfo?: { ordered:Array<DebugEntry>, chosen?:DebugChosen }
  * }
  *
  * No side-effects: caller applies move or advances turn.
@@ -255,7 +254,7 @@ function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, mo
  * @returns {{value:number, runaway:boolean, stepsToInfinity?:number, bestGrid:Array<Array<{value:number,player:string}>>, branchCount:number}} evaluation score for focus player and plies to +/-Infinity if detected.
  */
 function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts) {
-	const { gridSize, activeColors, dataRespectK, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount } = opts;
+	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount } = opts;
 	// Avoid terminal mis-detection during initial placement phase
 	const inInitialPlacementPhase = !simInitialPlacementsInput.every(v => v);
 	if (!inInitialPlacementPhase) {
@@ -307,7 +306,7 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 		}
 	}
 	evaluated.sort((a, b) => isFocusTurn ? (b.value - a.value) : (a.value - b.value));
-	const topCandidates = evaluated.slice(0, Math.min(dataRespectK, evaluated.length));
+	const topCandidates = evaluated;
 	const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
 	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestSteps; let bestGrid = simGridInput; let branchCount = 0;
 	for (const entry of topCandidates) {
@@ -348,9 +347,8 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  *    - Immediate material gain (difference in total owned value).
  *    - Explosion count (for tie‑breaking / heuristic flavor).
  *    - Runaway flag (detected explosion loop exceeding a bounded iteration).
- * 3. Order candidates by (immediateGain DESC, atk DESC, def DESC) and keep the
- *    top K (dataRespectK) for deeper search.
- * 4. For each of the top K, perform a minimax search (depth = aiDepth-1) where
+ * 3. Order candidates by (immediateGain DESC, atk DESC, def DESC).
+ * 4. For each candidate, perform a minimax search (depth = aiDepth-1) where
  *    coalition opponents attempt to minimize the AI's advantage. Alpha‑beta
  *    pruning trims branches early.
  * 5. If any branch yields a forced win (Infinity gain), choose the fastest
@@ -376,7 +374,6 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  * @param {Object} config - AI configuration and tuning parameters.
  * @param {number} config.maxCellValue - Upper cap for cell values (prevents runaway growth).
  * @param {number} config.initialPlacementValue - Value assigned on an initial placement.
- * @param {number} config.dataRespectK - Branch factor (top K candidates retained for deep search).
  * @param {number} config.aiDepth - Total search depth (plies) including root.
  * @param {number} config.cellExplodeThreshold - Threshold at/above which a cell explodes (used for heuristics).
  * @param {boolean} [config.debug] - If true, attaches ordered candidate metadata for external UI/debug panels.
@@ -388,14 +385,13 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  *   debugInfo?: {
  *     chosen: {r:number,c:number,src:number,expl:number,gain:number,atk?:number,def?:number,winPlies?:number} | null,
  *     ordered: Array<{r:number,c:number,src:number,expl:number,gain:number,atk?:number,def?:number,winPlies?:number}>,
- *     topK: number,
  *     stepsPerSec?: number
  *   }
  * }} Result object: either a chosen move or flags instructing caller to advance/end.
  */
 export function computeAIMove(state, config) {
 	const { grid, initialPlacements, playerIndex, playerCount, gridSize, activeColors, invalidInitialPositions } = state;
-	const { maxCellValue, initialPlacementValue, dataRespectK, aiDepth, cellExplodeThreshold, debug } = config;
+	const { maxCellValue, initialPlacementValue, aiDepth, cellExplodeThreshold, debug } = config;
 	const maxExplosionsToAssumeLoop = gridSize * 3;
 	const computationBudget = Math.pow(5, aiDepth);
 
@@ -424,8 +420,8 @@ export function computeAIMove(state, config) {
 		});
 	}
 	evaluated.sort((a, b) => (b.immediateGain - a.immediateGain) || (b.atk - a.atk) || (b.def - a.def));
-	const topK = evaluated.slice(0, Math.min(dataRespectK, evaluated.length));
-	const depthOpts = { gridSize, activeColors, dataRespectK, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount };
+	const allCandidates = evaluated.slice();
+	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount };
 	let effectiveDepth = 1;
 	let totalBranches = 0;
 	let prevTotal = -1;
@@ -433,7 +429,7 @@ export function computeAIMove(state, config) {
 	let stopReason = 'budget';
 	for (let depth = 1; depth <= computationBudget; depth++) {
 		totalBranches = 0;
-		for (const cand of topK) {
+		for (const cand of allCandidates) {
 			if (cand.runaway) {
 				cand.searchScore = (cand.immediateGain === Infinity) ? Infinity : -Infinity;
 				if (cand.searchScore === Infinity) cand.winPlies = 1;
@@ -456,7 +452,7 @@ export function computeAIMove(state, config) {
 		if (totalBranches === prevTotal) { stopReason = 'plateau'; break; }
 		prevTotal = totalBranches;
 	}
-	for (const cand of topK) {
+	for (const cand of allCandidates) {
 		if (cand.runaway && cand.searchScore === Infinity) {
 			cand.def = undefined;
 			cand.atk = undefined;
@@ -469,16 +465,16 @@ export function computeAIMove(state, config) {
 		cand.atk = atkDef.atk;
 		cand.netResult = (typeof cand.searchScore === 'number' ? cand.searchScore : cand.immediateGain);
 	}
-	const winning = topK.filter(c => c.searchScore === Infinity);
+	const winning = allCandidates.filter(c => c.searchScore === Infinity);
 	let chosen;
 	if (winning.length) {
 		const minPlies = Math.min(...winning.map(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY)));
 		const fastest = winning.filter(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY) === minPlies);
 		chosen = fastest.length ? fastest[Math.floor(Math.random() * fastest.length)] : winning[0];
 	} else {
-		topK.sort((a, b) => (b.netResult - a.netResult) || (b.atk - a.atk) || (b.def - a.def));
-		const bestNet = topK[0] ? topK[0].netResult : -Infinity;
-		const bestByNet = topK.filter(t => t.netResult === bestNet);
+		allCandidates.sort((a, b) => (b.netResult - a.netResult) || (b.atk - a.atk) || (b.def - a.def));
+		const bestNet = allCandidates[0] ? allCandidates[0].netResult : -Infinity;
+		const bestByNet = allCandidates.filter(t => t.netResult === bestNet);
 		let bestMoves;
 		if (bestByNet.length === 1) bestMoves = bestByNet; else {
 			const maxAtk = Math.max(...bestByNet.map(t => (typeof t.atk === 'number' ? t.atk : -Infinity)));
@@ -488,7 +484,7 @@ export function computeAIMove(state, config) {
 				bestMoves = byAtk.filter(t => (typeof t.def === 'number' ? t.def : -Infinity) === maxDef);
 			}
 		}
-		if (!bestMoves || !bestMoves.length) bestMoves = topK.length ? [topK[0]] : [];
+		if (!bestMoves || !bestMoves.length) bestMoves = allCandidates.length ? [allCandidates[0]] : [];
 		chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
 	}
 	const result = {
@@ -503,13 +499,11 @@ export function computeAIMove(state, config) {
 				computationBudget,
 				effectiveDepth,
 				stopReason,
-				dataRespectK,
-				topK: topK.length,
 				totalBranches,
 				depthCounts
 			});
 		} catch { /* ignore */ }
-		let ordered = topK.slice();
+		let ordered = allCandidates.slice();
 		if (winning.length) {
 			ordered = ordered.slice().sort((a, b) => {
 				if (a.searchScore === Infinity && b.searchScore === Infinity) {
@@ -544,7 +538,6 @@ export function computeAIMove(state, config) {
 			ordered: ordered.map(c => ({ r: c.r, c: c.c, src: c.srcVal, expl: c.explosions, gain: c.searchScore, atk: c.atk, def: c.def, winPlies: c.winPlies })),
 			steps,
 			branches,
-			topK: topK.length,
 			elapsedMs,
 			stepsPerSec,
 			currentAtk: currentAtkDef.atk,

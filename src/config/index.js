@@ -54,8 +54,10 @@ export const OnlineParams = Object.freeze({
     PACKET_DELAY_MIN_MS: 150,          // min artificial delay when delaying packets
     PACKET_DELAY_MAX_MS: 500,         // max artificial delay when delaying packets
     PACKET_DISCONNECT_RATE: 0.0,     // probability to force a disconnect on a move packet (debug)
-    // Prod Server
-    WS_PROD_BASE_URL: 'wss://color-clash-192172087961.europe-west1.run.app/ws'
+    // Google Cloud Run Prod Server
+    WS_PROD_BASE_URL: 'wss://color-clash-192172087961.europe-west1.run.app/ws',
+    // Render fallback Prod Server
+    WS_PROD_FALLBACK_BASE_URL: 'wss://color-clash-im8u.onrender.com/ws'
 });
 
 export const {
@@ -67,7 +69,8 @@ export const {
     PACKET_DELAY_MIN_MS,
     PACKET_DELAY_MAX_MS,
     PACKET_DISCONNECT_RATE,
-    WS_PROD_BASE_URL
+    WS_PROD_BASE_URL,
+    WS_PROD_FALLBACK_BASE_URL
 } = OnlineParams;
 
 // Consolidated default export (optional usage)

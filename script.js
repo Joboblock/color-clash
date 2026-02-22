@@ -22,6 +22,7 @@ import { APP_VERSION } from './src/version.js';
 // PLAYER_NAME_LENGTH now imported from nameUtils.js
 document.addEventListener('DOMContentLoaded', () => {
     let serverVersion = null;
+    let connectionTag = null;
 
     function initVersionOverlay() {
         const overlay = document.createElement('div');
@@ -34,13 +35,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function formatVersionTag() {
+        const suffix = connectionTag ? ` (${connectionTag})` : '';
         if (!serverVersion) {
-            return `c: ${APP_VERSION}`;
+            return `c: ${APP_VERSION}${suffix}`;
         }
         if (serverVersion === APP_VERSION) {
-            return `c+s: ${APP_VERSION}`;
+            return `c+s: ${APP_VERSION}${suffix}`;
         }
-        return `c: ${APP_VERSION}; s: ${serverVersion}`;
+        return `c: ${APP_VERSION}; s: ${serverVersion}${suffix}`;
     }
 
     function renderVersionOverlay(state) {
@@ -196,10 +198,17 @@ document.addEventListener('DOMContentLoaded', () => {
         initialBackoffMs: WS_INITIAL_BACKOFF_MS,
         maxBackoffMs: WS_MAX_BACKOFF_MS
     });
+    const updateConnectionTag = () => {
+        connectionTag = onlineConnection.getConnectionTag && onlineConnection.getConnectionTag();
+        renderVersionOverlay(versionOverlayState);
+    };
     onlineConnection.on('reconnect_scheduled', () => {
         showConnBanner('Reconnecting…', 'info');
     });
-    onlineConnection.on('open', () => { hideConnBanner(); });
+    onlineConnection.on('open', () => {
+        hideConnBanner();
+        updateConnectionTag();
+    });
     onlineConnection.on('packet_retry_started', () => {
         showConnBanner('Retrying connection…', 'info');
     });

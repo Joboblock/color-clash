@@ -1,4 +1,4 @@
-import { WS_PROD_BASE_URL, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from '../config/index.js';
+import { WS_PROD_BASE_URL, WS_PROD_FALLBACK_BASE_URL, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from '../config/index.js';
 import {
 	PACKET_DROP_RATE,
 	PACKET_DELAY_RATE,
@@ -86,6 +86,9 @@ export class OnlineConnection {
 		this._backoffMs = initialBackoffMs;
 		this._ws = null;
 		this._reconnectTimer = null;
+		this._useProdFallback = false;
+		this._currentUrl = null;
+		this._currentUrlTag = null;
 		// When true, automatic reconnect (on close) is suppressed until the next explicit connect.
 		this._suppressReconnect = false;
 		this._everOpened = false;
@@ -410,6 +413,12 @@ export class OnlineConnection {
 	wasEverOpened() { return this._everOpened; }
 
 	/**
+	 * Return a short tag for the current WebSocket target.
+	 * @returns {'g'|'f'|'l'|null}
+	 */
+	getConnectionTag() { return this._currentUrlTag || null; }
+
+	/**
 	 * Initiate a connection if not already OPEN or CONNECTING.
 	 * Sets up message routing and schedules reconnect on close.
 	 */
@@ -418,13 +427,18 @@ export class OnlineConnection {
 		this._suppressReconnect = false;
 		if (this._ws && (this._ws.readyState === WebSocket.OPEN || this._ws.readyState === WebSocket.CONNECTING)) return;
 		const url = this._getWebSocketUrl();
+		this._currentUrl = url;
 		this._log('connecting to', url);
 		try { this._ws = new WebSocket(url); } catch (e) { this._log('connect failed immediate', e); this._scheduleReconnect(); return; }
 		const ws = this._ws;
+		let openedThisAttempt = false;
 		ws.onopen = () => {
+			openedThisAttempt = true;
 			this._log('open');
 			this._everOpened = true;
+			this._currentUrlTag = this._resolveUrlTag(url);
 			this._backoffMs = this._initialBackoffMs;
+			if (url === WS_PROD_BASE_URL) this._useProdFallback = false;
 			if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
 
 			// Start ping keepalive timer
@@ -743,10 +757,14 @@ export class OnlineConnection {
 				default: this._log('unhandled message type', type);
 			}
 		};
-		ws.onerror = () => { this._log('socket error'); };
+		ws.onerror = () => {
+			this._log('socket error');
+			if (!openedThisAttempt) this._maybeSwitchToProdFallback(url);
+		};
 		ws.onclose = () => {
 			// Stop ping timer
 			this._stopPingTimer();
+			if (!openedThisAttempt) this._maybeSwitchToProdFallback(url);
 			if (this._suppressReconnect) {
 				console.info('[Client] 📴 WebSocket closed (reconnect suppressed)');
 			} else {
@@ -765,6 +783,43 @@ export class OnlineConnection {
 				this._scheduleReconnect();
 			}
 		};
+	}
+
+	/**
+	 * Switch to the Render fallback if the primary prod URL fails to connect.
+	 * @private
+	 * @param {string} attemptUrl
+	 */
+	_maybeSwitchToProdFallback(attemptUrl) {
+		try {
+			const isGithubPages = (window.location.host || '').endsWith('github.io');
+			if (!isGithubPages) return;
+			if (attemptUrl !== WS_PROD_BASE_URL) return;
+			if (this._useProdFallback) return;
+			this._useProdFallback = true;
+			this._backoffMs = this._initialBackoffMs;
+			console.warn('[Client] ⚠️ Primary prod WebSocket failed; switching to fallback', WS_PROD_FALLBACK_BASE_URL);
+		} catch {
+			/* ignore */
+		}
+	}
+
+	/**
+	 * Map a WebSocket URL to a short tag for UI display.
+	 * @private
+	 * @param {string} url
+	 * @returns {'g'|'f'|'l'|null}
+	 */
+	_resolveUrlTag(url) {
+		try {
+			if (url === WS_PROD_BASE_URL) return 'g';
+			if (url === WS_PROD_FALLBACK_BASE_URL) return 'f';
+			const lowered = String(url || '').toLowerCase();
+			if (lowered.includes('localhost') || lowered.includes('127.0.0.1') || lowered.includes('0.0.0.0')) {
+				return 'l';
+			}
+		} catch { /* ignore */ }
+		return null;
 	}
 
 	/**
@@ -1296,7 +1351,9 @@ export class OnlineConnection {
 	 */
 	_defaultUrl() {
 		try {
-			if ((window.location.host || '').endsWith('github.io')) return WS_PROD_BASE_URL;
+			if ((window.location.host || '').endsWith('github.io')) {
+				return this._useProdFallback ? WS_PROD_FALLBACK_BASE_URL : WS_PROD_BASE_URL;
+			}
 			const isSecure = window.location.protocol === 'https:'; const proto = isSecure ? 'wss' : 'ws';
 			const host = window.location.host || 'localhost:8080';
 			return `${proto}://${host}/ws`;

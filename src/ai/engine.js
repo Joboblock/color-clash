@@ -27,7 +27,11 @@
  *   chosen: { r:number, c:number, isInitial:boolean, srcVal:number } | null,
  *   requireAdvanceTurn: boolean,      // true if AI should advance turn (no move)
  *   scheduleGameEnd: boolean,         // true if game end should be scheduled
- *   debugInfo?: { ordered:Array<DebugEntry>, chosen?:DebugChosen }
+ *   debugInfo?: {
+ *     ordered:Array<DebugEntry>,
+ *     chosen?:DebugChosen,
+ *     depthCounts?: Array<{depth:number,count:number,pruned:number}>
+ *   }
  * }
  *
  * No side-effects: caller applies move or advances turn.
@@ -251,7 +255,7 @@ function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, mo
  * @param {number} beta - beta value.
  * @param {number} maximizingPlayerIndex - maximizing player.
  * @param {number} focusPlayerIndex - player to evaluate for.
- * @returns {{value:number, runaway:boolean, stepsToInfinity?:number, bestGrid:Array<Array<{value:number,player:string}>>, branchCount:number}} evaluation score for focus player and plies to +/-Infinity if detected.
+ * @returns {{value:number, runaway:boolean, stepsToInfinity?:number, bestGrid:Array<Array<{value:number,player:string}>>, branchCount:number, prunedCount:number}} evaluation score for focus player and plies to +/-Infinity if detected.
  */
 function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts) {
 	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount } = opts;
@@ -273,12 +277,12 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 			}
 		}
 		if (hasAny && activePlayers === 1) {
-			if (soleIdx === focusPlayerIndex) return { value: Infinity, runaway: true, stepsToInfinity: 1, bestGrid: simGridInput, branchCount: 1 };
-			return { value: -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: simGridInput, branchCount: 1 };
+			if (soleIdx === focusPlayerIndex) return { value: Infinity, runaway: true, stepsToInfinity: 1, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
+			return { value: -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
 		}
 	}
 	if (depth === 0) {
-		return { value: totalOwnedOnGrid(simGridInput, focusPlayerIndex, activeColors, gridSize), runaway: false, bestGrid: simGridInput, branchCount: 1 };
+		return { value: totalOwnedOnGrid(simGridInput, focusPlayerIndex, activeColors, gridSize), runaway: false, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
 	}
 	const simGrid = deepCloneGrid(simGridInput, gridSize);
 	const simInitial = simInitialPlacementsInput.slice();
@@ -308,29 +312,43 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 	evaluated.sort((a, b) => isFocusTurn ? (b.value - a.value) : (a.value - b.value));
 	const topCandidates = evaluated;
 	const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
-	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestSteps; let bestGrid = simGridInput; let branchCount = 0;
-	for (const entry of topCandidates) {
-		if (entry.value === Infinity) return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid, branchCount: 1 };
-		if (entry.value === -Infinity) return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid, branchCount: 1 };
+	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestSteps; let bestGrid = simGridInput; let branchCount = 0; let prunedCount = 0;
+	for (let i = 0; i < topCandidates.length; i++) {
+		const entry = topCandidates[i];
+		if (entry.value === Infinity) {
+			prunedCount += Math.max(0, topCandidates.length - (i + 1));
+			return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid, branchCount: 1, prunedCount };
+		}
+		if (entry.value === -Infinity) {
+			prunedCount += Math.max(0, topCandidates.length - (i + 1));
+			return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid, branchCount: 1, prunedCount };
+		}
 		const child = minimaxEvaluate(entry.resultGrid, entry.simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts);
 		branchCount += typeof child.branchCount === 'number' ? child.branchCount : 1;
+		prunedCount += typeof child.prunedCount === 'number' ? child.prunedCount : 0;
 		const value = child.value; const childSteps = typeof child.stepsToInfinity === 'number' ? child.stepsToInfinity + 1 : undefined;
 		if (isFocusTurn) {
 			if (value > bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (childSteps < bestSteps)))) {
 				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
 			}
 			alpha = Math.max(alpha, bestValue);
-			if (alpha >= beta) break;
+			if (alpha >= beta) {
+				prunedCount += Math.max(0, topCandidates.length - (i + 1));
+				break;
+			}
 		} else {
 			if (value < bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (childSteps > bestSteps)))) {
 				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
 			}
 			beta = Math.min(beta, bestValue);
-			if (beta <= alpha) break;
+			if (beta <= alpha) {
+				prunedCount += Math.max(0, topCandidates.length - (i + 1));
+				break;
+			}
 		}
 	}
 	const isInf = (bestValue === Infinity || bestValue === -Infinity);
-	return { value: bestValue, runaway: isInf, stepsToInfinity: isInf ? bestSteps : undefined, bestGrid, branchCount };
+	return { value: bestValue, runaway: isInf, stepsToInfinity: isInf ? bestSteps : undefined, bestGrid, branchCount, prunedCount };
 }
 
 /**
@@ -378,15 +396,12 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  * @param {number} config.cellExplodeThreshold - Threshold at/above which a cell explodes (used for heuristics).
  * @param {boolean} [config.debug] - If true, attaches ordered candidate metadata for external UI/debug panels.
  *
- * @returns {{
- *   chosen: {r:number,c:number,isInitial:boolean,srcVal:number} | null,
- *   requireAdvanceTurn: boolean,
- *   scheduleGameEnd: boolean,
- *   debugInfo?: {
- *     chosen: {r:number,c:number,src:number,expl:number,gain:number,atk?:number,def?:number,winPlies?:number} | null,
- *     ordered: Array<{r:number,c:number,src:number,expl:number,gain:number,atk?:number,def?:number,winPlies?:number}>,
- *     stepsPerSec?: number
- *   }
+ * Returns: {
+ *   chosen: { r:number, c:number, isInitial:boolean, srcVal:number } | null,
+ *   requireAdvanceTurn: boolean,      // true if AI should advance turn (no move)
+ *   scheduleGameEnd: boolean,         // true if game end should be scheduled
+ *   debugInfo?: { ordered:Array<DebugEntry>, chosen?:DebugChosen }
+ * }
  * }} Result object: either a chosen move or flags instructing caller to advance/end.
  */
 export function computeAIMove(state, config) {
@@ -427,12 +442,14 @@ export function computeAIMove(state, config) {
 	const depthCounts = [];
 	for (let depth = 1; totalBranches < computationBudget; depth++) {
 		totalBranches = 0;
+		let totalPruned = 0;
 		for (const cand of allCandidates) {
 			if (cand.runaway) {
 				cand.searchScore = (cand.immediateGain === Infinity) ? Infinity : -Infinity;
 				if (cand.searchScore === Infinity) cand.winPlies = 1;
 				cand.finalGrid = cand.resultGrid;
 				cand.branchCount = 1;
+				cand.prunedCount = 0;
 			} else {
 				const nextMover = -1;
 				const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextMover, Math.max(0, depth - 1), -Infinity, Infinity, playerIndex, playerIndex, depthOpts);
@@ -441,10 +458,12 @@ export function computeAIMove(state, config) {
 				if (evalRes.value === Infinity && typeof evalRes.stepsToInfinity === 'number') cand.winPlies = evalRes.stepsToInfinity;
 				cand.finalGrid = evalRes.bestGrid || cand.resultGrid;
 				cand.branchCount = evalRes.branchCount;
+				cand.prunedCount = evalRes.prunedCount;
 			}
 			totalBranches += (typeof cand.branchCount === 'number' ? cand.branchCount : 1);
+			totalPruned += (typeof cand.prunedCount === 'number' ? cand.prunedCount : 0);
 		}
-		depthCounts.push({ depth, count: totalBranches });
+		depthCounts.push({ depth, count: totalBranches, pruned: totalPruned });
 		effectiveDepth = depth;
 	}
 	for (const cand of allCandidates) {
@@ -532,6 +551,7 @@ export function computeAIMove(state, config) {
 			ordered: ordered.map(c => ({ r: c.r, c: c.c, src: c.srcVal, expl: c.explosions, gain: c.searchScore, atk: c.atk, def: c.def, winPlies: c.winPlies })),
 			steps,
 			branches,
+			depthCounts,
 			elapsedMs,
 			stepsPerSec,
 			currentAtk: currentAtkDef.atk,

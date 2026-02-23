@@ -41,6 +41,150 @@
 /** @typedef {{r:number,c:number,isInitial:boolean,srcVal:number,explosions:number,immediateGain:number,resultGrid:any,resultInitial:boolean[],runaway:boolean,searchScore?:number,winPlies?:number,atk?:number,def?:number,netResult?:number,finalGrid?:any}} Evaluated */
 
 /**
+ * Build Zobrist hashing tables for a given grid size and palette.
+ * @param {number} gridSize
+ * @param {number} playerCount
+ * @param {number} maxCellValue
+ */
+function buildZobristTable(gridSize, playerCount, maxCellValue) {
+	const seed = 0xC0FFEE;
+	let t = seed >>> 0;
+	const next32 = () => {
+		t += 0x6D2B79F5;
+		let x = t;
+		x = Math.imul(x ^ (x >>> 15), x | 1);
+		x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+		return (x ^ (x >>> 14)) >>> 0;
+	};
+	const next64 = () => (BigInt(next32()) << 32n) ^ BigInt(next32());
+	const ownerCount = playerCount + 1; // +1 for empty
+	const cellHash = new Array(gridSize);
+	for (let r = 0; r < gridSize; r++) {
+		cellHash[r] = new Array(gridSize);
+		for (let c = 0; c < gridSize; c++) {
+			cellHash[r][c] = new Array(ownerCount);
+			for (let o = 0; o < ownerCount; o++) {
+				cellHash[r][c][o] = new Array(maxCellValue + 1);
+				for (let v = 0; v <= maxCellValue; v++) {
+					cellHash[r][c][o][v] = next64();
+				}
+			}
+		}
+	}
+	const placementHash = new Array(playerCount);
+	for (let i = 0; i < playerCount; i++) placementHash[i] = next64();
+	const moverHash = new Array(playerCount + 1);
+	for (let i = 0; i < moverHash.length; i++) moverHash[i] = next64();
+	return { cellHash, placementHash, moverHash };
+}
+
+/**
+ * Compute a Zobrist hash for a simulated game state.
+ * @param {Array<Array<{value:number,player:string}>>} simGrid
+ * @param {boolean[]} simInitialPlacements
+ * @param {number} moverIndex
+ * @param {Map<string, number>} colorIndexMap
+ * @param {number} gridSize
+ * @param {number} maxCellValue
+ * @param {{cellHash: BigInt[][][][], placementHash: BigInt[], moverHash: BigInt[]}} zobrist
+ * @returns {bigint}
+ */
+function computeZobristHash(simGrid, simInitialPlacements, moverIndex, colorIndexMap, gridSize, maxCellValue, zobrist) {
+	let hash = 0n;
+	const emptyOwner = colorIndexMap.size; // empty is last index
+	for (let r = 0; r < gridSize; r++) {
+		for (let c = 0; c < gridSize; c++) {
+			const cell = simGrid[r][c];
+			const owner = cell.player ? (colorIndexMap.get(cell.player) ?? emptyOwner) : emptyOwner;
+			const value = Math.max(0, Math.min(maxCellValue, cell.value));
+			hash ^= zobrist.cellHash[r][c][owner][value];
+		}
+	}
+	for (let i = 0; i < simInitialPlacements.length; i++) {
+		if (simInitialPlacements[i]) hash ^= zobrist.placementHash[i];
+	}
+	const moverIdx = moverIndex + 1; // -1 maps to 0
+	hash ^= zobrist.moverHash[Math.max(0, Math.min(zobrist.moverHash.length - 1, moverIdx))];
+	return hash;
+}
+
+function clampIndex(value, max) {
+	if (value < 0) return 0;
+	if (value > max) return max;
+	return value;
+}
+
+function updateMoverHash(hash, prevMoverIndex, nextMoverIndex, zobrist) {
+	const maxIdx = zobrist.moverHash.length - 1;
+	const prevIdx = clampIndex(prevMoverIndex + 1, maxIdx);
+	const nextIdx = clampIndex(nextMoverIndex + 1, maxIdx);
+	return hash ^ zobrist.moverHash[prevIdx] ^ zobrist.moverHash[nextIdx];
+}
+
+function updateCellHash(hash, r, c, prevOwner, prevValue, nextOwner, nextValue, zobrist) {
+	if (prevOwner === nextOwner && prevValue === nextValue) return hash;
+	return hash ^ zobrist.cellHash[r][c][prevOwner][prevValue] ^ zobrist.cellHash[r][c][nextOwner][nextValue];
+}
+
+function simulateExplosionsWithHash(simGrid, simInitialPlacements, gridSize, maxCellValue, maxExplosionsToAssumeLoop, hash, zobrist, colorIndexMap) {
+	let explosionCount = 0;
+	let iteration = 0;
+	const emptyOwner = colorIndexMap.size;
+	const getOwner = (player) => (player ? (colorIndexMap.get(player) ?? emptyOwner) : emptyOwner);
+	while (true) {
+		iteration++;
+		if (iteration > maxExplosionsToAssumeLoop) {
+			return { grid: simGrid, explosionCount, runaway: true, hash };
+		}
+		const cellsToExplode = [];
+		for (let i = 0; i < gridSize; i++) {
+			for (let j = 0; j < gridSize; j++) {
+				if (simGrid[i][j].value >= 4) {
+					cellsToExplode.push({ row: i, col: j, player: simGrid[i][j].player, value: simGrid[i][j].value });
+				}
+			}
+		}
+		if (!cellsToExplode.length) break;
+		explosionCount += cellsToExplode.length;
+		for (const cell of cellsToExplode) {
+			const { row, col, player, value } = cell;
+			const explosionValue = value - 3;
+			const prevOwner = getOwner(simGrid[row][col].player);
+			hash = updateCellHash(hash, row, col, prevOwner, simGrid[row][col].value, prevOwner, 0, zobrist);
+			simGrid[row][col].value = 0;
+			const isInitialPlacementPhase = !simInitialPlacements.every(v => v);
+			let extraBackToOrigin = 0;
+			const targets = [];
+			if (row > 0) targets.push({ r: row - 1, c: col }); else if (isInitialPlacementPhase) extraBackToOrigin++;
+			if (row < gridSize - 1) targets.push({ r: row + 1, c: col }); else if (isInitialPlacementPhase) extraBackToOrigin++;
+			if (col > 0) targets.push({ r: row, c: col - 1 }); else if (isInitialPlacementPhase) extraBackToOrigin++;
+			if (col < gridSize - 1) targets.push({ r: row, c: col + 1 }); else if (isInitialPlacementPhase) extraBackToOrigin++;
+			for (const t of targets) {
+				const prevCell = simGrid[t.r][t.c];
+				const prevVal = prevCell.value;
+				const nextVal = Math.min(maxCellValue, prevVal + explosionValue);
+				const prevOwnerIdx = getOwner(prevCell.player);
+				const nextOwnerIdx = getOwner(player);
+				hash = updateCellHash(hash, t.r, t.c, prevOwnerIdx, prevVal, nextOwnerIdx, nextVal, zobrist);
+				prevCell.value = nextVal;
+				prevCell.player = player;
+			}
+			if (extraBackToOrigin && isInitialPlacementPhase) {
+				const prevCell = simGrid[row][col];
+				const prevVal = prevCell.value;
+				const nextVal = Math.min(maxCellValue, prevVal + extraBackToOrigin);
+				const prevOwnerIdx = getOwner(prevCell.player);
+				const nextOwnerIdx = getOwner(player);
+				hash = updateCellHash(hash, row, col, prevOwnerIdx, prevVal, nextOwnerIdx, nextVal, zobrist);
+				prevCell.value = nextVal;
+				prevCell.player = player;
+			}
+		}
+	}
+	return { grid: simGrid, explosionCount, runaway: false, hash };
+}
+
+/**
  * Deep-copy a simulated grid structure to avoid mutation across branches.
  * @param {Array<Array<{value:number,player:string}>>} simGrid - the grid to copy.
  * @param {number} gridSize - size (width/height) of the grid.
@@ -75,55 +219,6 @@ function totalOwnedOnGrid(simGrid, playerIndex, activeColors, gridSize) {
 	return total;
 }
 
-/**
- * Run explosion propagation on a simulated grid until stable or runaway detected.
- * @param {Array<Array<{value:number,player:string}>>} simGrid - simulated grid.
- * @param {boolean[]} simInitialPlacements - initial placement flags.
- * @returns {{grid: Array<Array<{value:number,player:string}>>, explosionCount: number, runaway: boolean}} updated grid, number of explosions, runaway flag.
- */
-function simulateExplosions(simGrid, simInitialPlacements, gridSize, maxCellValue, maxExplosionsToAssumeLoop) {
-	let explosionCount = 0;
-	let iteration = 0;
-	while (true) {
-		iteration++;
-		if (iteration > maxExplosionsToAssumeLoop) {
-			return { grid: simGrid, explosionCount, runaway: true };
-		}
-		const cellsToExplode = [];
-		for (let i = 0; i < gridSize; i++) {
-			for (let j = 0; j < gridSize; j++) {
-				if (simGrid[i][j].value >= 4) {
-					cellsToExplode.push({ row: i, col: j, player: simGrid[i][j].player, value: simGrid[i][j].value });
-				}
-			}
-		}
-		if (!cellsToExplode.length) break;
-		explosionCount += cellsToExplode.length;
-		for (const cell of cellsToExplode) {
-			const { row, col, player, value } = cell;
-			const explosionValue = value - 3;
-			simGrid[row][col].value = 0;
-			const isInitialPlacementPhase = !simInitialPlacements.every(v => v);
-			let extraBackToOrigin = 0;
-			const targets = [];
-			if (row > 0) targets.push({ r: row - 1, c: col }); else if (isInitialPlacementPhase) extraBackToOrigin++;
-			if (row < gridSize - 1) targets.push({ r: row + 1, c: col }); else if (isInitialPlacementPhase) extraBackToOrigin++;
-			if (col > 0) targets.push({ r: row, c: col - 1 }); else if (isInitialPlacementPhase) extraBackToOrigin++;
-			if (col < gridSize - 1) targets.push({ r: row, c: col + 1 }); else if (isInitialPlacementPhase) extraBackToOrigin++;
-			for (const t of targets) {
-				const prev = simGrid[t.r][t.c].value;
-				simGrid[t.r][t.c].value = Math.min(maxCellValue, prev + explosionValue);
-				simGrid[t.r][t.c].player = player;
-			}
-			if (extraBackToOrigin && isInitialPlacementPhase) {
-				const prev = simGrid[row][col].value;
-				simGrid[row][col].value = Math.min(maxCellValue, prev + extraBackToOrigin);
-				simGrid[row][col].player = player;
-			}
-		}
-	}
-	return { grid: simGrid, explosionCount, runaway: false };
-}
 
 /**
  * Validate simulated initial placement using current size and simulated occupancy.
@@ -218,20 +313,33 @@ function computeAtkDefForGrid(simGrid, gridSize, activeColors, cellExplodeThresh
  * @param {boolean} isInitialMove - whether it's an initial placement.
  * @returns {{grid: Array<Array<{value:number,player:string}>>, explosionCount: number, runaway: boolean, simInitial: boolean[]}} post-move state.
  */
-function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, moveR, moveC, isInitialMove, gridSize, maxCellValue, initialPlacementValue, activeColors, maxExplosionsToAssumeLoop) {
+
+function applyMoveAndSimWithHash(simGridInput, simInitialPlacementsInput, moverIndex, moveR, moveC, isInitialMove, gridSize, maxCellValue, initialPlacementValue, activeColors, maxExplosionsToAssumeLoop, hash, zobrist, colorIndexMap) {
 	const simGrid = deepCloneGrid(simGridInput, gridSize);
 	const simInitial = simInitialPlacementsInput.slice();
-	if (isInitialMove) simInitial[moverIndex] = true;
-	if (isInitialMove) {
-		simGrid[moveR][moveC].value = initialPlacementValue;
-		simGrid[moveR][moveC].player = activeColors()[moverIndex];
-	} else {
-		const prev = simGrid[moveR][moveC].value;
-		simGrid[moveR][moveC].value = Math.min(maxCellValue, prev + 1);
-		simGrid[moveR][moveC].player = activeColors()[moverIndex];
+	const emptyOwner = colorIndexMap.size;
+	const getOwner = (player) => (player ? (colorIndexMap.get(player) ?? emptyOwner) : emptyOwner);
+	let nextHash = hash;
+	if (isInitialMove && !simInitial[moverIndex]) {
+		simInitial[moverIndex] = true;
+		nextHash ^= zobrist.placementHash[moverIndex];
 	}
-	const result = simulateExplosions(simGrid, simInitial, gridSize, maxCellValue, maxExplosionsToAssumeLoop);
-	return { grid: result.grid, explosionCount: result.explosionCount, runaway: result.runaway, simInitial };
+	const prevCell = simGrid[moveR][moveC];
+	const prevOwner = getOwner(prevCell.player);
+	if (isInitialMove) {
+		const nextOwner = getOwner(activeColors()[moverIndex]);
+		nextHash = updateCellHash(nextHash, moveR, moveC, prevOwner, prevCell.value, nextOwner, initialPlacementValue, zobrist);
+		prevCell.value = initialPlacementValue;
+		prevCell.player = activeColors()[moverIndex];
+	} else {
+		const nextOwner = getOwner(activeColors()[moverIndex]);
+		const nextVal = Math.min(maxCellValue, prevCell.value + 1);
+		nextHash = updateCellHash(nextHash, moveR, moveC, prevOwner, prevCell.value, nextOwner, nextVal, zobrist);
+		prevCell.value = nextVal;
+		prevCell.player = activeColors()[moverIndex];
+	}
+	const result = simulateExplosionsWithHash(simGrid, simInitial, gridSize, maxCellValue, maxExplosionsToAssumeLoop, nextHash, zobrist, colorIndexMap);
+	return { grid: result.grid, explosionCount: result.explosionCount, runaway: result.runaway, simInitial, hash: result.hash };
 }
 
 /**
@@ -257,8 +365,18 @@ function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, mo
  * @param {number} focusPlayerIndex - player to evaluate for.
  * @returns {{value:number, runaway:boolean, stepsToInfinity?:number, bestGrid:Array<Array<{value:number,player:string}>>, branchCount:number, prunedCount:number}} evaluation score for focus player and plies to +/-Infinity if detected.
  */
-function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts) {
-	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount } = opts;
+function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts, stateHash) {
+	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, transpositionTable, transpositionStats, colorIndexMap, zobrist } = opts;
+	let transpositionKey;
+	let preferredMove;
+	if (transpositionTable && colorIndexMap && zobrist) {
+		transpositionKey = stateHash ?? computeZobristHash(simGridInput, simInitialPlacementsInput, moverIndex, colorIndexMap, gridSize, maxCellValue, zobrist);
+		const cached = transpositionTable.get(transpositionKey);
+		if (cached && typeof cached.depth === 'number' && cached.depth >= depth && cached.move) {
+			if (transpositionStats) transpositionStats.hits++;
+			preferredMove = cached.move;
+		}
+	}
 	// Avoid terminal mis-detection during initial placement phase
 	const inInitialPlacementPhase = !simInitialPlacementsInput.every(v => v);
 	if (!inInitialPlacementPhase) {
@@ -282,7 +400,8 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 		}
 	}
 	if (depth === 0) {
-		return { value: totalOwnedOnGrid(simGridInput, focusPlayerIndex, activeColors, gridSize), runaway: false, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
+		const value = totalOwnedOnGrid(simGridInput, focusPlayerIndex, activeColors, gridSize);
+		return { value, runaway: false, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
 	}
 	const simGrid = deepCloneGrid(simGridInput, gridSize);
 	const simInitial = simInitialPlacementsInput.slice();
@@ -293,43 +412,63 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 	} else {
 		candidates = generateCoalitionCandidatesOnSim(simGrid, simInitial, focusPlayerIndex, playerCount, gridSize, activeColors, invalidInitialPositions);
 	}
+	if (preferredMove) {
+		const filtered = candidates.filter(c => c.r === preferredMove.r && c.c === preferredMove.c && c.isInitial === preferredMove.isInitial && c.owner === preferredMove.owner);
+		if (filtered.length) candidates = filtered;
+	}
 	if (!candidates.length) {
 		const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
-		return minimaxEvaluate(simGrid, simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts);
+		const nextHash = (typeof transpositionKey === 'bigint' && zobrist) ? updateMoverHash(transpositionKey, moverIndex, nextMover, zobrist) : undefined;
+		const res = minimaxEvaluate(simGrid, simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts, nextHash);
+		return res;
 	}
 	const evaluated = [];
 	const maxExplosionsToAssumeLoop = gridSize * 3;
 	for (const cand of candidates) {
-		const applied = applyMoveAndSim(simGrid, simInitial, cand.owner, cand.r, cand.c, cand.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, maxExplosionsToAssumeLoop);
+		const baseHash = (typeof transpositionKey === 'bigint') ? transpositionKey : computeZobristHash(simGrid, simInitial, moverIndex, colorIndexMap, gridSize, maxCellValue, zobrist);
+		const applied = applyMoveAndSimWithHash(simGrid, simInitial, cand.owner, cand.r, cand.c, cand.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, maxExplosionsToAssumeLoop, baseHash, zobrist, colorIndexMap);
 		const val = totalOwnedOnGrid(applied.grid, focusPlayerIndex, activeColors, gridSize);
 		if (applied.runaway) {
 			const runawayVal = (cand.owner === focusPlayerIndex) ? Infinity : -Infinity;
-			evaluated.push({ cand, owner: cand.owner, value: runawayVal, resultGrid: applied.grid, simInitial: applied.simInitial });
+			const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
+			const resultHash = updateMoverHash(applied.hash, moverIndex, nextMover, zobrist);
+			evaluated.push({ cand, owner: cand.owner, value: runawayVal, resultGrid: applied.grid, simInitial: applied.simInitial, hash: resultHash });
 		} else {
-			evaluated.push({ cand, owner: cand.owner, value: val, resultGrid: applied.grid, simInitial: applied.simInitial });
+			const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
+			const resultHash = updateMoverHash(applied.hash, moverIndex, nextMover, zobrist);
+			evaluated.push({ cand, owner: cand.owner, value: val, resultGrid: applied.grid, simInitial: applied.simInitial, hash: resultHash });
 		}
 	}
 	evaluated.sort((a, b) => isFocusTurn ? (b.value - a.value) : (a.value - b.value));
 	const topCandidates = evaluated;
 	const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
-	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestSteps; let bestGrid = simGridInput; let branchCount = 0; let prunedCount = 0;
+	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestSteps; let bestGrid = simGridInput; let branchCount = 0; let prunedCount = 0; let bestMove;
 	for (let i = 0; i < topCandidates.length; i++) {
 		const entry = topCandidates[i];
 		if (entry.value === Infinity) {
 			prunedCount += Math.max(0, topCandidates.length - (i + 1));
+			if (transpositionTable && typeof transpositionKey === 'bigint') {
+				transpositionTable.set(transpositionKey, { depth, move: { r: entry.cand.r, c: entry.cand.c, isInitial: entry.cand.isInitial, owner: entry.cand.owner } });
+				if (transpositionStats) transpositionStats.stores++;
+			}
 			return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid, branchCount: 1, prunedCount };
 		}
 		if (entry.value === -Infinity) {
 			prunedCount += Math.max(0, topCandidates.length - (i + 1));
+			if (transpositionTable && typeof transpositionKey === 'bigint') {
+				transpositionTable.set(transpositionKey, { depth, move: { r: entry.cand.r, c: entry.cand.c, isInitial: entry.cand.isInitial, owner: entry.cand.owner } });
+				if (transpositionStats) transpositionStats.stores++;
+			}
 			return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid, branchCount: 1, prunedCount };
 		}
-		const child = minimaxEvaluate(entry.resultGrid, entry.simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts);
+		const child = minimaxEvaluate(entry.resultGrid, entry.simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts, entry.hash);
 		branchCount += typeof child.branchCount === 'number' ? child.branchCount : 1;
 		prunedCount += typeof child.prunedCount === 'number' ? child.prunedCount : 0;
 		const value = child.value; const childSteps = typeof child.stepsToInfinity === 'number' ? child.stepsToInfinity + 1 : undefined;
 		if (isFocusTurn) {
 			if (value > bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (childSteps < bestSteps)))) {
 				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
+				bestMove = entry.cand;
 			}
 			alpha = Math.max(alpha, bestValue);
 			if (alpha >= beta) {
@@ -339,6 +478,7 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 		} else {
 			if (value < bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (childSteps > bestSteps)))) {
 				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
+				bestMove = entry.cand;
 			}
 			beta = Math.min(beta, bestValue);
 			if (beta <= alpha) {
@@ -348,6 +488,10 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 		}
 	}
 	const isInf = (bestValue === Infinity || bestValue === -Infinity);
+	if (transpositionTable && typeof transpositionKey === 'bigint' && bestMove) {
+		transpositionTable.set(transpositionKey, { depth, move: { r: bestMove.r, c: bestMove.c, isInitial: bestMove.isInitial, owner: bestMove.owner } });
+		if (transpositionStats) transpositionStats.stores++;
+	}
 	return { value: bestValue, runaway: isInf, stepsToInfinity: isInf ? bestSteps : undefined, bestGrid, branchCount, prunedCount };
 }
 
@@ -412,7 +556,9 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  *     candidates?:number,
  *     evaluated?:number,
  *     depth?:number,
- *     branches?:number
+ *     branches?:number,
+ *     transpositionHits?:number,
+ *     transpositionStores?:number
  *   }
  * }
  * }} Result object: either a chosen move or flags instructing caller to advance/end.
@@ -456,10 +602,18 @@ export function computeAIMove(state, config) {
 		};
 	}
 	const evaluated = [];
+	const colors = activeColors();
+	const colorIndexMap = new Map(colors.map((color, idx) => [color, idx]));
+	const transpositionTable = new Map();
+	const transpositionStats = { hits: 0, stores: 0 };
+	const zobrist = buildZobristTable(gridSize, colors.length, maxCellValue);
+	const rootHash = computeZobristHash(grid, initialPlacements, playerIndex, colorIndexMap, gridSize, maxCellValue, zobrist);
 	const beforeTotal = totalOwnedOnGrid(grid, playerIndex, activeColors, gridSize);
 	for (const cand of candidates) {
-		const res = applyMoveAndSim(grid, initialPlacements, playerIndex, cand.r, cand.c, cand.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, maxExplosionsToAssumeLoop);
+		const res = applyMoveAndSimWithHash(grid, initialPlacements, playerIndex, cand.r, cand.c, cand.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, maxExplosionsToAssumeLoop, rootHash, zobrist, colorIndexMap);
 		const atkDef = computeAtkDefForGrid(res.grid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
+		const nextMover = -1;
+		const resultHash = updateMoverHash(res.hash, playerIndex, nextMover, zobrist);
 		evaluated.push({
 			r: cand.r,
 			c: cand.c,
@@ -471,12 +625,13 @@ export function computeAIMove(state, config) {
 			def: atkDef.def,
 			resultGrid: res.grid,
 			resultInitial: res.simInitial,
-			runaway: res.runaway
+			runaway: res.runaway,
+			hash: resultHash
 		});
 	}
 	mark('simulate');
 	const allCandidates = evaluated.slice();
-	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount };
+	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, transpositionTable, transpositionStats, colorIndexMap, zobrist };
 	let effectiveDepth = 1;
 	let totalBranches = 0;
 	const depthCounts = [];
@@ -492,7 +647,7 @@ export function computeAIMove(state, config) {
 				cand.prunedCount = 0;
 			} else {
 				const nextMover = -1;
-				const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextMover, Math.max(0, depth - 1), -Infinity, Infinity, playerIndex, playerIndex, depthOpts);
+				const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextMover, Math.max(0, depth - 1), -Infinity, Infinity, playerIndex, playerIndex, depthOpts, cand.hash);
 				const before = totalOwnedOnGrid(grid, playerIndex, activeColors, gridSize);
 				cand.searchScore = (evalRes.value === Infinity || evalRes.value === -Infinity) ? evalRes.value : (evalRes.value - before);
 				if (evalRes.value === Infinity && typeof evalRes.stepsToInfinity === 'number') cand.winPlies = evalRes.stepsToInfinity;
@@ -555,7 +710,9 @@ export function computeAIMove(state, config) {
 			candidates: candidates.length,
 			evaluated: allCandidates.length,
 			depth: effectiveDepth,
-			branches: totalBranches
+			branches: totalBranches,
+			transpositionHits: transpositionStats.hits,
+			transpositionStores: transpositionStats.stores
 		});
 	}
 	if (debug) {

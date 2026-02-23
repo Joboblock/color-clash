@@ -50,6 +50,10 @@ const runCase = ({ name, gridSize, aiStrength, initialPlacement }) => {
 		selectMs: [],
 		totalMs: []
 	};
+	const transposition = {
+		hits: [],
+		stores: []
+	};
 	const allTimes = [];
 
 	for (let i = 0; i < iterations; i++) {
@@ -82,6 +86,12 @@ const runCase = ({ name, gridSize, aiStrength, initialPlacement }) => {
 				totals[key].push(result.benchmarkInfo[key]);
 			}
 		}
+		if (typeof result.benchmarkInfo.transpositionHits === 'number') {
+			transposition.hits.push(result.benchmarkInfo.transpositionHits);
+		}
+		if (typeof result.benchmarkInfo.transpositionStores === 'number') {
+			transposition.stores.push(result.benchmarkInfo.transpositionStores);
+		}
 	}
 
 	console.log(`\nCase: ${name}`);
@@ -92,6 +102,12 @@ const runCase = ({ name, gridSize, aiStrength, initialPlacement }) => {
 	}
 	const overall = summarize(allTimes);
 	console.log(`  wallClockMs: avg=${overall.avg.toFixed(2)}ms min=${overall.min.toFixed(2)}ms max=${overall.max.toFixed(2)}ms`);
+	if (transposition.hits.length) {
+		const hits = summarize(transposition.hits);
+		const stores = summarize(transposition.stores);
+		console.log(`  transpositionHits: avg=${hits.avg.toFixed(2)} min=${hits.min.toFixed(2)} max=${hits.max.toFixed(2)}`);
+		console.log(`  transpositionStores: avg=${stores.avg.toFixed(2)} min=${stores.min.toFixed(2)} max=${stores.max.toFixed(2)}`);
+	}
 };
 
 runCase({ name: 'Midgame', gridSize: 6, aiStrength: 5, initialPlacement: true });

@@ -480,7 +480,8 @@ export function computeAIMove(state, config) {
 	let effectiveDepth = 1;
 	let totalBranches = 0;
 	const depthCounts = [];
-	for (let depth = 1; totalBranches < computationBudget; depth++) {
+	let depthCap = Number.POSITIVE_INFINITY;
+	for (let depth = 1; totalBranches < computationBudget && depth <= depthCap; depth++) {
 		totalBranches = 0;
 		let totalPruned = 0;
 		for (const cand of allCandidates) {
@@ -505,6 +506,13 @@ export function computeAIMove(state, config) {
 		}
 		depthCounts.push({ depth, count: totalBranches, pruned: totalPruned });
 		effectiveDepth = depth;
+		const forcedWins = allCandidates
+			.filter(c => c.searchScore === Infinity && typeof c.winPlies === 'number')
+			.map(c => c.winPlies);
+		if (forcedWins.length) {
+			const minWinPlies = Math.min(...forcedWins);
+			depthCap = Math.max(1, minWinPlies - 2);
+		}
 	}
 	mark('search');
 	for (const cand of allCandidates) {

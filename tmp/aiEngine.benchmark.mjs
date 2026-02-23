@@ -5,6 +5,8 @@ import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD } from 
 
 const rng = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
+const cloneGrid = (grid) => grid.map(row => row.map(cell => ({ value: cell.value, player: cell.player })));
+
 const createGrid = (size, colors, density = 0.35) => {
 	const grid = Array.from({ length: size }, () => Array.from({ length: size }, () => ({ value: 0, player: '' })));
 	for (let r = 0; r < size; r++) {
@@ -37,9 +39,17 @@ const summarize = (values) => {
 	return { avg, min, max };
 };
 
-const runCase = ({ name, gridSize, aiStrength, initialPlacement, prePlacedMoves = [] }) => {
+const runCase = ({
+	name,
+	gridSize,
+	aiStrength,
+	initialPlacement,
+	prePlacedMoves = [],
+	playerIndex = 0,
+	fixedGrid = null,
+	logChosenMove = false
+}) => {
 	const colors = ['green', 'red', 'blue', 'yellow'];
-	const playerIndex = 0;
 	const invalidInitialPositions = computeInvalidInitialPositions(gridSize);
 	const iterations = 20;
 	const totals = {
@@ -51,15 +61,18 @@ const runCase = ({ name, gridSize, aiStrength, initialPlacement, prePlacedMoves 
 		totalMs: []
 	};
 	const allTimes = [];
+	let chosenMove = null;
 
 	for (let i = 0; i < iterations; i++) {
-		const grid = createGrid(gridSize, colors);
+		const grid = fixedGrid ? cloneGrid(fixedGrid) : createGrid(gridSize, colors);
 		for (const move of prePlacedMoves) {
 			if (!grid[move.row] || !grid[move.row][move.col]) continue;
 			grid[move.row][move.col].player = move.player;
 			grid[move.row][move.col].value = move.value ?? 1;
 		}
-		ensureOwnedCell(grid, gridSize, colors[playerIndex]);
+		if (!fixedGrid) {
+			ensureOwnedCell(grid, gridSize, colors[playerIndex]);
+		}
 		const initialPlacements = colors.map((_, idx) => initialPlacement ? true : idx !== playerIndex);
 		const state = {
 			grid,
@@ -80,6 +93,9 @@ const runCase = ({ name, gridSize, aiStrength, initialPlacement, prePlacedMoves 
 		const t0 = performance.now();
 		const result = computeAIMove(state, config);
 		const t1 = performance.now();
+		if (logChosenMove && !chosenMove) {
+			chosenMove = result.chosen ?? null;
+		}
 		allTimes.push(t1 - t0);
 		if (!result.benchmarkInfo) continue;
 		for (const key of Object.keys(totals)) {
@@ -90,6 +106,9 @@ const runCase = ({ name, gridSize, aiStrength, initialPlacement, prePlacedMoves 
 	}
 
 	console.log(`\nCase: ${name}`);
+	if (logChosenMove) {
+		console.log(`  chosenMove: ${chosenMove ? `r=${chosenMove.r}, c=${chosenMove.c}, isInitial=${chosenMove.isInitial}, srcVal=${chosenMove.srcVal}` : 'none'}`);
+	}
 	console.log(`Grid ${gridSize}x${gridSize}, aiStrength=${aiStrength}, initialPlacement=${initialPlacement}`);
 	for (const [key, values] of Object.entries(totals)) {
 		const stats = summarize(values);
@@ -106,4 +125,52 @@ runCase({
 	aiStrength: 5,
 	initialPlacement: false,
 	prePlacedMoves: [{ row: 3, col: 1, player: 'green', value: 1 }]
+});
+
+const redStrength8Grid = [
+	[
+		{ value: 0, player: '' },
+		{ value: 3, player: 'green' },
+		{ value: 2, player: 'red' },
+		{ value: 3, player: 'red' },
+		{ value: 3, player: 'red' }
+	],
+	[
+		{ value: 3, player: 'green' },
+		{ value: 0, player: '' },
+		{ value: 3, player: 'red' },
+		{ value: 3, player: 'red' },
+		{ value: 3, player: 'red' }
+	],
+	[
+		{ value: 3, player: 'green' },
+		{ value: 2, player: 'green' },
+		{ value: 2, player: 'red' },
+		{ value: 1, player: 'red' },
+		{ value: 2, player: 'red' }
+	],
+	[
+		{ value: 3, player: 'green' },
+		{ value: 2, player: 'green' },
+		{ value: 3, player: 'red' },
+		{ value: 0, player: '' },
+		{ value: 1, player: 'red' }
+	],
+	[
+		{ value: 3, player: 'green' },
+		{ value: 3, player: 'green' },
+		{ value: 2, player: 'green' },
+		{ value: 3, player: 'red' },
+		{ value: 2, player: 'red' }
+	]
+];
+
+runCase({
+	name: "Forced Win Grid",
+	gridSize: 5,
+	aiStrength: 8,
+	initialPlacement: true,
+	playerIndex: 1,
+	fixedGrid: redStrength8Grid,
+	logChosenMove: true
 });

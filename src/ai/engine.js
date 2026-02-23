@@ -313,13 +313,15 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 	const topCandidates = evaluated;
 	const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
 	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestSteps; let bestGrid = simGridInput; let branchCount = 0; let prunedCount = 0;
+	const prefersSteps = (value, candidateSteps) => {
+		if (typeof candidateSteps !== 'number') return false;
+		if (value === Infinity) return isFocusTurn ? (bestSteps === undefined || candidateSteps < bestSteps) : (bestSteps === undefined || candidateSteps > bestSteps);
+		if (value === -Infinity) return isFocusTurn ? (bestSteps === undefined || candidateSteps > bestSteps) : (bestSteps === undefined || candidateSteps < bestSteps);
+		return false;
+	};
 	for (let i = 0; i < topCandidates.length; i++) {
 		const entry = topCandidates[i];
-		if (entry.value === Infinity) {
-			prunedCount += Math.max(0, topCandidates.length - (i + 1));
-			return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid, branchCount: 1, prunedCount };
-		}
-		if (entry.value === -Infinity) {
+		if (entry.value === Infinity || entry.value === -Infinity) {
 			prunedCount += Math.max(0, topCandidates.length - (i + 1));
 			return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid, branchCount: 1, prunedCount };
 		}
@@ -328,7 +330,7 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 		prunedCount += typeof child.prunedCount === 'number' ? child.prunedCount : 0;
 		const value = child.value; const childSteps = typeof child.stepsToInfinity === 'number' ? child.stepsToInfinity + 1 : undefined;
 		if (isFocusTurn) {
-			if (value > bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (childSteps < bestSteps)))) {
+			if (value > bestValue || (value === bestValue && (value === Infinity || value === -Infinity) && prefersSteps(value, childSteps))) {
 				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
 			}
 			alpha = Math.max(alpha, bestValue);
@@ -337,7 +339,7 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 				break;
 			}
 		} else {
-			if (value < bestValue || (value === bestValue && value === Infinity && (bestSteps === undefined || (childSteps > bestSteps)))) {
+			if (value < bestValue || (value === bestValue && (value === Infinity || value === -Infinity) && prefersSteps(value, childSteps))) {
 				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
 			}
 			beta = Math.min(beta, bestValue);
@@ -496,7 +498,9 @@ export function computeAIMove(state, config) {
 				const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextMover, Math.max(0, depth - 1), -Infinity, Infinity, playerIndex, playerIndex, depthOpts);
 				const before = totalOwnedOnGrid(grid, playerIndex, activeColors, gridSize);
 				cand.searchScore = (evalRes.value === Infinity || evalRes.value === -Infinity) ? evalRes.value : (evalRes.value - before);
-				if (evalRes.value === Infinity && typeof evalRes.stepsToInfinity === 'number') cand.winPlies = evalRes.stepsToInfinity;
+				if ((evalRes.value === Infinity || evalRes.value === -Infinity) && typeof evalRes.stepsToInfinity === 'number') {
+					cand.winPlies = evalRes.stepsToInfinity;
+				}
 				cand.finalGrid = evalRes.bestGrid || cand.resultGrid;
 				cand.branchCount = evalRes.branchCount;
 				cand.prunedCount = evalRes.prunedCount;
@@ -507,7 +511,7 @@ export function computeAIMove(state, config) {
 		depthCounts.push({ depth, count: totalBranches, pruned: totalPruned });
 		effectiveDepth = depth;
 		const forcedWins = allCandidates
-			.filter(c => c.searchScore === Infinity && typeof c.winPlies === 'number')
+			.filter(c => (c.searchScore === Infinity || c.searchScore === -Infinity) && typeof c.winPlies === 'number')
 			.map(c => c.winPlies);
 		if (forcedWins.length) {
 			const minWinPlies = Math.min(...forcedWins);

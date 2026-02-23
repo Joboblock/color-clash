@@ -39,10 +39,12 @@ const summarize = (values) => {
 	return { avg, min, max };
 };
 
+
 const runCase = ({
 	name,
 	gridSize,
 	aiStrength,
+	// initialPlacement is broken
 	initialPlacement,
 	prePlacedMoves = [],
 	playerIndex = 0,
@@ -127,7 +129,7 @@ runCase({
 	prePlacedMoves: [{ row: 3, col: 1, player: 'green', value: 1 }]
 });
 
-const redStrength8Grid = [
+const aiForcedWinGrid = [
 	[
 		{ value: 0, player: '' },
 		{ value: 3, player: 'green' },
@@ -171,6 +173,54 @@ runCase({
 	aiStrength: 8,
 	initialPlacement: true,
 	playerIndex: 1,
-	fixedGrid: redStrength8Grid,
+	fixedGrid: aiForcedWinGrid,
+	logChosenMove: true
+});
+
+const aiForcedLossGrid = [
+	[
+		{ value: 1, player: 'red' },
+		{ value: 0, player: '' },
+		{ value: 2, player: 'green' },
+		{ value: 2, player: 'red' },
+		{ value: 3, player: 'green' }
+	],
+	[
+		{ value: 3, player: 'green' },
+		{ value: 2, player: 'green' },
+		{ value: 0, player: '' },
+		{ value: 1, player: 'green' },
+		{ value: 1, player: 'green' }
+	],
+	[
+		{ value: 3, player: 'green' },
+		{ value: 2, player: 'green' },
+		{ value: 2, player: 'green' },
+		{ value: 3, player: 'green' },
+		{ value: 2, player: 'green' }
+	],
+	[
+		{ value: 3, player: 'green' },
+		{ value: 2, player: 'green' },
+		{ value: 1, player: 'green' },
+		{ value: 0, player: '' },
+		{ value: 2, player: 'green' }
+	],
+	[
+		{ value: 2, player: 'green' },
+		{ value: 3, player: 'green' },
+		{ value: 3, player: 'green' },
+		{ value: 3, player: 'green' },
+		{ value: 1, player: 'green' }
+	]
+];
+
+runCase({
+	name: "Forced Loss Grid",
+	gridSize: 5,
+	aiStrength: 3,
+	initialPlacement: true,
+	playerIndex: 1,
+	fixedGrid: aiForcedLossGrid,
 	logChosenMove: true
 });

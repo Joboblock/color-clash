@@ -45,3 +45,12 @@ Existing menu DOM manipulation remains for compatibility. The registry hides non
 - Move remaining menu-specific logic from `script.js` into individual page modules.
 - Add unit tests for page transitions.
 - Consolidate duplicate selector pages (local/host/practice) into a single dynamic module if useful.
+
+## AI Benchmark
+Run the AI timing harness to see where the move calculation spends time:
+
+```sh
+npm run benchmark:ai
+```
+
+The benchmark prints per-phase averages (candidate generation, simulation, search, finalize, select) plus overall wall-clock timing.

@@ -395,25 +395,65 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  * @param {number} config.aiStrength - Total search depth (plies) including root.
  * @param {number} config.cellExplodeThreshold - Threshold at/above which a cell explodes (used for heuristics).
  * @param {boolean} [config.debug] - If true, attaches ordered candidate metadata for external UI/debug panels.
+ * @param {boolean} [config.benchmark] - If true, attaches timing breakdowns for move computation.
  *
  * Returns: {
  *   chosen: { r:number, c:number, isInitial:boolean, srcVal:number } | null,
  *   requireAdvanceTurn: boolean,      // true if AI should advance turn (no move)
  *   scheduleGameEnd: boolean,         // true if game end should be scheduled
- *   debugInfo?: { ordered:Array<DebugEntry>, chosen?:DebugChosen }
+ *   debugInfo?: { ordered:Array<DebugEntry>, chosen?:DebugChosen },
+ *   benchmarkInfo?: {
+ *     candidateGenMs?:number,
+ *     simulateMs?:number,
+ *     searchMs?:number,
+ *     finalizeMs?:number,
+ *     selectMs?:number,
+ *     totalMs?:number,
+ *     candidates?:number,
+ *     evaluated?:number,
+ *     depth?:number,
+ *     branches?:number
+ *   }
  * }
  * }} Result object: either a chosen move or flags instructing caller to advance/end.
  */
+function buildBenchmarkInfo(bench, meta = {}) {
+ if (!bench || !bench.marks) return meta;
+ const { marks } = bench;
+ const diff = (a, b) => (typeof marks[a] === 'number' && typeof marks[b] === 'number') ? (marks[b] - marks[a]) : undefined;
+ return {
+  ...meta,
+  candidateGenMs: diff('start', 'candidates'),
+  simulateMs: diff('candidates', 'simulate'),
+  searchMs: diff('simulate', 'search'),
+  finalizeMs: diff('search', 'finalize'),
+  selectMs: diff('finalize', 'select'),
+  totalMs: diff('start', 'end')
+ };
+}
+
 export function computeAIMove(state, config) {
 	const { grid, initialPlacements, playerIndex, playerCount, gridSize, activeColors, invalidInitialPositions } = state;
-	const { maxCellValue, initialPlacementValue, aiStrength, cellExplodeThreshold, debug } = config;
+	const { maxCellValue, initialPlacementValue, aiStrength, cellExplodeThreshold, debug, benchmark } = config;
 	const maxExplosionsToAssumeLoop = gridSize * 3;
 	const computationBudget = Math.pow(5, aiStrength);
+	const now = (typeof performance !== 'undefined' && performance.now) ? () => performance.now() : () => Date.now();
+	const bench = benchmark ? { marks: {} } : null;
+	const mark = (label) => { if (bench) bench.marks[label] = now(); };
+	mark('start');
 
 	const startTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 	const candidates = generateCandidatesOnSim(grid, initialPlacements, playerIndex, gridSize, activeColors, invalidInitialPositions);
+	mark('candidates');
 	if (!candidates.length) {
-		return { chosen: null, requireAdvanceTurn: true, scheduleGameEnd: !initialPlacements[playerIndex] };
+		mark('end');
+		const benchmarkInfo = benchmark ? buildBenchmarkInfo(bench, { candidates: 0, evaluated: 0, depth: 0, branches: 0 }) : undefined;
+		return {
+			chosen: null,
+			requireAdvanceTurn: true,
+			scheduleGameEnd: !initialPlacements[playerIndex],
+			...(benchmarkInfo ? { benchmarkInfo } : {})
+		};
 	}
 	const evaluated = [];
 	const beforeTotal = totalOwnedOnGrid(grid, playerIndex, activeColors, gridSize);
@@ -434,6 +474,7 @@ export function computeAIMove(state, config) {
 			runaway: res.runaway
 		});
 	}
+	mark('simulate');
 	const allCandidates = evaluated.slice();
 	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount };
 	let effectiveDepth = 1;
@@ -465,6 +506,7 @@ export function computeAIMove(state, config) {
 		depthCounts.push({ depth, count: totalBranches, pruned: totalPruned });
 		effectiveDepth = depth;
 	}
+	mark('search');
 	for (const cand of allCandidates) {
 		if (cand.runaway && cand.searchScore === Infinity) {
 			cand.def = undefined;
@@ -478,6 +520,7 @@ export function computeAIMove(state, config) {
 		cand.atk = atkDef.atk;
 		cand.netResult = (typeof cand.searchScore === 'number' ? cand.searchScore : cand.immediateGain);
 	}
+	mark('finalize');
 	const winning = allCandidates.filter(c => c.searchScore === Infinity);
 	let chosen;
 	if (winning.length) {
@@ -500,11 +543,21 @@ export function computeAIMove(state, config) {
 		if (!bestMoves || !bestMoves.length) bestMoves = allCandidates.length ? [allCandidates[0]] : [];
 		chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
 	}
+	mark('select');
 	const result = {
 		chosen: chosen ? { r: chosen.r, c: chosen.c, isInitial: chosen.isInitial, srcVal: chosen.srcVal } : null,
 		requireAdvanceTurn: !chosen,
 		scheduleGameEnd: !chosen && !initialPlacements[playerIndex]
 	};
+	mark('end');
+	if (benchmark) {
+		result.benchmarkInfo = buildBenchmarkInfo(bench, {
+			candidates: candidates.length,
+			evaluated: allCandidates.length,
+			depth: effectiveDepth,
+			branches: totalBranches
+		});
+	}
 	if (debug) {
 		try {
 			console.log('[AI debug] budget', {

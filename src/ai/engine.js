@@ -37,6 +37,8 @@
  * No side-effects: caller applies move or advances turn.
  */
 
+import { resolveExplosionChain } from '../game/gridCalc.js';
+
 /** @typedef {{r:number,c:number,isInitial:boolean,srcVal:number,sortKey:number}} Candidate */
 /** @typedef {{r:number,c:number,isInitial:boolean,srcVal:number,explosions:number,immediateGain:number,resultGrid:any,resultInitial:boolean[],runaway:boolean,searchScore?:number,winPlies?:number,atk?:number,def?:number,netResult?:number,finalGrid?:any}} Evaluated */
 
@@ -99,48 +101,18 @@ function totalOwnedByOpponents(simGrid, playerIndex, activeColors, gridSize) {
  * @param {boolean[]} simInitialPlacements - initial placement flags.
  * @returns {{grid: Array<Array<{value:number,player:string}>>, explosionCount: number, runaway: boolean}} updated grid, number of explosions, runaway flag.
  */
-function simulateExplosions(simGrid, simInitialPlacements, gridSize, maxCellValue, maxExplosionsToAssumeLoop) {
-	let explosionCount = 0;
-	let iteration = 0;
-	while (true) {
-		iteration++;
-		if (iteration > maxExplosionsToAssumeLoop) {
-			return { grid: simGrid, explosionCount, runaway: true };
-		}
-		const cellsToExplode = [];
-		for (let i = 0; i < gridSize; i++) {
-			for (let j = 0; j < gridSize; j++) {
-				if (simGrid[i][j].value >= 4) {
-					cellsToExplode.push({ row: i, col: j, player: simGrid[i][j].player, value: simGrid[i][j].value });
-				}
-			}
-		}
-		if (!cellsToExplode.length) break;
-		explosionCount += cellsToExplode.length;
-		for (const cell of cellsToExplode) {
-			const { row, col, player, value } = cell;
-			const explosionValue = value - 3;
-			simGrid[row][col].value = 0;
-			const isInitialPlacementPhase = !simInitialPlacements.every(v => v);
-			let extraBackToOrigin = 0;
-			const targets = [];
-			if (row > 0) targets.push({ r: row - 1, c: col }); else if (isInitialPlacementPhase) extraBackToOrigin++;
-			if (row < gridSize - 1) targets.push({ r: row + 1, c: col }); else if (isInitialPlacementPhase) extraBackToOrigin++;
-			if (col > 0) targets.push({ r: row, c: col - 1 }); else if (isInitialPlacementPhase) extraBackToOrigin++;
-			if (col < gridSize - 1) targets.push({ r: row, c: col + 1 }); else if (isInitialPlacementPhase) extraBackToOrigin++;
-			for (const t of targets) {
-				const prev = simGrid[t.r][t.c].value;
-				simGrid[t.r][t.c].value = Math.min(maxCellValue, prev + explosionValue);
-				simGrid[t.r][t.c].player = player;
-			}
-			if (extraBackToOrigin && isInitialPlacementPhase) {
-				const prev = simGrid[row][col].value;
-				simGrid[row][col].value = Math.min(maxCellValue, prev + extraBackToOrigin);
-				simGrid[row][col].player = player;
-			}
-		}
-	}
-	return { grid: simGrid, explosionCount, runaway: false };
+
+function simulateExplosions(simGrid, simInitialPlacements, gridSize, maxCellValue, cellExplodeThreshold, maxExplosionsToAssumeLoop) {
+	const isInitialPlacementPhase = !simInitialPlacements.every(v => v);
+	const res = resolveExplosionChain({
+		grid: simGrid,
+		gridSize,
+		cellExplodeThreshold,
+		maxCellValue,
+		isInitialPlacementPhase,
+		maxIterations: maxExplosionsToAssumeLoop
+	});
+	return { grid: simGrid, explosionCount: res.explosionCount, runaway: res.runaway };
 }
 
 /**
@@ -284,7 +256,7 @@ function evaluatePosition(simGrid, playerIndex, opts) {
  * @param {boolean} isInitialMove - whether it's an initial placement.
  * @returns {{grid: Array<Array<{value:number,player:string}>>, explosionCount: number, runaway: boolean, simInitial: boolean[]}} post-move state.
  */
-function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, moveR, moveC, isInitialMove, gridSize, maxCellValue, initialPlacementValue, activeColors, maxExplosionsToAssumeLoop) {
+function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, moveR, moveC, isInitialMove, gridSize, maxCellValue, initialPlacementValue, activeColors, cellExplodeThreshold, maxExplosionsToAssumeLoop) {
 	const simGrid = deepCloneGrid(simGridInput, gridSize);
 	const simInitial = simInitialPlacementsInput.slice();
 	if (isInitialMove) simInitial[moverIndex] = true;
@@ -296,7 +268,7 @@ function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, mo
 		simGrid[moveR][moveC].value = Math.min(maxCellValue, prev + 1);
 		simGrid[moveR][moveC].player = activeColors()[moverIndex];
 	}
-	const result = simulateExplosions(simGrid, simInitial, gridSize, maxCellValue, maxExplosionsToAssumeLoop);
+	const result = simulateExplosions(simGrid, simInitial, gridSize, maxCellValue, cellExplodeThreshold, maxExplosionsToAssumeLoop);
 	return { grid: result.grid, explosionCount: result.explosionCount, runaway: result.runaway, simInitial };
 }
 
@@ -367,7 +339,7 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 	const evaluated = [];
 	const maxExplosionsToAssumeLoop = gridSize * 3;
 	for (const cand of candidates) {
-		const applied = applyMoveAndSim(simGrid, simInitial, cand.owner, cand.r, cand.c, cand.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, maxExplosionsToAssumeLoop);
+		const applied = applyMoveAndSim(simGrid, simInitial, cand.owner, cand.r, cand.c, cand.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, cellExplodeThreshold, maxExplosionsToAssumeLoop);
 		const evalRes = evaluatePosition(applied.grid, focusPlayerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal, baseEnemyTotal });
 		if (applied.runaway) {
 			const runawayVal = (cand.owner === focusPlayerIndex) ? Infinity : -Infinity;
@@ -528,7 +500,7 @@ export function computeAIMove(state, config) {
 	const beforeTotal = totalOwnedOnGrid(grid, playerIndex, activeColors, gridSize);
 	const beforeEnemyTotal = totalOwnedByOpponents(grid, playerIndex, activeColors, gridSize);
 	for (const cand of candidates) {
-		const res = applyMoveAndSim(grid, initialPlacements, playerIndex, cand.r, cand.c, cand.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, maxExplosionsToAssumeLoop);
+		const res = applyMoveAndSim(grid, initialPlacements, playerIndex, cand.r, cand.c, cand.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, cellExplodeThreshold, maxExplosionsToAssumeLoop);
 		const evalRes = evaluatePosition(res.grid, playerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal: beforeTotal, baseEnemyTotal: beforeEnemyTotal });
 		evaluated.push({
 			r: cand.r,

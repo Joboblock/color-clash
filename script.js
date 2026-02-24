@@ -7,7 +7,12 @@ import { mainPage } from './src/pages/main.js';
 
 // General utilities (merged)
 import { sanitizeName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
-import { computeInvalidInitialPositions as calcInvalidInitialPositions, isInitialPlacementInvalid as calcIsInitialPlacementInvalid, getCellsToExplode as calcGetCellsToExplode, computeExplosionTargets as calcComputeExplosionTargets } from './src/game/gridCalc.js';
+import {
+    computeInvalidInitialPositions as calcInvalidInitialPositions,
+    isInitialPlacementInvalid as calcIsInitialPlacementInvalid,
+    getCellsToExplode as calcGetCellsToExplode,
+    explodeCellsOnce as calcExplodeCellsOnce
+} from './src/game/gridCalc.js';
 import { playerColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './src/game/palette.js';
 import { advanceTurnIndex } from './src/game/turnCalc.js';
 import { createOnlineTurnTracker } from './src/online/onlineTurn.js';
@@ -2659,34 +2664,30 @@ document.addEventListener('DOMContentLoaded', () => {
             performanceMode = false;
         }
 
-        // Process each explosion
-        cellsToExplode.forEach(cell => {
-            const { row, col, player, value } = cell;
-            const explosionValue = value - 3;
-            grid[row][col].value = 0;
-            updateCell(row, col, 0, '', true);
-
-            // Determine if this explosion is from an initial placement
-            const isInitialPlacement = !initialPlacements.every(placement => placement);
-            const { targets: targetCells, extraBackToOrigin } = calcComputeExplosionTargets(
-                gridSize,
-                row,
-                col,
-                explosionValue,
-                isInitialPlacement
-            );
-
-            // Animate valid explosions
-            animateInnerCircles(document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`), targetCells, player, explosionValue);
-
-            // Update grid for valid explosion targets
-            targetCells.forEach(({ row, col, value }) => {
-                updateCell(row, col, value, player, true);
-            });
-
-            // Add out-of-bounds split-offs back to origin cell during initial placements
-            if (extraBackToOrigin > 0 && isInitialPlacement) {
-                updateCell(row, col, extraBackToOrigin, player, true);
+        // Process each explosion wave using shared grid helpers
+        const isInitialPlacement = !initialPlacements.every(placement => placement);
+        calcExplodeCellsOnce({
+            grid,
+            gridSize,
+            cellExplodeThreshold,
+            maxCellValue,
+            isInitialPlacementPhase: isInitialPlacement,
+            cellsToExplode,
+            clearCell: (row, col) => {
+                grid[row][col].value = 0;
+                grid[row][col].player = '';
+                updateCell(row, col, 0, '', true);
+            },
+            applyFragment: (row, col, addValue, owner) => {
+                updateCell(row, col, addValue, owner, true);
+            },
+            onExplode: ({ row, col, player, fragmentValue, targets }) => {
+                animateInnerCircles(
+                    document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`),
+                    targets,
+                    player,
+                    fragmentValue
+                );
             }
         });
 

@@ -76,6 +76,24 @@ function totalOwnedOnGrid(simGrid, playerIndex, activeColors, gridSize) {
 }
 
 /**
+ * Evaluate a grid by summing values of all opponent cells (combined opponents).
+ * @param {Array<Array<{value:number,player:string}>>} simGrid - the grid to evaluate.
+ * @param {number} playerIndex - focus player index.
+ * @returns {number} total owned cell value of opponents.
+ */
+function totalOwnedByOpponents(simGrid, playerIndex, activeColors, gridSize) {
+	const focusColor = activeColors()[playerIndex];
+	let total = 0;
+	for (let r = 0; r < gridSize; r++) {
+		for (let c = 0; c < gridSize; c++) {
+			const cell = simGrid[r][c];
+			if (cell.player && cell.player !== focusColor) total += cell.value;
+		}
+	}
+	return total;
+}
+
+/**
  * Run explosion propagation on a simulated grid until stable or runaway detected.
  * @param {Array<Array<{value:number,player:string}>>} simGrid - simulated grid.
  * @param {boolean[]} simInitialPlacements - initial placement flags.
@@ -208,6 +226,54 @@ function computeAtkDefForGrid(simGrid, gridSize, activeColors, cellExplodeThresh
 	return { atk, def };
 }
 
+function computeAtkDefForOpponents(simGrid, gridSize, activeColors, cellExplodeThreshold, playerIndex) {
+	const focusColor = activeColors()[playerIndex];
+	const nearVal = cellExplodeThreshold - 1;
+	let def = 0;
+	let atk = 0;
+	for (let r = 0; r < gridSize; r++) {
+		for (let c = 0; c < gridSize; c++) {
+			const cell = simGrid[r][c];
+			if (!cell.player || cell.player === focusColor) continue;
+			if (cell.value === nearVal) def++;
+			const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+			for (const [ar, ac] of adj) {
+				if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+				const adjCell = simGrid[ar][ac];
+				if (adjCell.player === focusColor && cell.value > adjCell.value) atk++;
+			}
+		}
+	}
+	return { atk, def };
+}
+
+/**
+ * Score a position for a player using gain + 1/2 atk + 1/5 def,
+ * minus the combined opponents' score using the same formula.
+ * @param {Array<Array<{value:number,player:string}>>} simGrid - simulated grid.
+ * @param {number} playerIndex - player index.
+ * @param {Object} opts
+ * @param {number} opts.gridSize
+ * @param {() => string[]} opts.activeColors
+ * @param {number} opts.cellExplodeThreshold
+ * @param {number} [opts.baseTotal]
+ * @param {number} [opts.baseEnemyTotal]
+ * @returns {{score:number,gain:number,atk:number,def:number,enemyGain:number,enemyAtk:number,enemyDef:number}}
+ */
+function evaluatePosition(simGrid, playerIndex, opts) {
+	const { gridSize, activeColors, cellExplodeThreshold, baseTotal = 0, baseEnemyTotal = 0 } = opts;
+	const total = totalOwnedOnGrid(simGrid, playerIndex, activeColors, gridSize);
+	const gain = total - baseTotal;
+	const enemyTotal = totalOwnedByOpponents(simGrid, playerIndex, activeColors, gridSize);
+	const enemyGain = enemyTotal - baseEnemyTotal;
+	const { atk, def } = computeAtkDefForGrid(simGrid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
+	const enemyAtkDef = computeAtkDefForOpponents(simGrid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
+	const ownScore = gain + (0.6 * atk) + (0.2 * def);
+	const enemyScore = enemyGain + (0.6 * enemyAtkDef.atk) + (0.2 * enemyAtkDef.def);
+	const score = ownScore - enemyScore;
+	return { score, gain, atk, def, enemyGain, enemyAtk: enemyAtkDef.atk, enemyDef: enemyAtkDef.def };
+}
+
 /**
  * Apply a move on a cloned grid (initial or increment) and simulate explosions.
  * @param {Array<Array<{value:number,player:string}>>} simGridInput - input simulated grid.
@@ -258,7 +324,7 @@ function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, mo
  * @returns {{value:number, runaway:boolean, stepsToInfinity?:number, bestGrid:Array<Array<{value:number,player:string}>>, branchCount:number, prunedCount:number}} evaluation score for focus player and plies to +/-Infinity if detected.
  */
 function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts) {
-	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount } = opts;
+	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal, baseEnemyTotal } = opts;
 	// Avoid terminal mis-detection during initial placement phase
 	const inInitialPlacementPhase = !simInitialPlacementsInput.every(v => v);
 	if (!inInitialPlacementPhase) {
@@ -282,7 +348,8 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 		}
 	}
 	if (depth === 0) {
-		return { value: totalOwnedOnGrid(simGridInput, focusPlayerIndex, activeColors, gridSize), runaway: false, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
+		const evalRes = evaluatePosition(simGridInput, focusPlayerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal, baseEnemyTotal });
+		return { value: evalRes.score, runaway: false, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
 	}
 	const simGrid = deepCloneGrid(simGridInput, gridSize);
 	const simInitial = simInitialPlacementsInput.slice();
@@ -301,12 +368,12 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 	const maxExplosionsToAssumeLoop = gridSize * 3;
 	for (const cand of candidates) {
 		const applied = applyMoveAndSim(simGrid, simInitial, cand.owner, cand.r, cand.c, cand.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, maxExplosionsToAssumeLoop);
-		const val = totalOwnedOnGrid(applied.grid, focusPlayerIndex, activeColors, gridSize);
+		const evalRes = evaluatePosition(applied.grid, focusPlayerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal, baseEnemyTotal });
 		if (applied.runaway) {
 			const runawayVal = (cand.owner === focusPlayerIndex) ? Infinity : -Infinity;
 			evaluated.push({ cand, owner: cand.owner, value: runawayVal, resultGrid: applied.grid, simInitial: applied.simInitial });
 		} else {
-			evaluated.push({ cand, owner: cand.owner, value: val, resultGrid: applied.grid, simInitial: applied.simInitial });
+			evaluated.push({ cand, owner: cand.owner, value: evalRes.score, resultGrid: applied.grid, simInitial: applied.simInitial });
 		}
 	}
 	evaluated.sort((a, b) => isFocusTurn ? (b.value - a.value) : (a.value - b.value));
@@ -363,11 +430,11 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  * Selection process (high level):
  * 1. Generate all legal candidate moves for the AI player (initial placement
  *    or increment of an owned cell).
- * 2. For each candidate, simulate the move plus chained explosions and record:
- *    - Immediate material gain (difference in total owned value).
- *    - Explosion count (for tie‑breaking / heuristic flavor).
- *    - Runaway flag (detected explosion loop exceeding a bounded iteration).
- * 3. Order candidates by (immediateGain DESC, atk DESC, def DESC).
+	 * 2. For each candidate, simulate the move plus chained explosions and record:
+	 *    - Position score (gain + 1/2 atk + 1/5 def).
+	 *    - Explosion count (for debugging / heuristic flavor).
+	 *    - Runaway flag (detected explosion loop exceeding a bounded iteration).
+	 * 3. Order candidates by position score (higher is better).
  * 4. For each candidate, perform a minimax search (depth = aiStrength-1) where
  *    coalition opponents attempt to minimize the AI's advantage. Alpha‑beta
  *    pruning trims branches early.
@@ -459,18 +526,19 @@ export function computeAIMove(state, config) {
 	}
 	const evaluated = [];
 	const beforeTotal = totalOwnedOnGrid(grid, playerIndex, activeColors, gridSize);
+	const beforeEnemyTotal = totalOwnedByOpponents(grid, playerIndex, activeColors, gridSize);
 	for (const cand of candidates) {
 		const res = applyMoveAndSim(grid, initialPlacements, playerIndex, cand.r, cand.c, cand.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, maxExplosionsToAssumeLoop);
-		const atkDef = computeAtkDefForGrid(res.grid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
+		const evalRes = evaluatePosition(res.grid, playerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal: beforeTotal, baseEnemyTotal: beforeEnemyTotal });
 		evaluated.push({
 			r: cand.r,
 			c: cand.c,
 			isInitial: cand.isInitial,
 			srcVal: cand.srcVal,
-			immediateGain: (res.runaway ? Infinity : (totalOwnedOnGrid(res.grid, playerIndex, activeColors, gridSize) - beforeTotal)),
+			immediateGain: (res.runaway ? Infinity : evalRes.gain),
 			explosions: res.explosionCount,
-			atk: atkDef.atk,
-			def: atkDef.def,
+			atk: evalRes.atk,
+			def: evalRes.def,
 			resultGrid: res.grid,
 			resultInitial: res.simInitial,
 			runaway: res.runaway
@@ -478,7 +546,7 @@ export function computeAIMove(state, config) {
 	}
 	mark('simulate');
 	const allCandidates = evaluated.slice();
-	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount };
+	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal: beforeTotal, baseEnemyTotal: beforeEnemyTotal };
 	let effectiveDepth = 1;
 	let totalBranches = 0;
 	const depthCounts = [];
@@ -496,8 +564,7 @@ export function computeAIMove(state, config) {
 			} else {
 				const nextMover = -1;
 				const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextMover, Math.max(0, depth - 1), -Infinity, Infinity, playerIndex, playerIndex, depthOpts);
-				const before = totalOwnedOnGrid(grid, playerIndex, activeColors, gridSize);
-				cand.searchScore = (evalRes.value === Infinity || evalRes.value === -Infinity) ? evalRes.value : (evalRes.value - before);
+				cand.searchScore = evalRes.value;
 				if ((evalRes.value === Infinity || evalRes.value === -Infinity) && typeof evalRes.stepsToInfinity === 'number') {
 					cand.winPlies = evalRes.stepsToInfinity;
 				}
@@ -510,12 +577,18 @@ export function computeAIMove(state, config) {
 		}
 		depthCounts.push({ depth, count: totalBranches, pruned: totalPruned });
 		effectiveDepth = depth;
-		const forcedWins = allCandidates
-			.filter(c => (c.searchScore === Infinity || c.searchScore === -Infinity) && typeof c.winPlies === 'number')
+		const winPlies = allCandidates
+			.filter(c => c.searchScore === Infinity && typeof c.winPlies === 'number')
 			.map(c => c.winPlies);
-		if (forcedWins.length) {
-			const minWinPlies = Math.min(...forcedWins);
-			depthCap = Math.max(1, minWinPlies - 2);
+		const hasForcedWin = winPlies.length > 0;
+		const hasForcedLoss = allCandidates.length > 0 && allCandidates.every(c => c.searchScore === -Infinity && typeof c.winPlies === 'number');
+		if (hasForcedWin || hasForcedLoss) {
+			const lossPlies = hasForcedLoss ? allCandidates.map(c => c.winPlies).filter(v => typeof v === 'number') : [];
+			const allPlies = hasForcedWin ? winPlies.concat(lossPlies) : lossPlies;
+			if (allPlies.length) {
+				const minWinPlies = Math.min(...allPlies);
+				depthCap = Math.max(1, minWinPlies - 2);
+			}
 		}
 	}
 	mark('search');
@@ -527,9 +600,9 @@ export function computeAIMove(state, config) {
 			continue;
 		}
 		const rg = cand.finalGrid || cand.resultGrid;
-		const atkDef = computeAtkDefForGrid(rg, gridSize, activeColors, cellExplodeThreshold, playerIndex);
-		cand.def = atkDef.def;
-		cand.atk = atkDef.atk;
+		const evalRes = evaluatePosition(rg, playerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal: beforeTotal, baseEnemyTotal: beforeEnemyTotal });
+		cand.def = evalRes.def;
+		cand.atk = evalRes.atk;
 		cand.netResult = (typeof cand.searchScore === 'number' ? cand.searchScore : cand.immediateGain);
 	}
 	mark('finalize');
@@ -540,18 +613,10 @@ export function computeAIMove(state, config) {
 		const fastest = winning.filter(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY) === minPlies);
 		chosen = fastest.length ? fastest[Math.floor(Math.random() * fastest.length)] : winning[0];
 	} else {
-		allCandidates.sort((a, b) => (b.netResult - a.netResult) || (b.atk - a.atk) || (b.def - a.def));
+		allCandidates.sort((a, b) => (b.netResult - a.netResult));
 		const bestNet = allCandidates[0] ? allCandidates[0].netResult : -Infinity;
 		const bestByNet = allCandidates.filter(t => t.netResult === bestNet);
-		let bestMoves;
-		if (bestByNet.length === 1) bestMoves = bestByNet; else {
-			const maxAtk = Math.max(...bestByNet.map(t => (typeof t.atk === 'number' ? t.atk : -Infinity)));
-			const byAtk = bestByNet.filter(t => (typeof t.atk === 'number' ? t.atk : -Infinity) === maxAtk);
-			if (byAtk.length === 1) bestMoves = byAtk; else {
-				const maxDef = Math.max(...byAtk.map(t => (typeof t.def === 'number' ? t.def : -Infinity)));
-				bestMoves = byAtk.filter(t => (typeof t.def === 'number' ? t.def : -Infinity) === maxDef);
-			}
-		}
+		let bestMoves = bestByNet.length ? bestByNet : [];
 		if (!bestMoves || !bestMoves.length) bestMoves = allCandidates.length ? [allCandidates[0]] : [];
 		chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
 	}
@@ -590,10 +655,10 @@ export function computeAIMove(state, config) {
 				}
 				if (a.searchScore === Infinity) return -1;
 				if (b.searchScore === Infinity) return 1;
-				return (b.netResult - a.netResult) || (b.atk - a.atk) || (b.def - a.def);
+				return (b.netResult - a.netResult);
 			});
 		} else {
-			ordered = ordered.slice().sort((a, b) => (b.netResult - a.netResult) || (b.atk - a.atk) || (b.def - a.def));
+			ordered = ordered.slice().sort((a, b) => (b.netResult - a.netResult));
 		}
 		if (chosen) {
 			const chosenIdx = ordered.findIndex(c => c.r === chosen.r && c.c === chosen.c && c.isInitial === chosen.isInitial);

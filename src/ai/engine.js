@@ -293,7 +293,6 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 			if (markVisited(ar, ac)) stack.push([ar, ac]);
 		}
 	}
-	const stallCells = playerNearCells.filter(cell => !visited.has(keyFor(cell.r, cell.c)));
 	const highlightCells = opponentNearCells.concat(playerNearCells.filter(cell => visited.has(keyFor(cell.r, cell.c))));
 	const highlightSet = new Set(highlightCells.map(cell => keyFor(cell.r, cell.c)));
 	const extraHighlight = [];
@@ -351,7 +350,18 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 			queue.push({ r: ar, c: ac });
 		}
 	}
-	return { stallTime: stallCells.length, stallCells, highlightCells: expandedHighlights, chains };
+	let stallTime = 0;
+	const stallCells = [];
+	for (let r = 0; r < gridSize; r++) {
+		for (let c = 0; c < gridSize; c++) {
+			const cell = simGrid[r][c];
+			if (cell.player !== focusColor) continue;
+			if (highlightSet.has(keyFor(r, c))) continue;
+			stallCells.push({ r, c });
+			stallTime += Math.max(0, nearVal - cell.value);
+		}
+	}
+	return { stallTime, stallCells, highlightCells: expandedHighlights, chains };
 }
 
 /**

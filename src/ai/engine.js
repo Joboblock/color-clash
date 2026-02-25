@@ -219,149 +219,216 @@ function computeAtkDefForOpponents(simGrid, gridSize, activeColors, cellExplodeT
 	return { atk, def };
 }
 
-function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThreshold, playerIndex) {
+function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue) {
 	const focusColor = activeColors()[playerIndex];
 	const nearVal = cellExplodeThreshold - 1;
 	const nearValMinus = cellExplodeThreshold - 2;
-	const visited = new Set();
-	const stack = [];
-	const playerNearCells = [];
-	const opponentNearCells = [];
-	const chains = [];
-	const chainVisited = new Set();
-	const chainIndexByKey = new Map();
 	const keyFor = (r, c) => `${r},${c}`;
-	const markVisited = (r, c) => {
-		const key = keyFor(r, c);
-		if (visited.has(key)) return false;
-		visited.add(key);
-		return true;
-	};
-	for (let r = 0; r < gridSize; r++) {
-		for (let c = 0; c < gridSize; c++) {
-			const cell = simGrid[r][c];
-			if (cell.value !== nearVal) continue;
-			if (cell.player === focusColor) {
-				playerNearCells.push({ r, c });
-			} else if (cell.player) {
-				opponentNearCells.push({ r, c });
-			}
-		}
-	}
-	for (let r = 0; r < gridSize; r++) {
-		for (let c = 0; c < gridSize; c++) {
-			const cell = simGrid[r][c];
-			if (!cell.player || cell.value !== nearVal) continue;
-			const startKey = keyFor(r, c);
-			if (chainVisited.has(startKey)) continue;
-			const chainCells = [];
-			const chainOwners = new Set();
-			const queue = [[r, c]];
-			chainVisited.add(startKey);
-			while (queue.length) {
-				const [cr, cc] = queue.pop();
-				const current = simGrid[cr][cc];
-				chainCells.push({ r: cr, c: cc });
-				if (current.player) chainOwners.add(current.player);
-				const adj = [[cr - 1, cc], [cr + 1, cc], [cr, cc - 1], [cr, cc + 1]];
-				for (const [ar, ac] of adj) {
-					if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
-					const adjCell = simGrid[ar][ac];
-					if (!adjCell.player || adjCell.value !== nearVal) continue;
-					const adjKey = keyFor(ar, ac);
-					if (chainVisited.has(adjKey)) continue;
-					chainVisited.add(adjKey);
-					queue.push([ar, ac]);
+	const buildHighlightState = (grid) => {
+		const visited = new Set();
+		const stack = [];
+		const playerNearCells = [];
+		const opponentNearCells = [];
+		const chains = [];
+		const chainVisited = new Set();
+		const chainIndexByKey = new Map();
+		const markVisited = (r, c) => {
+			const key = keyFor(r, c);
+			if (visited.has(key)) return false;
+			visited.add(key);
+			return true;
+		};
+		for (let r = 0; r < gridSize; r++) {
+			for (let c = 0; c < gridSize; c++) {
+				const cell = grid[r][c];
+				if (cell.value !== nearVal) continue;
+				if (cell.player === focusColor) {
+					playerNearCells.push({ r, c });
+				} else if (cell.player) {
+					opponentNearCells.push({ r, c });
 				}
 			}
-			const chainIndex = chains.length;
-			for (const cellEntry of chainCells) {
-				chainIndexByKey.set(keyFor(cellEntry.r, cellEntry.c), chainIndex);
+		}
+		for (let r = 0; r < gridSize; r++) {
+			for (let c = 0; c < gridSize; c++) {
+				const cell = grid[r][c];
+				if (!cell.player || cell.value !== nearVal) continue;
+				const startKey = keyFor(r, c);
+				if (chainVisited.has(startKey)) continue;
+				const chainCells = [];
+				const chainOwners = new Set();
+				const queue = [[r, c]];
+				chainVisited.add(startKey);
+				while (queue.length) {
+					const [cr, cc] = queue.pop();
+					const current = grid[cr][cc];
+					chainCells.push({ r: cr, c: cc });
+					if (current.player) chainOwners.add(current.player);
+					const adj = [[cr - 1, cc], [cr + 1, cc], [cr, cc - 1], [cr, cc + 1]];
+					for (const [ar, ac] of adj) {
+						if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+						const adjCell = grid[ar][ac];
+						if (!adjCell.player || adjCell.value !== nearVal) continue;
+						const adjKey = keyFor(ar, ac);
+						if (chainVisited.has(adjKey)) continue;
+						chainVisited.add(adjKey);
+						queue.push([ar, ac]);
+					}
+				}
+				const chainIndex = chains.length;
+				for (const cellEntry of chainCells) {
+					chainIndexByKey.set(keyFor(cellEntry.r, cellEntry.c), chainIndex);
+				}
+				chains.push({ cells: chainCells, owners: Array.from(chainOwners) });
 			}
-			chains.push({ cells: chainCells, owners: Array.from(chainOwners) });
 		}
-	}
-	for (const cell of opponentNearCells) {
-		if (markVisited(cell.r, cell.c)) stack.push([cell.r, cell.c]);
-	}
-	while (stack.length) {
-		const [r, c] = stack.pop();
-		const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
-		for (const [ar, ac] of adj) {
-			if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
-			if (simGrid[ar][ac].value !== nearVal) continue;
-			if (markVisited(ar, ac)) stack.push([ar, ac]);
+		for (const cell of opponentNearCells) {
+			if (markVisited(cell.r, cell.c)) stack.push([cell.r, cell.c]);
 		}
-	}
-	const highlightCells = opponentNearCells.concat(playerNearCells.filter(cell => visited.has(keyFor(cell.r, cell.c))));
-	const highlightSet = new Set(highlightCells.map(cell => keyFor(cell.r, cell.c)));
-	const extraHighlight = [];
-	if (nearValMinus >= 0 && highlightCells.length) {
-		for (const cell of highlightCells) {
+		while (stack.length) {
+			const [r, c] = stack.pop();
+			const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+			for (const [ar, ac] of adj) {
+				if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+				if (grid[ar][ac].value !== nearVal) continue;
+				if (markVisited(ar, ac)) stack.push([ar, ac]);
+			}
+		}
+		const highlightCells = opponentNearCells.concat(playerNearCells.filter(cell => visited.has(keyFor(cell.r, cell.c))));
+		const highlightSet = new Set(highlightCells.map(cell => keyFor(cell.r, cell.c)));
+		const extraHighlight = [];
+		if (nearValMinus >= 0 && highlightCells.length) {
+			for (const cell of highlightCells) {
+				const adj = [[cell.r - 1, cell.c], [cell.r + 1, cell.c], [cell.r, cell.c - 1], [cell.r, cell.c + 1]];
+				for (const [ar, ac] of adj) {
+					if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+					if (grid[ar][ac].value !== nearValMinus) continue;
+					const key = keyFor(ar, ac);
+					if (highlightSet.has(key)) continue;
+					const chainOwnerSignatures = new Set();
+					const chainIndexes = new Set();
+					const adjNear = [[ar - 1, ac], [ar + 1, ac], [ar, ac - 1], [ar, ac + 1]];
+					for (const [nr, nc] of adjNear) {
+						if (nr < 0 || nr >= gridSize || nc < 0 || nc >= gridSize) continue;
+						const nearCell = grid[nr][nc];
+						if (!nearCell.player || nearCell.value !== nearVal) continue;
+						const chainIndex = chainIndexByKey.get(keyFor(nr, nc));
+						if (typeof chainIndex !== 'number') continue;
+						if (chainIndexes.has(chainIndex)) continue;
+						chainIndexes.add(chainIndex);
+						const owners = chains[chainIndex]?.owners || [];
+						chainOwnerSignatures.add(owners.slice().sort().join('|'));
+					}
+					if (chainOwnerSignatures.size < 2) continue;
+					highlightSet.add(key);
+					extraHighlight.push({ r: ar, c: ac });
+				}
+			}
+		}
+		const expandedHighlights = highlightCells.concat(extraHighlight);
+		const queue = [];
+		for (const cell of expandedHighlights) {
 			const adj = [[cell.r - 1, cell.c], [cell.r + 1, cell.c], [cell.r, cell.c - 1], [cell.r, cell.c + 1]];
 			for (const [ar, ac] of adj) {
 				if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
-				if (simGrid[ar][ac].value !== nearValMinus) continue;
+				if (grid[ar][ac].value !== nearVal) continue;
 				const key = keyFor(ar, ac);
 				if (highlightSet.has(key)) continue;
-				const chainOwnerSignatures = new Set();
-				const chainIndexes = new Set();
-				const adjNear = [[ar - 1, ac], [ar + 1, ac], [ar, ac - 1], [ar, ac + 1]];
-				for (const [nr, nc] of adjNear) {
-					if (nr < 0 || nr >= gridSize || nc < 0 || nc >= gridSize) continue;
-					const nearCell = simGrid[nr][nc];
-					if (!nearCell.player || nearCell.value !== nearVal) continue;
-					const chainIndex = chainIndexByKey.get(keyFor(nr, nc));
-					if (typeof chainIndex !== 'number') continue;
-					if (chainIndexes.has(chainIndex)) continue;
-					chainIndexes.add(chainIndex);
-					const owners = chains[chainIndex]?.owners || [];
-					chainOwnerSignatures.add(owners.slice().sort().join('|'));
-				}
-				if (chainOwnerSignatures.size < 2) continue;
 				highlightSet.add(key);
-				extraHighlight.push({ r: ar, c: ac });
+				queue.push({ r: ar, c: ac });
 			}
 		}
-	}
-	const expandedHighlights = highlightCells.concat(extraHighlight);
-	const queue = [];
-	for (const cell of expandedHighlights) {
-		const adj = [[cell.r - 1, cell.c], [cell.r + 1, cell.c], [cell.r, cell.c - 1], [cell.r, cell.c + 1]];
-		for (const [ar, ac] of adj) {
-			if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
-			if (simGrid[ar][ac].value !== nearVal) continue;
-			const key = keyFor(ar, ac);
-			if (highlightSet.has(key)) continue;
-			highlightSet.add(key);
-			queue.push({ r: ar, c: ac });
+		while (queue.length) {
+			const cell = queue.pop();
+			expandedHighlights.push(cell);
+			const adj = [[cell.r - 1, cell.c], [cell.r + 1, cell.c], [cell.r, cell.c - 1], [cell.r, cell.c + 1]];
+			for (const [ar, ac] of adj) {
+				if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+				if (grid[ar][ac].value !== nearVal) continue;
+				const key = keyFor(ar, ac);
+				if (highlightSet.has(key)) continue;
+				highlightSet.add(key);
+				queue.push({ r: ar, c: ac });
+			}
 		}
-	}
-	while (queue.length) {
-		const cell = queue.pop();
-		expandedHighlights.push(cell);
-		const adj = [[cell.r - 1, cell.c], [cell.r + 1, cell.c], [cell.r, cell.c - 1], [cell.r, cell.c + 1]];
-		for (const [ar, ac] of adj) {
-			if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
-			if (simGrid[ar][ac].value !== nearVal) continue;
-			const key = keyFor(ar, ac);
-			if (highlightSet.has(key)) continue;
-			highlightSet.add(key);
-			queue.push({ r: ar, c: ac });
-		}
-	}
-	let stallTime = 0;
+		return { highlightSet, highlightCells: expandedHighlights, chains };
+	};
+	const initialState = buildHighlightState(simGrid);
 	const stallCells = [];
 	for (let r = 0; r < gridSize; r++) {
 		for (let c = 0; c < gridSize; c++) {
 			const cell = simGrid[r][c];
 			if (cell.player !== focusColor) continue;
-			if (highlightSet.has(keyFor(r, c))) continue;
+			if (initialState.highlightSet.has(keyFor(r, c))) continue;
 			stallCells.push({ r, c });
-			stallTime += Math.max(0, nearVal - cell.value);
 		}
 	}
-	return { stallTime, stallCells, highlightCells: expandedHighlights, chains };
+	const isAdjacentToMarked = (row, col, markedSet) => {
+		const adj = [[row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]];
+		return adj.some(([r, c]) => r >= 0 && r < gridSize && c >= 0 && c < gridSize && markedSet.has(keyFor(r, c)));
+	};
+	const countAdjacentMarked = (row, col, markedSet) => {
+		const adj = [[row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]];
+		let count = 0;
+		for (const [r, c] of adj) {
+			if (r < 0 || r >= gridSize || c < 0 || c >= gridSize) continue;
+			if (markedSet.has(keyFor(r, c))) count += 1;
+		}
+		return count;
+	};
+	const sim = deepCloneGrid(simGrid, gridSize);
+	let stallTime = 0;
+	const maxExplosionsToAssumeLoop = gridSize * 3;
+	while (true) {
+		const state = buildHighlightState(sim);
+		const markedSet = state.highlightSet;
+		const candidates = [];
+		for (let r = 0; r < gridSize; r++) {
+			for (let c = 0; c < gridSize; c++) {
+				const cell = sim[r][c];
+				if (cell.player !== focusColor) continue;
+				if (markedSet.has(keyFor(r, c))) continue;
+				const probe = deepCloneGrid(sim, gridSize);
+				const target = probe[r][c];
+				target.value = Math.min(maxCellValue, target.value + 1);
+				target.player = focusColor;
+				let hasInvalidExplosion = false;
+				let explosionCount = 0;
+				let adjMarkedCount = 0;
+				resolveExplosionChain({
+					grid: probe,
+					gridSize,
+					cellExplodeThreshold,
+					maxCellValue,
+					isInitialPlacementPhase: false,
+					maxIterations: maxExplosionsToAssumeLoop,
+					onExplode: ({ row, col }) => {
+						explosionCount += 1;
+						adjMarkedCount += countAdjacentMarked(row, col, markedSet);
+						if (isAdjacentToMarked(row, col, markedSet)) hasInvalidExplosion = true;
+					}
+				});
+				if (hasInvalidExplosion) continue;
+				candidates.push({ r, c, grid: probe, explosionCount, adjMarkedCount });
+			}
+		}
+		if (!candidates.length) break;
+		const explosionMoves = candidates.filter(c => c.explosionCount > 0);
+		const selectionPool = explosionMoves.length ? explosionMoves : candidates;
+		selectionPool.sort((a, b) => {
+			if (a.adjMarkedCount !== b.adjMarkedCount) return a.adjMarkedCount - b.adjMarkedCount;
+			return b.explosionCount - a.explosionCount;
+		});
+		const chosen = selectionPool[0];
+		for (let r = 0; r < gridSize; r++) {
+			for (let c = 0; c < gridSize; c++) {
+				sim[r][c].value = chosen.grid[r][c].value;
+				sim[r][c].player = chosen.grid[r][c].player;
+			}
+		}
+		stallTime += 1;
+	}
+	return { stallTime, stallCells, highlightCells: initialState.highlightCells, chains: initialState.chains };
 }
 
 /**
@@ -790,7 +857,7 @@ export function computeAIMove(state, config) {
 		const elapsedMs = endTime - startTime;
 		const stepsPerSec = (typeof branches === 'number' && elapsedMs > 0) ? (branches / (elapsedMs / 1000)) : undefined;
 		const currentAtkDef = computeAtkDefForGrid(grid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
-		const currentStall = computeStallTimeForGrid(grid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
+		const currentStall = computeStallTimeForGrid(grid, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue);
 		result.debugInfo = {
 			chosen: chosen ? {
 				r: chosen.r, c: chosen.c, src: chosen.srcVal, expl: chosen.explosions, gain: chosen.searchScore, atk: chosen.atk, def: chosen.def, winPlies: chosen.winPlies

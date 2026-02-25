@@ -3085,6 +3085,7 @@ document.addEventListener('DOMContentLoaded', () => {
         style.id = 'aiDebugStyles';
         style.textContent = `
             .ai-highlight { outline: 4px solid rgba(255,235,59,0.95) !important; box-shadow: 0 0 18px rgba(255,235,59,0.6); z-index:50; }
+            .ai-stall-highlight { outline: 3px solid rgba(0,200,255,0.95) !important; box-shadow: 0 0 16px rgba(0,200,255,0.55); z-index:45; }
             #aiDebugPanel { position:fixed; right:12px; bottom:12px; background:rgba(18,18,18,0.88); color:#eaeaea; padding:10px 12px; font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial; font-size:13px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.45); max-width:420px; z-index:1000; }
             #aiDebugPanel h4 { margin:0 0 6px 0; font-size:13px; }
             #aiDebugPanel pre { margin:6px 0 0 0; white-space:pre-wrap; font-family:monospace; font-size:12px; max-height:240px; overflow:auto; }
@@ -3096,6 +3097,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const existing = document.getElementById('aiDebugPanel');
         if (existing) existing.remove();
         document.querySelectorAll('.ai-highlight').forEach(el => el.classList.remove('ai-highlight'));
+        document.querySelectorAll('.ai-stall-highlight').forEach(el => el.classList.remove('ai-stall-highlight'));
     }
 
     function showAIDebugPanelWithResponse(info) {
@@ -3111,11 +3113,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const speedVal = (typeof info.stepsPerSec === 'number' ? `${info.stepsPerSec.toFixed(1)} steps/s` : '-');
         const currentAtkVal = formatVal(info.currentAtk);
         const currentDefVal = formatVal(info.currentDef);
+        const currentStallVal = formatVal(info.currentStall);
+        const stallCells = Array.isArray(info.currentStallCells) ? info.currentStallCells : [];
         const summary1 = document.createElement('div');
         summary1.innerHTML = `<strong>chosen gain:</strong> ${info.chosen ? formatVal(info.chosen.gain) : '-'} &nbsp; <strong>steps:</strong> ${stepsVal} &nbsp; <strong>total:</strong> ${branchesVal}`;
         panel.appendChild(summary1);
         const summary2 = document.createElement('div');
-        summary2.innerHTML = `<strong>current atk/def:</strong> ${currentAtkVal}/${currentDefVal}`;
+        summary2.innerHTML = `<strong>current atk/def/stall:</strong> ${currentAtkVal}/${currentDefVal}/${currentStallVal}`;
         panel.appendChild(summary2);
         const summary3 = document.createElement('div');
         summary3.innerHTML = `<strong>time:</strong> ${elapsedVal} &nbsp; <strong>speed:</strong> ${speedVal}`;
@@ -3126,6 +3130,13 @@ document.addEventListener('DOMContentLoaded', () => {
         pre.textContent = ordered.map((e, i) => `${i + 1}. (${e.r},${e.c}) src:${formatVal(e.src)} expl:${formatVal(e.expl)} gain:${formatVal(e.gain)} atk:${formatVal(e.atk)} def:${formatVal(e.def)}`).join('\n');
         panel.appendChild(pre);
         document.body.appendChild(panel);
+
+        if (stallCells.length) {
+            stallCells.forEach(({ r, c }) => {
+                const stallCell = document.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
+                if (stallCell) stallCell.classList.add('ai-stall-highlight');
+            });
+        }
     }
 
     function aiMakeMoveFor(playerIndex) {

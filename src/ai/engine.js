@@ -219,6 +219,141 @@ function computeAtkDefForOpponents(simGrid, gridSize, activeColors, cellExplodeT
 	return { atk, def };
 }
 
+function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThreshold, playerIndex) {
+	const focusColor = activeColors()[playerIndex];
+	const nearVal = cellExplodeThreshold - 1;
+	const nearValMinus = cellExplodeThreshold - 2;
+	const visited = new Set();
+	const stack = [];
+	const playerNearCells = [];
+	const opponentNearCells = [];
+	const chains = [];
+	const chainVisited = new Set();
+	const chainIndexByKey = new Map();
+	const keyFor = (r, c) => `${r},${c}`;
+	const markVisited = (r, c) => {
+		const key = keyFor(r, c);
+		if (visited.has(key)) return false;
+		visited.add(key);
+		return true;
+	};
+	for (let r = 0; r < gridSize; r++) {
+		for (let c = 0; c < gridSize; c++) {
+			const cell = simGrid[r][c];
+			if (cell.value !== nearVal) continue;
+			if (cell.player === focusColor) {
+				playerNearCells.push({ r, c });
+			} else if (cell.player) {
+				opponentNearCells.push({ r, c });
+			}
+		}
+	}
+	for (let r = 0; r < gridSize; r++) {
+		for (let c = 0; c < gridSize; c++) {
+			const cell = simGrid[r][c];
+			if (!cell.player || cell.value !== nearVal) continue;
+			const startKey = keyFor(r, c);
+			if (chainVisited.has(startKey)) continue;
+			const chainCells = [];
+			const chainOwners = new Set();
+			const queue = [[r, c]];
+			chainVisited.add(startKey);
+			while (queue.length) {
+				const [cr, cc] = queue.pop();
+				const current = simGrid[cr][cc];
+				chainCells.push({ r: cr, c: cc });
+				if (current.player) chainOwners.add(current.player);
+				const adj = [[cr - 1, cc], [cr + 1, cc], [cr, cc - 1], [cr, cc + 1]];
+				for (const [ar, ac] of adj) {
+					if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+					const adjCell = simGrid[ar][ac];
+					if (!adjCell.player || adjCell.value !== nearVal) continue;
+					const adjKey = keyFor(ar, ac);
+					if (chainVisited.has(adjKey)) continue;
+					chainVisited.add(adjKey);
+					queue.push([ar, ac]);
+				}
+			}
+			const chainIndex = chains.length;
+			for (const cellEntry of chainCells) {
+				chainIndexByKey.set(keyFor(cellEntry.r, cellEntry.c), chainIndex);
+			}
+			chains.push({ cells: chainCells, owners: Array.from(chainOwners) });
+		}
+	}
+	for (const cell of opponentNearCells) {
+		if (markVisited(cell.r, cell.c)) stack.push([cell.r, cell.c]);
+	}
+	while (stack.length) {
+		const [r, c] = stack.pop();
+		const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+		for (const [ar, ac] of adj) {
+			if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+			if (simGrid[ar][ac].value !== nearVal) continue;
+			if (markVisited(ar, ac)) stack.push([ar, ac]);
+		}
+	}
+	const stallCells = playerNearCells.filter(cell => !visited.has(keyFor(cell.r, cell.c)));
+	const highlightCells = opponentNearCells.concat(playerNearCells.filter(cell => visited.has(keyFor(cell.r, cell.c))));
+	const highlightSet = new Set(highlightCells.map(cell => keyFor(cell.r, cell.c)));
+	const extraHighlight = [];
+	if (nearValMinus >= 0 && highlightCells.length) {
+		for (const cell of highlightCells) {
+			const adj = [[cell.r - 1, cell.c], [cell.r + 1, cell.c], [cell.r, cell.c - 1], [cell.r, cell.c + 1]];
+			for (const [ar, ac] of adj) {
+				if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+				if (simGrid[ar][ac].value !== nearValMinus) continue;
+				const key = keyFor(ar, ac);
+				if (highlightSet.has(key)) continue;
+				const chainOwnerSignatures = new Set();
+				const chainIndexes = new Set();
+				const adjNear = [[ar - 1, ac], [ar + 1, ac], [ar, ac - 1], [ar, ac + 1]];
+				for (const [nr, nc] of adjNear) {
+					if (nr < 0 || nr >= gridSize || nc < 0 || nc >= gridSize) continue;
+					const nearCell = simGrid[nr][nc];
+					if (!nearCell.player || nearCell.value !== nearVal) continue;
+					const chainIndex = chainIndexByKey.get(keyFor(nr, nc));
+					if (typeof chainIndex !== 'number') continue;
+					if (chainIndexes.has(chainIndex)) continue;
+					chainIndexes.add(chainIndex);
+					const owners = chains[chainIndex]?.owners || [];
+					chainOwnerSignatures.add(owners.slice().sort().join('|'));
+				}
+				if (chainOwnerSignatures.size < 2) continue;
+				highlightSet.add(key);
+				extraHighlight.push({ r: ar, c: ac });
+			}
+		}
+	}
+	const expandedHighlights = highlightCells.concat(extraHighlight);
+	const queue = [];
+	for (const cell of expandedHighlights) {
+		const adj = [[cell.r - 1, cell.c], [cell.r + 1, cell.c], [cell.r, cell.c - 1], [cell.r, cell.c + 1]];
+		for (const [ar, ac] of adj) {
+			if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+			if (simGrid[ar][ac].value !== nearVal) continue;
+			const key = keyFor(ar, ac);
+			if (highlightSet.has(key)) continue;
+			highlightSet.add(key);
+			queue.push({ r: ar, c: ac });
+		}
+	}
+	while (queue.length) {
+		const cell = queue.pop();
+		expandedHighlights.push(cell);
+		const adj = [[cell.r - 1, cell.c], [cell.r + 1, cell.c], [cell.r, cell.c - 1], [cell.r, cell.c + 1]];
+		for (const [ar, ac] of adj) {
+			if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+			if (simGrid[ar][ac].value !== nearVal) continue;
+			const key = keyFor(ar, ac);
+			if (highlightSet.has(key)) continue;
+			highlightSet.add(key);
+			queue.push({ r: ar, c: ac });
+		}
+	}
+	return { stallTime: stallCells.length, stallCells, highlightCells: expandedHighlights, chains };
+}
+
 /**
  * Score a position for a player using gain + 1/2 atk + 1/5 def,
  * minus the combined opponents' score using the same formula.
@@ -645,6 +780,7 @@ export function computeAIMove(state, config) {
 		const elapsedMs = endTime - startTime;
 		const stepsPerSec = (typeof branches === 'number' && elapsedMs > 0) ? (branches / (elapsedMs / 1000)) : undefined;
 		const currentAtkDef = computeAtkDefForGrid(grid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
+		const currentStall = computeStallTimeForGrid(grid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
 		result.debugInfo = {
 			chosen: chosen ? {
 				r: chosen.r, c: chosen.c, src: chosen.srcVal, expl: chosen.explosions, gain: chosen.searchScore, atk: chosen.atk, def: chosen.def, winPlies: chosen.winPlies
@@ -656,7 +792,10 @@ export function computeAIMove(state, config) {
 			elapsedMs,
 			stepsPerSec,
 			currentAtk: currentAtkDef.atk,
-			currentDef: currentAtkDef.def
+			currentDef: currentAtkDef.def,
+			currentStall: currentStall.stallTime,
+			currentStallCells: currentStall.highlightCells,
+			currentStallChains: currentStall.chains
 		};
 	}
 	return result;

@@ -219,11 +219,18 @@ function computeAtkDefForOpponents(simGrid, gridSize, activeColors, cellExplodeT
 	return { atk, def };
 }
 
+/**
+ * Compute how long a player can stall before being forced into a losing move.
+ * 0 means they are not forced into a bad move. We calculate opponent-controlled
+ * spaces and count safe interactions that avoid them, with exceptions for
+ * distant opponents, excessive moves, and the 2x2 stall-breaking formation.
+ */
 function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue) {
 	const focusColor = activeColors()[playerIndex];
 	const nearVal = cellExplodeThreshold - 1;
 	const nearValMinus = cellExplodeThreshold - 2;
 	const keyFor = (r, c) => `${r},${c}`;
+	// Build the current opponent-control map and nearVal chain ownership metadata.
 	const buildHighlightState = (grid) => {
 		const visited = new Set();
 		const stack = [];
@@ -232,6 +239,7 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 		const chains = [];
 		const chainVisited = new Set();
 		const chainIndexByKey = new Map();
+		const chainOwnersByKey = new Map();
 		const markVisited = (r, c) => {
 			const key = keyFor(r, c);
 			if (visited.has(key)) return false;
@@ -276,10 +284,13 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 					}
 				}
 				const chainIndex = chains.length;
+				const ownersList = Array.from(chainOwners);
 				for (const cellEntry of chainCells) {
-					chainIndexByKey.set(keyFor(cellEntry.r, cellEntry.c), chainIndex);
+					const cellKey = keyFor(cellEntry.r, cellEntry.c);
+					chainIndexByKey.set(cellKey, chainIndex);
+					chainOwnersByKey.set(cellKey, ownersList);
 				}
-				chains.push({ cells: chainCells, owners: Array.from(chainOwners) });
+				chains.push({ cells: chainCells, owners: ownersList });
 			}
 		}
 		for (const cell of opponentNearCells) {
@@ -351,9 +362,75 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 				queue.push({ r: ar, c: ac });
 			}
 		}
-		return { highlightSet, highlightCells: expandedHighlights, chains };
+		return { highlightSet, highlightCells: expandedHighlights, chains, chainOwnersByKey };
 	};
+	// Initial opponent-control map and early exit checks.
 	const initialState = buildHighlightState(simGrid);
+	const stallZeroReasons = [];
+	let hasMarkedAdjacency = false;
+	for (let r = 0; r < gridSize; r++) {
+		for (let c = 0; c < gridSize; c++) {
+			const cell = simGrid[r][c];
+			if (cell.player !== focusColor) continue;
+			const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+			if (adj.some(([ar, ac]) => ar >= 0 && ar < gridSize && ac >= 0 && ac < gridSize && initialState.highlightSet.has(keyFor(ar, ac)))) {
+				hasMarkedAdjacency = true;
+				r = gridSize;
+				break;
+			}
+		}
+	}
+	if (!hasMarkedAdjacency) {
+		stallZeroReasons.push('no marked cells adjacent to player');
+	}
+	// Detect the 2x2 owned safespace formation during stall simulation.
+	const findOwnedSquare = (grid, state) => {
+		for (let r = 0; r < gridSize - 1; r++) {
+			for (let c = 0; c < gridSize - 1; c++) {
+				const square = [
+					[r, c],
+					[r + 1, c],
+					[r, c + 1],
+					[r + 1, c + 1]
+				];
+				let playerCellCount = 0;
+				for (const [sr, sc] of square) {
+					const sqCell = grid[sr][sc];
+					if (sqCell.player !== focusColor) continue;
+					playerCellCount += 1;
+				}
+				if (playerCellCount === 4) {
+					let cornerAdjOtherChains = 0;
+					let hasCornerInOtherChain = false;
+					for (const [sr, sc] of square) {
+						const sqCell = grid[sr][sc];
+						if (sqCell.value !== nearVal) continue;
+						const cellOwners = state.chainOwnersByKey.get(keyFor(sr, sc)) || [];
+						if (cellOwners.some(owner => owner !== focusColor)) {
+							hasCornerInOtherChain = true;
+							break;
+						}
+						const adj = [[sr - 1, sc], [sr + 1, sc], [sr, sc - 1], [sr, sc + 1]];
+						let hasOtherChainAdj = false;
+						for (const [ar, ac] of adj) {
+							if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+							const owners = state.chainOwnersByKey.get(keyFor(ar, ac));
+							if (!owners || !owners.length) continue;
+							if (!owners.some(owner => owner !== focusColor)) continue;
+							hasOtherChainAdj = true;
+							break;
+						}
+						if (hasOtherChainAdj) cornerAdjOtherChains += 1;
+					}
+					if (hasCornerInOtherChain) continue;
+					if (cornerAdjOtherChains > 1) continue;
+					return { r: r + 1, c };
+				}
+			}
+		}
+		return null;
+	};
+	// Record player cells not currently interacting with the marked control set.
 	const stallCells = [];
 	for (let r = 0; r < gridSize; r++) {
 		for (let c = 0; c < gridSize; c++) {
@@ -376,12 +453,37 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 		}
 		return count;
 	};
+	// Simulate safe interactions with explosions, preferring lower marked adjacency.
 	const sim = deepCloneGrid(simGrid, gridSize);
 	let stallTime = 0;
+	let forcedStop = false;
 	const maxExplosionsToAssumeLoop = gridSize * 3;
 	while (true) {
 		const state = buildHighlightState(sim);
 		const markedSet = state.highlightSet;
+		const sparseSquareBottomLeft = findOwnedSquare(sim, state);
+		if (sparseSquareBottomLeft) {
+			stallZeroReasons.push('2x2 owned safespace present');
+			try {
+				console.log('[AI debug] sparse 2x2 bottom-left', sparseSquareBottomLeft);
+				const bl = sparseSquareBottomLeft;
+				const squareCells = [
+					{ r: bl.r - 1, c: bl.c },
+					{ r: bl.r, c: bl.c },
+					{ r: bl.r - 1, c: bl.c + 1 },
+					{ r: bl.r, c: bl.c + 1 }
+				];
+				const squareInfo = squareCells
+					.filter(cell => cell.r >= 0 && cell.r < gridSize && cell.c >= 0 && cell.c < gridSize)
+					.map(cell => {
+						const current = sim[cell.r][cell.c];
+						return { r: cell.r, c: cell.c, value: current.value, player: current.player };
+					});
+				console.log('[AI debug] sparse 2x2 cells', squareInfo);
+			} catch { /* ignore */ }
+			forcedStop = true;
+			break;
+		}
 		const candidates = [];
 		for (let r = 0; r < gridSize; r++) {
 			for (let c = 0; c < gridSize; c++) {
@@ -427,6 +529,20 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 			}
 		}
 		stallTime += 1;
+	}
+	// Clamp stall time for excessive depth.
+	if (stallTime > 20) {
+		stallZeroReasons.push('stallTime exceeded 20');
+	}
+	// Apply any stall-breaking exceptions and log all triggering conditions.
+	if (stallZeroReasons.length) {
+		try {
+			stallZeroReasons.forEach(reason => console.log(`[AI debug] stallTime=0: ${reason}`));
+		} catch { /* ignore */ }
+		stallTime = 0;
+	}
+	if (forcedStop) {
+		stallTime = 0;
 	}
 	return { stallTime, stallCells, highlightCells: initialState.highlightCells, chains: initialState.chains };
 }

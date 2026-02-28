@@ -908,9 +908,15 @@ export function computeAIMove(state, config) {
 	mark('finalize');
 	const winning = allCandidates.filter(c => c.searchScore === Infinity);
 	let chosen;
+	let orderedCandidates = [];
 	if (winning.length) {
 		const minPlies = Math.min(...winning.map(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY)));
 		const fastest = winning.filter(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY) === minPlies);
+		orderedCandidates = winning.slice().sort((a, b) => {
+			const aPlies = typeof a.winPlies === 'number' ? a.winPlies : Number.POSITIVE_INFINITY;
+			const bPlies = typeof b.winPlies === 'number' ? b.winPlies : Number.POSITIVE_INFINITY;
+			return aPlies - bPlies;
+		});
 		chosen = fastest.length ? fastest[Math.floor(Math.random() * fastest.length)] : winning[0];
 	} else {
 		allCandidates.sort((a, b) => (b.netResult - a.netResult));
@@ -919,6 +925,30 @@ export function computeAIMove(state, config) {
 		let bestMoves = bestByNet.length ? bestByNet : [];
 		if (!bestMoves || !bestMoves.length) bestMoves = allCandidates.length ? [allCandidates[0]] : [];
 		chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
+		orderedCandidates = allCandidates.slice();
+	}
+	// Only allow choosing moves that don't force a bad situation beyond the ai's horiton
+	let stallChosen = null;
+	const stallCandidates = orderedCandidates.filter(c => c.searchScore !== -Infinity);
+	if (stallCandidates.length) {
+		for (const cand of stallCandidates) {
+			const gridToCheck = cand.finalGrid || cand.resultGrid;
+			if (!gridToCheck) continue;
+			const stallResult = computeStallTimeForGrid(gridToCheck, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue);
+			if (stallResult.stallTime === 0) {
+				stallChosen = cand;
+				break;
+			}
+		}
+		if (stallChosen) {
+			chosen = stallChosen;
+		}
+	} else if (orderedCandidates.length) {
+		const maxLossPlies = Math.max(...orderedCandidates.map(c => (typeof c.winPlies === 'number' ? c.winPlies : 0)));
+		const lossCandidates = orderedCandidates.filter(c => (typeof c.winPlies === 'number' ? c.winPlies : 0) === maxLossPlies);
+		if (lossCandidates.length) {
+			chosen = lossCandidates[Math.floor(Math.random() * lossCandidates.length)];
+		}
 	}
 	mark('select');
 	const result = {

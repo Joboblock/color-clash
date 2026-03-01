@@ -3085,6 +3085,7 @@ document.addEventListener('DOMContentLoaded', () => {
         style.id = 'aiDebugStyles';
         style.textContent = `
             .ai-highlight { outline: 4px solid rgba(255,235,59,0.95) !important; box-shadow: 0 0 18px rgba(255,235,59,0.6); z-index:50; }
+            .ai-highlight-equal { outline: 4px dotted rgba(255,235,59,0.95) !important; box-shadow: 0 0 18px rgba(255,235,59,0.6); z-index:50; }
             #aiDebugPanel { position:fixed; right:12px; bottom:12px; background:rgba(18,18,18,0.88); color:#eaeaea; padding:10px 12px; font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial; font-size:13px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.45); max-width:420px; z-index:1000; }
             #aiDebugPanel h4 { margin:0 0 6px 0; font-size:13px; }
             #aiDebugPanel pre { margin:6px 0 0 0; white-space:pre-wrap; font-family:monospace; font-size:12px; max-height:240px; overflow:auto; }
@@ -3096,6 +3097,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const existing = document.getElementById('aiDebugPanel');
         if (existing) existing.remove();
         document.querySelectorAll('.ai-highlight').forEach(el => el.classList.remove('ai-highlight'));
+        document.querySelectorAll('.ai-highlight-equal').forEach(el => el.classList.remove('ai-highlight-equal'));
     }
 
     function showAIDebugPanelWithResponse(info) {
@@ -3153,6 +3155,17 @@ document.addEventListener('DOMContentLoaded', () => {
             if (move) {
                 const aiCell = document.querySelector(`.cell[data-row="${move.r}"][data-col="${move.c}"]`);
                 if (aiCell) aiCell.classList.add('ai-highlight');
+            }
+            if (move && result.debugInfo && result.debugInfo.chosen && typeof result.debugInfo.chosen.gain === 'number') {
+                const chosenGain = result.debugInfo.chosen.gain;
+                const ordered = Array.isArray(result.debugInfo.ordered) ? result.debugInfo.ordered : [];
+                ordered
+                    .filter(entry => entry && typeof entry.gain === 'number' && entry.gain === chosenGain)
+                    .forEach(entry => {
+                        if (entry.r === move.r && entry.c === move.c) return;
+                        const cell = document.querySelector(`.cell[data-row="${entry.r}"][data-col="${entry.c}"]`);
+                        if (cell) cell.classList.add('ai-highlight-equal');
+                    });
             }
             showAIDebugPanelWithResponse(result.debugInfo);
             if (move) {

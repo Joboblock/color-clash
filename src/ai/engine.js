@@ -986,6 +986,19 @@ export function computeAIMove(state, config) {
 	let stallChoicePool = null;
 	const hasForcedWin = winning.length > 0;
 	const hasForcedLoss = allCandidates.length > 0 && allCandidates.every(c => c.searchScore === -Infinity);
+	const candidateHasOpponentStallRisk = (cand) => {
+		const baseGrid = cand.finalGrid || cand.resultGrid;
+		if (!baseGrid) return false;
+		const baseInitial = cand.resultInitial || initialPlacements;
+		const responses = generateCoalitionCandidatesOnSim(baseGrid, baseInitial, playerIndex, playerCount, gridSize, activeColors, invalidInitialPositions);
+		if (!responses.length) return false;
+		for (const response of responses) {
+			const applied = applyMoveAndSim(baseGrid, baseInitial, response.owner, response.r, response.c, response.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, cellExplodeThreshold, maxExplosionsToAssumeLoop);
+			const responseStall = computeStallTimeForGrid(applied.grid, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue, { type: 'response', r: response.r, c: response.c, isInitial: response.isInitial, owner: response.owner });
+			if (responseStall.stallTime !== 0) return true;
+		}
+		return false;
+	};
 	if (!hasForcedWin && !hasForcedLoss) {
 		const stallCandidates = orderedCandidates.filter(c => c.searchScore !== -Infinity);
 		if (stallCandidates.length) {
@@ -1002,7 +1015,9 @@ export function computeAIMove(state, config) {
 					const gridToCheck = cand.finalGrid || cand.resultGrid;
 					if (!gridToCheck) continue;
 					const stallResult = computeStallTimeForGrid(gridToCheck, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue, { type: 'candidate', r: cand.r, c: cand.c, isInitial: cand.isInitial });
-					if (stallResult.stallTime === 0) zeroCandidates.push(cand);
+					if (stallResult.stallTime !== 0) continue;
+					if (candidateHasOpponentStallRisk(cand)) continue;
+					zeroCandidates.push(cand);
 				}
 				if (zeroCandidates.length) {
 					stallChoicePool = zeroCandidates;

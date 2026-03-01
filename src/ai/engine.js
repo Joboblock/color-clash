@@ -225,7 +225,7 @@ function computeAtkDefForOpponents(simGrid, gridSize, activeColors, cellExplodeT
  * spaces and count safe interactions that avoid them, with exceptions for
  * distant opponents, excessive moves, and the 2x2 stall-breaking formation.
  */
-function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue) {
+function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue, context) {
 	const focusColor = activeColors()[playerIndex];
 	const nearVal = cellExplodeThreshold - 1;
 	const nearValMinus = cellExplodeThreshold - 2;
@@ -452,9 +452,71 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 	while (true) {
 		const state = buildHighlightState(sim);
 		const markedSet = state.highlightSet;
+		try {
+			const adjCounts = [];
+			for (let r = 0; r < gridSize; r++) {
+				for (let c = 0; c < gridSize; c++) {
+					const cell = sim[r][c];
+					if (cell.player !== focusColor) continue;
+					const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+					let adjCount = 0;
+					for (const [ar, ac] of adj) {
+						if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+						if (markedSet.has(keyFor(ar, ac))) adjCount += 1;
+					}
+					adjCounts.push({ r, c, adjMarked: adjCount, value: cell.value });
+				}
+			}
+			console.log('[AI debug] stall adjacents', adjCounts);
+		} catch { /* ignore */ }
 		const sparseSquareBottomLeft = findOwnedSquare(sim, state);
 		if (sparseSquareBottomLeft) {
 			stallZeroReasons.push('2x2 owned safespace present');
+			try {
+				const bl = sparseSquareBottomLeft;
+				const squareCells = [
+					{ r: bl.r - 1, c: bl.c },
+					{ r: bl.r, c: bl.c },
+					{ r: bl.r - 1, c: bl.c + 1 },
+					{ r: bl.r, c: bl.c + 1 }
+				];
+				const squareInfo = squareCells
+					.filter(cell => cell.r >= 0 && cell.r < gridSize && cell.c >= 0 && cell.c < gridSize)
+					.map(cell => {
+						const current = sim[cell.r][cell.c];
+						return { r: cell.r, c: cell.c, value: current.value, player: current.player };
+					});
+				const cornerDetails = squareCells.map(({ r, c }) => {
+					if (r < 0 || r >= gridSize || c < 0 || c >= gridSize) return { r, c, outOfBounds: true };
+					const current = sim[r][c];
+					const cellOwners = state.chainOwnersByKey.get(keyFor(r, c)) || [];
+					const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+					const adjChainOwners = adj
+						.filter(([ar, ac]) => ar >= 0 && ar < gridSize && ac >= 0 && ac < gridSize)
+						.map(([ar, ac]) => ({
+							r: ar,
+							c: ac,
+							owners: state.chainOwnersByKey.get(keyFor(ar, ac)) || []
+						}));
+					return {
+						r,
+						c,
+						value: current.value,
+						player: current.player,
+						nearVal: current.value === nearVal,
+						chainOwners: cellOwners,
+						adjacentChainOwners: adjChainOwners
+					};
+				});
+
+				// Log everything in one structured entry including which move/context produced this sim
+				console.log('[AI debug] sparse 2x2 detected', {
+					source: context || { type: 'unknown' },
+					bottomLeft: sparseSquareBottomLeft,
+					squareInfo,
+					cornerDetails
+				});
+			} catch (e) { try { console.log('[AI debug] sparse 2x2 logging error', e); } catch { /* ignore */ } }
 			forcedStop = true;
 			break;
 		}
@@ -489,6 +551,14 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 			const rawSources = getCellsToExplode(sim, gridSize, cellExplodeThreshold);
 			const sources = rawSources
 				.filter(cell => !isAdjacentToMarked(cell.row, cell.col, markedSet));
+			try {
+				console.log('[AI debug] stall explosions', {
+					iteration,
+					rawSources: rawSources.length,
+					safeSources: sources.length,
+					blocked: rawSources.length - sources.length
+				});
+			} catch { /* ignore */ }
 			if (!sources.length) break;
 			exploded = true;
 			explodeCellsOnce({
@@ -506,18 +576,26 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 			}
 		}
 		if (forcedStop) break;
-		if (!exploded) break;
+		if (!exploded) {
+			try { console.log('[AI debug] stall explosions none'); } catch { /* ignore */ }
+			break;
+		}
 	}
 	// Clamp stall time for excessive depth.
 	if (stallTime > 20) {
 		stallZeroReasons.push('stallTime exceeded 20');
 	}
 	// Apply any stall-breaking exceptions and log all triggering conditions.
-	if (stallZeroReasons.length) stallTime = 0;
+	if (stallZeroReasons.length) {
+		try {
+			stallZeroReasons.forEach(reason => console.log(`[AI debug] stallTime=0: ${reason}`));
+		} catch { /* ignore */ }
+		stallTime = 0;
+	}
 	if (forcedStop) {
 		stallTime = 0;
 	}
-	return { stallTime, stallCells };
+	return { stallTime, stallCells, highlightCells: initialState.highlightCells, chains: initialState.chains };
 }
 
 /**
@@ -923,7 +1001,7 @@ export function computeAIMove(state, config) {
 				for (const cand of batch) {
 					const gridToCheck = cand.finalGrid || cand.resultGrid;
 					if (!gridToCheck) continue;
-					const stallResult = computeStallTimeForGrid(gridToCheck, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue);
+					const stallResult = computeStallTimeForGrid(gridToCheck, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue, { type: 'candidate', r: cand.r, c: cand.c, isInitial: cand.isInitial });
 					if (stallResult.stallTime === 0) zeroCandidates.push(cand);
 				}
 				if (zeroCandidates.length) {
@@ -994,7 +1072,7 @@ export function computeAIMove(state, config) {
 		const getStallTimeForCandidate = (cand) => {
 			const gridToCheck = cand && (cand.finalGrid || cand.resultGrid);
 			if (!gridToCheck) return undefined;
-			return computeStallTimeForGrid(gridToCheck, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue).stallTime;
+			return computeStallTimeForGrid(gridToCheck, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue, { type: 'candidate', r: cand.r, c: cand.c, isInitial: cand.isInitial }).stallTime;
 		};
 		let alternateMoves = [];
 		if (chosen && choicePool && choicePool.length) {
@@ -1011,13 +1089,13 @@ export function computeAIMove(state, config) {
 		const endTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 		const elapsedMs = endTime - startTime;
 		const stepsPerSec = (typeof branches === 'number' && elapsedMs > 0) ? (branches / (elapsedMs / 1000)) : undefined;
-		const currentAtkDef = computeAtkDefForGrid(grid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
-		const currentStall = computeStallTimeForGrid(grid, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue);
+	const currentAtkDef = computeAtkDefForGrid(grid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
+	const currentStall = computeStallTimeForGrid(grid, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue, { type: 'current' });
 		result.debugInfo = {
 			chosen: chosen ? {
-				r: chosen.r, c: chosen.c, src: chosen.srcVal, expl: chosen.explosions, gain: chosen.searchScore, atk: chosen.atk, def: chosen.def, winPlies: chosen.winPlies
+				r: chosen.r, c: chosen.c, eval: chosen.searchScore, atk: chosen.atk, def: chosen.def, stall: getStallTimeForCandidate(chosen), winPlies: chosen.winPlies
 			} : null,
-			ordered: ordered.map(c => ({ r: c.r, c: c.c, src: c.srcVal, expl: c.explosions, gain: c.searchScore, atk: c.atk, def: c.def, winPlies: c.winPlies })),
+			ordered: ordered.map(c => ({ r: c.r, c: c.c, eval: c.searchScore, atk: c.atk, def: c.def, stall: getStallTimeForCandidate(c), winPlies: c.winPlies })),
 			alternateMoves,
 			steps,
 			branches,

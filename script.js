@@ -3106,7 +3106,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (existing) existing.remove();
         const panel = document.createElement('div'); panel.id = 'aiDebugPanel';
         const title = document.createElement('h4'); title.textContent = `AI dataRespect — player ${currentPlayer} (${activeColors()[currentPlayer]})`; panel.appendChild(title);
-        const formatVal = (val) => (typeof val === 'number' ? val : '-');
+        const formatVal = (val) => {
+            if (typeof val !== 'number') return '-';
+            if (!Number.isFinite(val)) return String(val);
+            return String(val);
+        };
+        const formatEval = (val) => {
+            if (typeof val !== 'number') return '-';
+            if (!Number.isFinite(val)) return String(val);
+            return val.toFixed(1);
+        };
         const stepsVal = (typeof info.steps === 'number' ? info.steps : '-');
         const branchesVal = (typeof info.branches === 'number' ? info.branches : '-');
         const elapsedVal = (typeof info.elapsedMs === 'number' ? `${info.elapsedMs.toFixed(0)}ms` : '-');
@@ -3116,7 +3125,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const currentStallVal = formatVal(info.currentStall);
         const stallCells = Array.isArray(info.currentStallCells) ? info.currentStallCells : [];
         const summary1 = document.createElement('div');
-        summary1.innerHTML = `<strong>chosen gain:</strong> ${info.chosen ? formatVal(info.chosen.gain) : '-'} &nbsp; <strong>steps:</strong> ${stepsVal} &nbsp; <strong>total:</strong> ${branchesVal}`;
+        summary1.innerHTML = `<strong>chosen eval:</strong> ${info.chosen ? formatEval(info.chosen.eval) : '-'} &nbsp; <strong>steps:</strong> ${stepsVal} &nbsp; <strong>total:</strong> ${branchesVal}`;
         panel.appendChild(summary1);
         const summary2 = document.createElement('div');
         summary2.innerHTML = `<strong>current atk/def/stall:</strong> ${currentAtkVal}/${currentDefVal}/${currentStallVal}`;
@@ -3124,10 +3133,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const summary3 = document.createElement('div');
         summary3.innerHTML = `<strong>time:</strong> ${elapsedVal} &nbsp; <strong>speed:</strong> ${speedVal}`;
         panel.appendChild(summary3);
-        const listTitle = document.createElement('div'); listTitle.style.marginTop = '8px'; listTitle.innerHTML = `<em>candidates ordered by AI gain:</em>`; panel.appendChild(listTitle);
+        const listTitle = document.createElement('div'); listTitle.style.marginTop = '8px'; listTitle.innerHTML = `<em>candidates ordered by AI eval:</em>`; panel.appendChild(listTitle);
         const pre = document.createElement('pre');
         const ordered = Array.isArray(info.ordered) ? info.ordered.slice(0, 16) : [];
-        pre.textContent = ordered.map((e, i) => `${i + 1}. (${e.r},${e.c}) src:${formatVal(e.src)} expl:${formatVal(e.expl)} gain:${formatVal(e.gain)} atk:${formatVal(e.atk)} def:${formatVal(e.def)}`).join('\n');
+        pre.textContent = ordered.map((e, i) => `${i + 1}. (${e.r},${e.c}) eval:${formatEval(e.eval)} atk/def/stall:${formatVal(e.atk)}/${formatVal(e.def)}/${formatVal(e.stall)}`).join('\n');
         panel.appendChild(pre);
         document.body.appendChild(panel);
 

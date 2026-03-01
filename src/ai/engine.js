@@ -37,7 +37,7 @@
  * No side-effects: caller applies move or advances turn.
  */
 
-import { resolveExplosionChain } from '../game/gridCalc.js';
+import { resolveExplosionChain, getCellsToExplode, explodeCellsOnce } from '../game/gridCalc.js';
 
 /** @typedef {{r:number,c:number,isInitial:boolean,srcVal:number,sortKey:number}} Candidate */
 /** @typedef {{r:number,c:number,isInitial:boolean,srcVal:number,explosions:number,immediateGain:number,resultGrid:any,resultInitial:boolean[],runaway:boolean,searchScore?:number,winPlies?:number,atk?:number,def?:number,netResult?:number,finalGrid?:any}} Evaluated */
@@ -444,15 +444,6 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 		const adj = [[row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]];
 		return adj.some(([r, c]) => r >= 0 && r < gridSize && c >= 0 && c < gridSize && markedSet.has(keyFor(r, c)));
 	};
-	const countAdjacentMarked = (row, col, markedSet) => {
-		const adj = [[row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]];
-		let count = 0;
-		for (const [r, c] of adj) {
-			if (r < 0 || r >= gridSize || c < 0 || c >= gridSize) continue;
-			if (markedSet.has(keyFor(r, c))) count += 1;
-		}
-		return count;
-	};
 	// Simulate safe interactions with explosions, preferring lower marked adjacency.
 	const sim = deepCloneGrid(simGrid, gridSize);
 	let stallTime = 0;
@@ -461,6 +452,23 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 	while (true) {
 		const state = buildHighlightState(sim);
 		const markedSet = state.highlightSet;
+		try {
+			const adjCounts = [];
+			for (let r = 0; r < gridSize; r++) {
+				for (let c = 0; c < gridSize; c++) {
+					const cell = sim[r][c];
+					if (cell.player !== focusColor) continue;
+					const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+					let adjCount = 0;
+					for (const [ar, ac] of adj) {
+						if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+						if (markedSet.has(keyFor(ar, ac))) adjCount += 1;
+					}
+					adjCounts.push({ r, c, adjMarked: adjCount, value: cell.value });
+				}
+			}
+			console.log('[AI debug] stall adjacents', adjCounts);
+		} catch { /* ignore */ }
 		const sparseSquareBottomLeft = findOwnedSquare(sim, state);
 		if (sparseSquareBottomLeft) {
 			stallZeroReasons.push('2x2 owned safespace present');
@@ -484,51 +492,66 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 			forcedStop = true;
 			break;
 		}
-		const candidates = [];
+		const safeCells = [];
 		for (let r = 0; r < gridSize; r++) {
 			for (let c = 0; c < gridSize; c++) {
 				const cell = sim[r][c];
 				if (cell.player !== focusColor) continue;
 				if (markedSet.has(keyFor(r, c))) continue;
-				const probe = deepCloneGrid(sim, gridSize);
-				const target = probe[r][c];
-				target.value = Math.min(maxCellValue, target.value + 1);
-				target.player = focusColor;
-				let hasInvalidExplosion = false;
-				let explosionCount = 0;
-				let adjMarkedCount = 0;
-				resolveExplosionChain({
-					grid: probe,
-					gridSize,
-					cellExplodeThreshold,
-					maxCellValue,
-					isInitialPlacementPhase: false,
-					maxIterations: maxExplosionsToAssumeLoop,
-					onExplode: ({ row, col }) => {
-						explosionCount += 1;
-						adjMarkedCount += countAdjacentMarked(row, col, markedSet);
-						if (isAdjacentToMarked(row, col, markedSet)) hasInvalidExplosion = true;
+				safeCells.push({ r, c, cell });
+			}
+		}
+		if (!safeCells.length) break;
+		for (const entry of safeCells) {
+			const target = entry.cell;
+			if (target.value < cellExplodeThreshold) {
+				const delta = Math.min(maxCellValue, cellExplodeThreshold) - target.value;
+				if (delta > 0) {
+					stallTime += delta;
+					if (stallTime > 20) {
+						stallZeroReasons.push('stallTime exceeded 20');
+						forcedStop = true;
+						break;
 					}
+					target.value += delta;
+				}
+			}
+		}
+		if (forcedStop) break;
+		let exploded = false;
+		for (let iteration = 0; iteration < maxExplosionsToAssumeLoop; iteration++) {
+			const rawSources = getCellsToExplode(sim, gridSize, cellExplodeThreshold);
+			const sources = rawSources
+				.filter(cell => !isAdjacentToMarked(cell.row, cell.col, markedSet));
+			try {
+				console.log('[AI debug] stall explosions', {
+					iteration,
+					rawSources: rawSources.length,
+					safeSources: sources.length,
+					blocked: rawSources.length - sources.length
 				});
-				if (hasInvalidExplosion) continue;
-				candidates.push({ r, c, grid: probe, explosionCount, adjMarkedCount });
+			} catch { /* ignore */ }
+			if (!sources.length) break;
+			exploded = true;
+			explodeCellsOnce({
+				grid: sim,
+				gridSize,
+				cellExplodeThreshold,
+				maxCellValue,
+				isInitialPlacementPhase: false,
+				cellsToExplode: sources
+			});
+			if (stallTime > 20) {
+				stallZeroReasons.push('stallTime exceeded 20');
+				forcedStop = true;
+				break;
 			}
 		}
-		if (!candidates.length) break;
-		const explosionMoves = candidates.filter(c => c.explosionCount > 0);
-		const selectionPool = explosionMoves.length ? explosionMoves : candidates;
-		selectionPool.sort((a, b) => {
-			if (a.adjMarkedCount !== b.adjMarkedCount) return a.adjMarkedCount - b.adjMarkedCount;
-			return b.explosionCount - a.explosionCount;
-		});
-		const chosen = selectionPool[0];
-		for (let r = 0; r < gridSize; r++) {
-			for (let c = 0; c < gridSize; c++) {
-				sim[r][c].value = chosen.grid[r][c].value;
-				sim[r][c].player = chosen.grid[r][c].player;
-			}
+		if (forcedStop) break;
+		if (!exploded) {
+			try { console.log('[AI debug] stall explosions none'); } catch { /* ignore */ }
+			break;
 		}
-		stallTime += 1;
 	}
 	// Clamp stall time for excessive depth.
 	if (stallTime > 20) {
@@ -929,19 +952,33 @@ export function computeAIMove(state, config) {
 	}
 	// Only allow choosing moves that don't force a bad situation beyond the ai's horiton
 	let stallChosen = null;
-	const stallCandidates = orderedCandidates.filter(c => c.searchScore !== -Infinity);
-	if (stallCandidates.length) {
-		for (const cand of stallCandidates) {
-			const gridToCheck = cand.finalGrid || cand.resultGrid;
-			if (!gridToCheck) continue;
-			const stallResult = computeStallTimeForGrid(gridToCheck, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue);
-			if (stallResult.stallTime === 0) {
-				stallChosen = cand;
-				break;
+	const hasForcedWin = winning.length > 0;
+	const hasForcedLoss = allCandidates.length > 0 && allCandidates.every(c => c.searchScore === -Infinity);
+	if (!hasForcedWin && !hasForcedLoss) {
+		const stallCandidates = orderedCandidates.filter(c => c.searchScore !== -Infinity);
+		if (stallCandidates.length) {
+			let i = 0;
+			while (i < stallCandidates.length && !stallChosen) {
+				const score = stallCandidates[i].netResult;
+				const batch = [];
+				while (i < stallCandidates.length && stallCandidates[i].netResult === score) {
+					batch.push(stallCandidates[i]);
+					i += 1;
+				}
+				const zeroCandidates = [];
+				for (const cand of batch) {
+					const gridToCheck = cand.finalGrid || cand.resultGrid;
+					if (!gridToCheck) continue;
+					const stallResult = computeStallTimeForGrid(gridToCheck, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue);
+					if (stallResult.stallTime === 0) zeroCandidates.push(cand);
+				}
+				if (zeroCandidates.length) {
+					stallChosen = zeroCandidates[Math.floor(Math.random() * zeroCandidates.length)];
+				}
 			}
-		}
-		if (stallChosen) {
-			chosen = stallChosen;
+			if (stallChosen) {
+				chosen = stallChosen;
+			}
 		}
 	} else if (orderedCandidates.length) {
 		const maxLossPlies = Math.max(...orderedCandidates.map(c => (typeof c.winPlies === 'number' ? c.winPlies : 0)));

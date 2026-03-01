@@ -246,6 +246,147 @@ function evaluatePosition(simGrid, playerIndex, opts) {
 	return { score, gain, atk, def, enemyGain, enemyAtk: enemyAtkDef.atk, enemyDef: enemyAtkDef.def };
 }
 
+function detectTerminalOutcome(simGridInput, simInitialPlacementsInput, focusPlayerIndex, gridSize, activeColors) {
+	// Avoid terminal mis-detection during initial placement phase
+	const inInitialPlacementPhase = !simInitialPlacementsInput.every(v => v);
+	if (inInitialPlacementPhase) return null;
+	let hasAny = false; let activePlayers = 0; let soleIdx = -1;
+	for (let r = 0; r < gridSize; r++) {
+		for (let c = 0; c < gridSize; c++) {
+			const owner = simGridInput[r][c].player;
+			if (owner !== '') {
+				hasAny = true;
+				const idx = activeColors().indexOf(owner);
+				if (idx !== -1) {
+					if (soleIdx === -1) { soleIdx = idx; activePlayers = 1; }
+					else if (idx !== soleIdx) { activePlayers = 2; r = gridSize; break; }
+				}
+			}
+		}
+	}
+	if (hasAny && activePlayers === 1) {
+		return { value: (soleIdx === focusPlayerIndex) ? Infinity : -Infinity, stepsToInfinity: 1 };
+	}
+	return null;
+}
+
+function collectNoisyCells(simGrid, gridSize, cellExplodeThreshold) {
+	const nearVal = cellExplodeThreshold - 1;
+	const noisy = new Set();
+	for (let r = 0; r < gridSize; r++) {
+		for (let c = 0; c < gridSize; c++) {
+			const cell = simGrid[r][c];
+			if (!cell.player || cell.value !== nearVal) continue;
+			const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+			for (const [ar, ac] of adj) {
+				if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
+				const adjCell = simGrid[ar][ac];
+				if (!adjCell.player || adjCell.value !== nearVal) continue;
+				if (adjCell.player !== cell.player) {
+					noisy.add(`${r},${c}`);
+					noisy.add(`${ar},${ac}`);
+				}
+			}
+		}
+	}
+	return noisy;
+}
+
+function generateNoisyCandidatesOnSim(simGrid, simInitialPlacements, playerIndex, gridSize, activeColors, invalidInitialPositions, noisyCells) {
+	if (!noisyCells || noisyCells.size === 0) return [];
+	const all = generateCandidatesOnSim(simGrid, simInitialPlacements, playerIndex, gridSize, activeColors, invalidInitialPositions);
+	return all.filter(c => noisyCells.has(`${c.r},${c.c}`));
+}
+
+function generateNoisyCoalitionCandidatesOnSim(simGrid, simInitialPlacements, focusPlayerIndex, playerCount, gridSize, activeColors, invalidInitialPositions, noisyCells) {
+	const out = [];
+	for (let idx = 0; idx < playerCount; idx++) {
+		if (idx === focusPlayerIndex) continue;
+		const moves = generateNoisyCandidatesOnSim(simGrid, simInitialPlacements, idx, gridSize, activeColors, invalidInitialPositions, noisyCells);
+		for (const m of moves) out.push({ ...m, owner: idx });
+	}
+	return out;
+}
+
+function quiescenceEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts) {
+	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal, baseEnemyTotal } = opts;
+	const terminal = detectTerminalOutcome(simGridInput, simInitialPlacementsInput, focusPlayerIndex, gridSize, activeColors);
+	if (terminal) {
+		return { value: terminal.value, runaway: true, stepsToInfinity: terminal.stepsToInfinity, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
+	}
+	const noisyCells = collectNoisyCells(simGridInput, gridSize, cellExplodeThreshold);
+	if (depth === 0 || noisyCells.size === 0) {
+		const evalRes = evaluatePosition(simGridInput, focusPlayerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal, baseEnemyTotal });
+		return { value: evalRes.score, runaway: false, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
+	}
+	const simGrid = deepCloneGrid(simGridInput, gridSize);
+	const simInitial = simInitialPlacementsInput.slice();
+	const isFocusTurn = (moverIndex === focusPlayerIndex);
+	let candidates;
+	if (isFocusTurn) {
+		candidates = generateNoisyCandidatesOnSim(simGrid, simInitial, focusPlayerIndex, gridSize, activeColors, invalidInitialPositions, noisyCells).map(c => ({ ...c, owner: focusPlayerIndex }));
+	} else {
+		candidates = generateNoisyCoalitionCandidatesOnSim(simGrid, simInitial, focusPlayerIndex, playerCount, gridSize, activeColors, invalidInitialPositions, noisyCells);
+	}
+	if (!candidates.length) {
+		const evalRes = evaluatePosition(simGridInput, focusPlayerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal, baseEnemyTotal });
+		return { value: evalRes.score, runaway: false, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
+	}
+	const evaluated = [];
+	const maxExplosionsToAssumeLoop = gridSize * 3;
+	for (const cand of candidates) {
+		const applied = applyMoveAndSim(simGrid, simInitial, cand.owner, cand.r, cand.c, cand.isInitial, gridSize, maxCellValue, initialPlacementValue, activeColors, cellExplodeThreshold, maxExplosionsToAssumeLoop);
+		const evalRes = evaluatePosition(applied.grid, focusPlayerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal, baseEnemyTotal });
+		if (applied.runaway) {
+			const runawayVal = (cand.owner === focusPlayerIndex) ? Infinity : -Infinity;
+			evaluated.push({ cand, owner: cand.owner, value: runawayVal, resultGrid: applied.grid, simInitial: applied.simInitial });
+		} else {
+			evaluated.push({ cand, owner: cand.owner, value: evalRes.score, resultGrid: applied.grid, simInitial: applied.simInitial });
+		}
+	}
+	evaluated.sort((a, b) => isFocusTurn ? (b.value - a.value) : (a.value - b.value));
+	const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
+	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestSteps; let bestGrid = simGridInput; let branchCount = 0; let prunedCount = 0;
+	const prefersSteps = (value, candidateSteps) => {
+		if (typeof candidateSteps !== 'number') return false;
+		if (value === Infinity) return isFocusTurn ? (bestSteps === undefined || candidateSteps < bestSteps) : (bestSteps === undefined || candidateSteps > bestSteps);
+		if (value === -Infinity) return isFocusTurn ? (bestSteps === undefined || candidateSteps > bestSteps) : (bestSteps === undefined || candidateSteps < bestSteps);
+		return false;
+	};
+	for (let i = 0; i < evaluated.length; i++) {
+		const entry = evaluated[i];
+		if (entry.value === Infinity || entry.value === -Infinity) {
+			prunedCount += Math.max(0, evaluated.length - (i + 1));
+			return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid, branchCount: 1, prunedCount };
+		}
+		const child = quiescenceEvaluate(entry.resultGrid, entry.simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts);
+		branchCount += typeof child.branchCount === 'number' ? child.branchCount : 1;
+		prunedCount += typeof child.prunedCount === 'number' ? child.prunedCount : 0;
+		const value = child.value; const childSteps = typeof child.stepsToInfinity === 'number' ? child.stepsToInfinity + 1 : undefined;
+		if (isFocusTurn) {
+			if (value > bestValue || (value === bestValue && (value === Infinity || value === -Infinity) && prefersSteps(value, childSteps))) {
+				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
+			}
+			alpha = Math.max(alpha, bestValue);
+			if (alpha >= beta) {
+				prunedCount += Math.max(0, evaluated.length - (i + 1));
+				break;
+			}
+		} else {
+			if (value < bestValue || (value === bestValue && (value === Infinity || value === -Infinity) && prefersSteps(value, childSteps))) {
+				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
+			}
+			beta = Math.min(beta, bestValue);
+			if (beta <= alpha) {
+				prunedCount += Math.max(0, evaluated.length - (i + 1));
+				break;
+			}
+		}
+	}
+	const isInf = (bestValue === Infinity || bestValue === -Infinity);
+	return { value: bestValue, runaway: isInf, stepsToInfinity: isInf ? bestSteps : undefined, bestGrid, branchCount, prunedCount };
+}
+
 /**
  * Apply a move on a cloned grid (initial or increment) and simulate explosions.
  * @param {Array<Array<{value:number,player:string}>>} simGridInput - input simulated grid.
@@ -296,30 +437,15 @@ function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, mo
  * @returns {{value:number, runaway:boolean, stepsToInfinity?:number, bestGrid:Array<Array<{value:number,player:string}>>, branchCount:number, prunedCount:number}} evaluation score for focus player and plies to +/-Infinity if detected.
  */
 function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts) {
-	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal, baseEnemyTotal } = opts;
-	// Avoid terminal mis-detection during initial placement phase
-	const inInitialPlacementPhase = !simInitialPlacementsInput.every(v => v);
-	if (!inInitialPlacementPhase) {
-		let hasAny = false; let activePlayers = 0; let soleIdx = -1;
-		for (let r = 0; r < gridSize; r++) {
-			for (let c = 0; c < gridSize; c++) {
-				const owner = simGridInput[r][c].player;
-				if (owner !== '') {
-					hasAny = true;
-					const idx = activeColors().indexOf(owner);
-					if (idx !== -1) {
-						if (soleIdx === -1) { soleIdx = idx; activePlayers = 1; }
-						else if (idx !== soleIdx) { activePlayers = 2; r = gridSize; break; }
-					}
-				}
-			}
-		}
-		if (hasAny && activePlayers === 1) {
-			if (soleIdx === focusPlayerIndex) return { value: Infinity, runaway: true, stepsToInfinity: 1, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
-			return { value: -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
-		}
+	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal, baseEnemyTotal, quiescenceDepth } = opts;
+	const terminal = detectTerminalOutcome(simGridInput, simInitialPlacementsInput, focusPlayerIndex, gridSize, activeColors);
+	if (terminal) {
+		return { value: terminal.value, runaway: true, stepsToInfinity: terminal.stepsToInfinity, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
 	}
 	if (depth === 0) {
+		if (quiescenceDepth > 0 && collectNoisyCells(simGridInput, gridSize, cellExplodeThreshold).size > 0) {
+			return quiescenceEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, quiescenceDepth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts);
+		}
 		const evalRes = evaluatePosition(simGridInput, focusPlayerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal, baseEnemyTotal });
 		return { value: evalRes.score, runaway: false, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
 	}
@@ -435,6 +561,7 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
  * @param {number} config.initialPlacementValue - Value assigned on an initial placement.
  * @param {number} config.aiStrength - Total search depth (plies) including root.
  * @param {number} config.cellExplodeThreshold - Threshold at/above which a cell explodes (used for heuristics).
+ * @param {number} [config.quiescenceDepth=4] - Extra noisy-only plies searched at leaf nodes.
  * @param {boolean} [config.debug] - If true, attaches ordered candidate metadata for external UI/debug panels.
  * @param {boolean} [config.benchmark] - If true, attaches timing breakdowns for move computation.
  *
@@ -475,7 +602,8 @@ function buildBenchmarkInfo(bench, meta = {}) {
 
 export function computeAIMove(state, config) {
 	const { grid, initialPlacements, playerIndex, playerCount, gridSize, activeColors, invalidInitialPositions } = state;
-	const { maxCellValue, initialPlacementValue, aiStrength, cellExplodeThreshold, debug, benchmark } = config;
+	const { maxCellValue, initialPlacementValue, aiStrength, cellExplodeThreshold, debug, benchmark, quiescenceDepth: configQuiescenceDepth } = config;
+	const quiescenceDepth = (typeof configQuiescenceDepth === 'number') ? configQuiescenceDepth : 1;
 	const maxExplosionsToAssumeLoop = gridSize * 3;
 	const computationBudget = Math.pow(5, aiStrength);
 	const now = (typeof performance !== 'undefined' && performance.now) ? () => performance.now() : () => Date.now();
@@ -518,7 +646,7 @@ export function computeAIMove(state, config) {
 	}
 	mark('simulate');
 	const allCandidates = evaluated.slice();
-	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal: beforeTotal, baseEnemyTotal: beforeEnemyTotal };
+	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal: beforeTotal, baseEnemyTotal: beforeEnemyTotal, quiescenceDepth };
 	let effectiveDepth = 1;
 	let totalBranches = 0;
 	const depthCounts = [];

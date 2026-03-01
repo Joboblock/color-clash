@@ -362,7 +362,7 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 				queue.push({ r: ar, c: ac });
 			}
 		}
-		return { highlightSet, highlightCells: expandedHighlights, chains, chainOwnersByKey };
+		return { highlightSet, chains, chainOwnersByKey };
 	};
 	// Initial opponent-control map and early exit checks.
 	const initialState = buildHighlightState(simGrid);
@@ -452,43 +452,9 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 	while (true) {
 		const state = buildHighlightState(sim);
 		const markedSet = state.highlightSet;
-		try {
-			const adjCounts = [];
-			for (let r = 0; r < gridSize; r++) {
-				for (let c = 0; c < gridSize; c++) {
-					const cell = sim[r][c];
-					if (cell.player !== focusColor) continue;
-					const adj = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
-					let adjCount = 0;
-					for (const [ar, ac] of adj) {
-						if (ar < 0 || ar >= gridSize || ac < 0 || ac >= gridSize) continue;
-						if (markedSet.has(keyFor(ar, ac))) adjCount += 1;
-					}
-					adjCounts.push({ r, c, adjMarked: adjCount, value: cell.value });
-				}
-			}
-			console.log('[AI debug] stall adjacents', adjCounts);
-		} catch { /* ignore */ }
 		const sparseSquareBottomLeft = findOwnedSquare(sim, state);
 		if (sparseSquareBottomLeft) {
 			stallZeroReasons.push('2x2 owned safespace present');
-			try {
-				console.log('[AI debug] sparse 2x2 bottom-left', sparseSquareBottomLeft);
-				const bl = sparseSquareBottomLeft;
-				const squareCells = [
-					{ r: bl.r - 1, c: bl.c },
-					{ r: bl.r, c: bl.c },
-					{ r: bl.r - 1, c: bl.c + 1 },
-					{ r: bl.r, c: bl.c + 1 }
-				];
-				const squareInfo = squareCells
-					.filter(cell => cell.r >= 0 && cell.r < gridSize && cell.c >= 0 && cell.c < gridSize)
-					.map(cell => {
-						const current = sim[cell.r][cell.c];
-						return { r: cell.r, c: cell.c, value: current.value, player: current.player };
-					});
-				console.log('[AI debug] sparse 2x2 cells', squareInfo);
-			} catch { /* ignore */ }
 			forcedStop = true;
 			break;
 		}
@@ -523,14 +489,6 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 			const rawSources = getCellsToExplode(sim, gridSize, cellExplodeThreshold);
 			const sources = rawSources
 				.filter(cell => !isAdjacentToMarked(cell.row, cell.col, markedSet));
-			try {
-				console.log('[AI debug] stall explosions', {
-					iteration,
-					rawSources: rawSources.length,
-					safeSources: sources.length,
-					blocked: rawSources.length - sources.length
-				});
-			} catch { /* ignore */ }
 			if (!sources.length) break;
 			exploded = true;
 			explodeCellsOnce({
@@ -548,26 +506,18 @@ function computeStallTimeForGrid(simGrid, gridSize, activeColors, cellExplodeThr
 			}
 		}
 		if (forcedStop) break;
-		if (!exploded) {
-			try { console.log('[AI debug] stall explosions none'); } catch { /* ignore */ }
-			break;
-		}
+		if (!exploded) break;
 	}
 	// Clamp stall time for excessive depth.
 	if (stallTime > 20) {
 		stallZeroReasons.push('stallTime exceeded 20');
 	}
 	// Apply any stall-breaking exceptions and log all triggering conditions.
-	if (stallZeroReasons.length) {
-		try {
-			stallZeroReasons.forEach(reason => console.log(`[AI debug] stallTime=0: ${reason}`));
-		} catch { /* ignore */ }
-		stallTime = 0;
-	}
+	if (stallZeroReasons.length) stallTime = 0;
 	if (forcedStop) {
 		stallTime = 0;
 	}
-	return { stallTime, stallCells, highlightCells: initialState.highlightCells, chains: initialState.chains };
+	return { stallTime, stallCells };
 }
 
 /**
@@ -932,6 +882,7 @@ export function computeAIMove(state, config) {
 	const winning = allCandidates.filter(c => c.searchScore === Infinity);
 	let chosen;
 	let orderedCandidates = [];
+	let choicePool = [];
 	if (winning.length) {
 		const minPlies = Math.min(...winning.map(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY)));
 		const fastest = winning.filter(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY) === minPlies);
@@ -940,18 +891,21 @@ export function computeAIMove(state, config) {
 			const bPlies = typeof b.winPlies === 'number' ? b.winPlies : Number.POSITIVE_INFINITY;
 			return aPlies - bPlies;
 		});
-		chosen = fastest.length ? fastest[Math.floor(Math.random() * fastest.length)] : winning[0];
+		choicePool = fastest.length ? fastest : winning;
+		chosen = choicePool.length ? choicePool[Math.floor(Math.random() * choicePool.length)] : winning[0];
 	} else {
 		allCandidates.sort((a, b) => (b.netResult - a.netResult));
 		const bestNet = allCandidates[0] ? allCandidates[0].netResult : -Infinity;
 		const bestByNet = allCandidates.filter(t => t.netResult === bestNet);
 		let bestMoves = bestByNet.length ? bestByNet : [];
 		if (!bestMoves || !bestMoves.length) bestMoves = allCandidates.length ? [allCandidates[0]] : [];
+		choicePool = bestMoves.slice();
 		chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
 		orderedCandidates = allCandidates.slice();
 	}
 	// Only allow choosing moves that don't force a bad situation beyond the ai's horiton
 	let stallChosen = null;
+	let stallChoicePool = null;
 	const hasForcedWin = winning.length > 0;
 	const hasForcedLoss = allCandidates.length > 0 && allCandidates.every(c => c.searchScore === -Infinity);
 	if (!hasForcedWin && !hasForcedLoss) {
@@ -973,17 +927,20 @@ export function computeAIMove(state, config) {
 					if (stallResult.stallTime === 0) zeroCandidates.push(cand);
 				}
 				if (zeroCandidates.length) {
+					stallChoicePool = zeroCandidates;
 					stallChosen = zeroCandidates[Math.floor(Math.random() * zeroCandidates.length)];
 				}
 			}
 			if (stallChosen) {
 				chosen = stallChosen;
+				if (stallChoicePool && stallChoicePool.length) choicePool = stallChoicePool.slice();
 			}
 		}
 	} else if (orderedCandidates.length) {
 		const maxLossPlies = Math.max(...orderedCandidates.map(c => (typeof c.winPlies === 'number' ? c.winPlies : 0)));
 		const lossCandidates = orderedCandidates.filter(c => (typeof c.winPlies === 'number' ? c.winPlies : 0) === maxLossPlies);
 		if (lossCandidates.length) {
+			choicePool = lossCandidates.slice();
 			chosen = lossCandidates[Math.floor(Math.random() * lossCandidates.length)];
 		}
 	}
@@ -1034,6 +991,21 @@ export function computeAIMove(state, config) {
 				ordered.unshift(chosenEntry);
 			}
 		}
+		const getStallTimeForCandidate = (cand) => {
+			const gridToCheck = cand && (cand.finalGrid || cand.resultGrid);
+			if (!gridToCheck) return undefined;
+			return computeStallTimeForGrid(gridToCheck, gridSize, activeColors, cellExplodeThreshold, playerIndex, maxCellValue).stallTime;
+		};
+		let alternateMoves = [];
+		if (chosen && choicePool && choicePool.length) {
+			const chosenStallTime = getStallTimeForCandidate(chosen);
+			if (typeof chosenStallTime === 'number') {
+				alternateMoves = choicePool
+					.filter(c => !(c.r === chosen.r && c.c === chosen.c && c.isInitial === chosen.isInitial))
+					.filter(c => getStallTimeForCandidate(c) === chosenStallTime)
+					.map(c => ({ r: c.r, c: c.c, isInitial: c.isInitial }));
+			}
+		}
 		const steps = (chosen && chosen.searchScore === Infinity && typeof chosen.winPlies === 'number') ? chosen.winPlies : effectiveDepth;
 		const branches = totalBranches;
 		const endTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -1046,6 +1018,7 @@ export function computeAIMove(state, config) {
 				r: chosen.r, c: chosen.c, src: chosen.srcVal, expl: chosen.explosions, gain: chosen.searchScore, atk: chosen.atk, def: chosen.def, winPlies: chosen.winPlies
 			} : null,
 			ordered: ordered.map(c => ({ r: c.r, c: c.c, src: c.srcVal, expl: c.explosions, gain: c.searchScore, atk: c.atk, def: c.def, winPlies: c.winPlies })),
+			alternateMoves,
 			steps,
 			branches,
 			depthCounts,

@@ -3085,7 +3085,7 @@ document.addEventListener('DOMContentLoaded', () => {
         style.id = 'aiDebugStyles';
         style.textContent = `
             .ai-highlight { outline: 4px solid rgba(255,235,59,0.95) !important; box-shadow: 0 0 18px rgba(255,235,59,0.6); z-index:50; }
-            .ai-stall-highlight { outline: 3px solid rgba(0,200,255,0.95) !important; box-shadow: 0 0 16px rgba(0,200,255,0.55); z-index:45; }
+            .ai-highlight-alt { outline: 4px solid rgba(255,255,255,0.95) !important; box-shadow: 0 0 16px rgba(255,255,255,0.55); z-index:45; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,0.9) 0 6px, rgba(255,255,255,0.15) 6px 12px); background-blend-mode: screen; }
             #aiDebugPanel { position:fixed; right:12px; bottom:12px; background:rgba(18,18,18,0.88); color:#eaeaea; padding:10px 12px; font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial; font-size:13px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.45); max-width:420px; z-index:1000; }
             #aiDebugPanel h4 { margin:0 0 6px 0; font-size:13px; }
             #aiDebugPanel pre { margin:6px 0 0 0; white-space:pre-wrap; font-family:monospace; font-size:12px; max-height:240px; overflow:auto; }
@@ -3097,7 +3097,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const existing = document.getElementById('aiDebugPanel');
         if (existing) existing.remove();
         document.querySelectorAll('.ai-highlight').forEach(el => el.classList.remove('ai-highlight'));
-        document.querySelectorAll('.ai-stall-highlight').forEach(el => el.classList.remove('ai-stall-highlight'));
+        document.querySelectorAll('.ai-highlight-alt').forEach(el => el.classList.remove('ai-highlight-alt'));
     }
 
     function showAIDebugPanelWithResponse(info) {
@@ -3164,6 +3164,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (move) {
                 const aiCell = document.querySelector(`.cell[data-row="${move.r}"][data-col="${move.c}"]`);
                 if (aiCell) aiCell.classList.add('ai-highlight');
+            }
+            const alternateMoves = Array.isArray(result.debugInfo.alternateMoves) ? result.debugInfo.alternateMoves : [];
+            if (alternateMoves.length) {
+                alternateMoves.forEach(({ r, c }) => {
+                    const altCell = document.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
+                    if (!altCell || altCell.classList.contains('ai-highlight')) return;
+                    altCell.classList.add('ai-highlight-alt');
+                });
             }
             showAIDebugPanelWithResponse(result.debugInfo);
             if (move) {

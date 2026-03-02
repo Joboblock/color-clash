@@ -16,7 +16,7 @@ import {
 import { playerColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './src/game/palette.js';
 import { advanceTurnIndex } from './src/game/turnCalc.js';
 import { createOnlineTurnTracker } from './src/online/onlineTurn.js';
-import { computeAIMove } from './src/ai/engine.js';
+import { computeAIMove, getNoisyCells } from './src/ai/engine.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
 // Edge circles component
 import { createEdgeCircles, updateEdgeCirclesActive, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
@@ -3086,6 +3086,7 @@ document.addEventListener('DOMContentLoaded', () => {
         style.textContent = `
             .ai-highlight { outline: 4px solid rgba(255,235,59,0.95) !important; box-shadow: 0 0 18px rgba(255,235,59,0.6); z-index:50; }
             .ai-highlight-equal { outline: 4px dotted rgba(255,235,59,0.95) !important; box-shadow: 0 0 18px rgba(255,235,59,0.6); z-index:50; }
+            .ai-noisy { outline: 3px dashed rgba(255,87,34,0.9) !important; box-shadow: 0 0 12px rgba(255,87,34,0.5); z-index:45; }
             #aiDebugPanel { position:fixed; right:12px; bottom:12px; background:rgba(18,18,18,0.88); color:#eaeaea; padding:10px 12px; font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial; font-size:13px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.45); max-width:420px; z-index:1000; }
             #aiDebugPanel h4 { margin:0 0 6px 0; font-size:13px; }
             #aiDebugPanel pre { margin:6px 0 0 0; white-space:pre-wrap; font-family:monospace; font-size:12px; max-height:240px; overflow:auto; }
@@ -3098,6 +3099,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (existing) existing.remove();
         document.querySelectorAll('.ai-highlight').forEach(el => el.classList.remove('ai-highlight'));
         document.querySelectorAll('.ai-highlight-equal').forEach(el => el.classList.remove('ai-highlight-equal'));
+        document.querySelectorAll('.ai-noisy').forEach(el => el.classList.remove('ai-noisy'));
+    }
+
+    function markNoisyCells() {
+        ensureAIDebugStyles();
+        const noisy = getNoisyCells(grid, gridSize, cellExplodeThreshold);
+        if (!Array.isArray(noisy) || noisy.length === 0) return;
+        noisy.forEach(({ r, c }) => {
+            const cell = document.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
+            if (cell) cell.classList.add('ai-noisy');
+        });
     }
 
     function showAIDebugPanelWithResponse(info) {
@@ -3152,6 +3164,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const move = result.chosen;
         if (aiDebug && result.debugInfo) {
             clearAIDebugUI();
+            markNoisyCells();
             if (move) {
                 const aiCell = document.querySelector(`.cell[data-row="${move.r}"][data-col="${move.c}"]`);
                 if (aiCell) aiCell.classList.add('ai-highlight');

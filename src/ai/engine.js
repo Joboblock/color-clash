@@ -313,11 +313,12 @@ function findNearValChains(simGrid, gridSize, cellExplodeThreshold) {
 	return chains;
 }
 
-function collectChainAdjacencyNoisyCells(simGrid, gridSize, cellExplodeThreshold, chains) {
+function collectChainAdjacencyNoisyCells(simGrid, gridSize, cellExplodeThreshold, chains, chainOwners) {
 	const nearVal = cellExplodeThreshold - 1;
 	const targetNearMinus1 = nearVal - 1;
 	const targetNearMinus2 = nearVal - 2;
 	const noisy = new Set();
+	const hasMultipleChainOwners = chainOwners && chainOwners.size > 1;
 	for (const chain of chains) {
 		const adjacencyCounts = new Map();
 		for (const cell of chain.members) {
@@ -338,7 +339,13 @@ function collectChainAdjacencyNoisyCells(simGrid, gridSize, cellExplodeThreshold
 			if (!matchNearMinus1 && !matchNearMinus2) continue;
 			const opponentAdj = getAdjacentCoords(r, c, gridSize)
 				.map(([ar, ac]) => ({ r: ar, c: ac, cell: simGrid[ar][ac] }))
-				.filter(({ cell: adjCell }) => adjCell.player && adjCell.player !== chain.owner && adjCell.value === nearVal);
+				.filter(({ cell: adjCell }) => {
+					if (!adjCell.player || adjCell.value !== nearVal) return false;
+					if (hasMultipleChainOwners) {
+						return chainOwners.has(adjCell.player);
+					}
+					return adjCell.player !== chain.owner;
+				});
 			if (opponentAdj.length) {
 				noisy.add(key);
 				for (const adj of opponentAdj) noisy.add(`${adj.r},${adj.c}`);
@@ -367,9 +374,18 @@ function collectNoisyCells(simGrid, gridSize, cellExplodeThreshold) {
 		}
 	}
 	const chains = findNearValChains(simGrid, gridSize, cellExplodeThreshold);
-	const chainNoisy = collectChainAdjacencyNoisyCells(simGrid, gridSize, cellExplodeThreshold, chains);
+	const chainOwners = new Set(chains.map(chain => chain.owner));
+	const chainNoisy = collectChainAdjacencyNoisyCells(simGrid, gridSize, cellExplodeThreshold, chains, chainOwners);
 	for (const key of chainNoisy) noisy.add(key);
 	return noisy;
+}
+
+export function getNoisyCells(grid, gridSize, cellExplodeThreshold) {
+	const noisy = collectNoisyCells(grid, gridSize, cellExplodeThreshold);
+	return Array.from(noisy).map(key => {
+		const [r, c] = key.split(',').map(v => parseInt(v, 10));
+		return { r, c };
+	});
 }
 
 function generateNoisyCandidatesOnSim(simGrid, simInitialPlacements, playerIndex, gridSize, activeColors, invalidInitialPositions, noisyCells) {

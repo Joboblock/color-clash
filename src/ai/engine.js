@@ -279,83 +279,6 @@ function getAdjacentCoords(row, col, gridSize) {
 	].filter(([r, c]) => r >= 0 && r < gridSize && c >= 0 && c < gridSize);
 }
 
-function findNearValChains(simGrid, gridSize, cellExplodeThreshold) {
-	const nearVal = cellExplodeThreshold - 1;
-	const visited = new Set();
-	const chains = [];
-	for (let r = 0; r < gridSize; r++) {
-		for (let c = 0; c < gridSize; c++) {
-			const cell = simGrid[r][c];
-			if (!cell.player || cell.value !== nearVal) continue;
-			const key = `${r},${c}`;
-			if (visited.has(key)) continue;
-			const owner = cell.player;
-			const stack = [[r, c]];
-			const members = [];
-			const memberSet = new Set();
-			visited.add(key);
-			while (stack.length) {
-				const [cr, cc] = stack.pop();
-				members.push({ r: cr, c: cc });
-				memberSet.add(`${cr},${cc}`);
-				for (const [ar, ac] of getAdjacentCoords(cr, cc, gridSize)) {
-					const adj = simGrid[ar][ac];
-					if (adj.player !== owner || adj.value !== nearVal) continue;
-					const adjKey = `${ar},${ac}`;
-					if (visited.has(adjKey)) continue;
-					visited.add(adjKey);
-					stack.push([ar, ac]);
-				}
-			}
-			chains.push({ owner, members, memberSet });
-		}
-	}
-	return chains;
-}
-
-function collectChainAdjacencyNoisyCells(simGrid, gridSize, cellExplodeThreshold, chains, chainOwners) {
-	const nearVal = cellExplodeThreshold - 1;
-	const targetNearMinus1 = nearVal - 1;
-	const targetNearMinus2 = nearVal - 2;
-	const noisy = new Set();
-	const hasMultipleChainOwners = chainOwners && chainOwners.size > 1;
-	for (const chain of chains) {
-		const adjacencyCounts = new Map();
-		for (const cell of chain.members) {
-			for (const [ar, ac] of getAdjacentCoords(cell.r, cell.c, gridSize)) {
-				const key = `${ar},${ac}`;
-				if (chain.memberSet.has(key)) continue;
-				adjacencyCounts.set(key, (adjacencyCounts.get(key) || 0) + 1);
-			}
-		}
-		for (const [key, count] of adjacencyCounts.entries()) {
-			const [rStr, cStr] = key.split(',');
-			const r = parseInt(rStr, 10);
-			const c = parseInt(cStr, 10);
-			const cell = simGrid[r][c];
-			if (!cell.player || cell.player !== chain.owner) continue;
-			const matchNearMinus1 = (targetNearMinus1 > 0 && cell.value === targetNearMinus1 && count >= 2);
-			const matchNearMinus2 = (targetNearMinus2 > 0 && cell.value === targetNearMinus2 && count >= 3);
-			if (!matchNearMinus1 && !matchNearMinus2) continue;
-			const opponentAdj = getAdjacentCoords(r, c, gridSize)
-				.map(([ar, ac]) => ({ r: ar, c: ac, cell: simGrid[ar][ac] }))
-				.filter(({ cell: adjCell }) => {
-					if (!adjCell.player || adjCell.value !== nearVal) return false;
-					if (hasMultipleChainOwners) {
-						return chainOwners.has(adjCell.player);
-					}
-					return adjCell.player !== chain.owner;
-				});
-			if (opponentAdj.length) {
-				noisy.add(key);
-				for (const adj of opponentAdj) noisy.add(`${adj.r},${adj.c}`);
-				for (const member of chain.members) noisy.add(`${member.r},${member.c}`);
-			}
-		}
-	}
-	return noisy;
-}
-
 function collectNoisyCells(simGrid, gridSize, cellExplodeThreshold) {
 	const nearVal = cellExplodeThreshold - 1;
 	const noisy = new Set();
@@ -373,10 +296,6 @@ function collectNoisyCells(simGrid, gridSize, cellExplodeThreshold) {
 			}
 		}
 	}
-	const chains = findNearValChains(simGrid, gridSize, cellExplodeThreshold);
-	const chainOwners = new Set(chains.map(chain => chain.owner));
-	const chainNoisy = collectChainAdjacencyNoisyCells(simGrid, gridSize, cellExplodeThreshold, chains, chainOwners);
-	for (const key of chainNoisy) noisy.add(key);
 	return noisy;
 }
 

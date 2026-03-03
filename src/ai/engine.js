@@ -313,9 +313,73 @@ function findNearValChains(simGrid, gridSize, cellExplodeThreshold) {
 	return chains;
 }
 
+function combineNearValChains(simGrid, gridSize, cellExplodeThreshold, chains) {
+	if (!chains.length) return chains;
+	const nearVal = cellExplodeThreshold - 1;
+	const parent = chains.map((_, idx) => idx);
+	const find = (x) => {
+		let cur = x;
+		while (parent[cur] !== cur) cur = parent[cur];
+		let root = cur;
+		cur = x;
+		while (parent[cur] !== cur) {
+			const next = parent[cur];
+			parent[cur] = root;
+			cur = next;
+		}
+		return root;
+	};
+	const union = (a, b) => {
+		const ra = find(a);
+		const rb = find(b);
+		if (ra !== rb) parent[rb] = ra;
+	};
+	const chainByCell = new Map();
+	chains.forEach((chain, idx) => {
+		for (const member of chain.members) {
+			chainByCell.set(`${member.r},${member.c}`, idx);
+		}
+	});
+	for (let r = 0; r < gridSize; r++) {
+		for (let c = 0; c < gridSize; c++) {
+			const cell = simGrid[r][c];
+			if (!cell.player || cell.value >= nearVal) continue;
+			const requiredAdj = cellExplodeThreshold - cell.value;
+			if (requiredAdj < 2) continue;
+			const counts = new Map();
+			const adjacentChains = new Set();
+			for (const [ar, ac] of getAdjacentCoords(r, c, gridSize)) {
+				const chainIdx = chainByCell.get(`${ar},${ac}`);
+				if (typeof chainIdx !== 'number') continue;
+				adjacentChains.add(chainIdx);
+				counts.set(chainIdx, (counts.get(chainIdx) || 0) + 1);
+			}
+			if (adjacentChains.size <= 1) continue;
+			for (const [chainIdx, count] of counts.entries()) {
+				if (count < requiredAdj) continue;
+				for (const otherIdx of adjacentChains) {
+					if (otherIdx !== chainIdx) union(chainIdx, otherIdx);
+				}
+			}
+		}
+	}
+	const combined = new Map();
+	chains.forEach((chain, idx) => {
+		const root = find(idx);
+		if (!combined.has(root)) {
+			combined.set(root, { owners: new Set(), members: [] });
+		}
+		const target = combined.get(root);
+		for (const owner of chain.owners) target.owners.add(owner);
+		for (const member of chain.members) target.members.push(member);
+	});
+	return Array.from(combined.values());
+}
+
 function collectNoisyCells(simGrid, gridSize, cellExplodeThreshold) {
 	const noisy = new Set();
-	const chains = findNearValChains(simGrid, gridSize, cellExplodeThreshold);
+	const baseChains = findNearValChains(simGrid, gridSize, cellExplodeThreshold);
+	const chains = combineNearValChains(simGrid, gridSize, cellExplodeThreshold, baseChains);
 	for (const chain of chains) {
 		if (chain.owners.size <= 1) continue;
 		for (const member of chain.members) {

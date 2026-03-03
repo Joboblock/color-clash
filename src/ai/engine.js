@@ -405,7 +405,8 @@ function generateNoisyCoalitionCandidatesOnSim(simGrid, simInitialPlacements, fo
 }
 
 function quiescenceEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts) {
-	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal, baseEnemyTotal } = opts;
+	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal, baseEnemyTotal, quiescenceTracker } = opts;
+	if (quiescenceTracker && typeof quiescenceTracker.count === 'number') quiescenceTracker.count += 1;
 	const terminal = detectTerminalOutcome(simGridInput, simInitialPlacementsInput, focusPlayerIndex, gridSize, activeColors);
 	if (terminal) {
 		return { value: terminal.value, runaway: true, stepsToInfinity: terminal.stepsToInfinity, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
@@ -699,7 +700,15 @@ function buildBenchmarkInfo(bench, meta = {}) {
 export function computeAIMove(state, config) {
 	const { grid, initialPlacements, playerIndex, playerCount, gridSize, activeColors, invalidInitialPositions } = state;
 	const { maxCellValue, initialPlacementValue, aiStrength, cellExplodeThreshold, debug, benchmark, quiescenceDepth: configQuiescenceDepth } = config;
-	const quiescenceDepth = (typeof configQuiescenceDepth === 'number') ? configQuiescenceDepth : 1;
+	// Default quiescence depth is half the AI strength, rounded up. If a config value
+	// is supplied, cap it to this limit to avoid excessive noisy-only search.
+	const quiescenceLimit = Math.max(0, Math.ceil((typeof aiStrength === 'number' && aiStrength > 0) ? (aiStrength / 2) : 1));
+	let quiescenceDepth = quiescenceLimit;
+	if (typeof configQuiescenceDepth === 'number' && !Number.isNaN(configQuiescenceDepth)) {
+		// ensure integer >= 0 and not larger than limit
+		const supplied = Math.max(0, Math.floor(configQuiescenceDepth));
+		quiescenceDepth = Math.min(supplied, quiescenceLimit);
+	}
 	const maxExplosionsToAssumeLoop = gridSize * 3;
 	const computationBudget = Math.pow(5, aiStrength);
 	const now = (typeof performance !== 'undefined' && performance.now) ? () => performance.now() : () => Date.now();
@@ -742,7 +751,8 @@ export function computeAIMove(state, config) {
 	}
 	mark('simulate');
 	const allCandidates = evaluated.slice();
-	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal: beforeTotal, baseEnemyTotal: beforeEnemyTotal, quiescenceDepth };
+	const quiescenceTracker = { count: 0 };
+	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal: beforeTotal, baseEnemyTotal: beforeEnemyTotal, quiescenceDepth, quiescenceTracker };
 	let effectiveDepth = 1;
 	let totalBranches = 0;
 	const depthCounts = [];
@@ -876,6 +886,7 @@ export function computeAIMove(state, config) {
 			ordered: ordered.map(c => ({ r: c.r, c: c.c, src: c.srcVal, expl: c.explosions, gain: c.searchScore, atk: c.atk, def: c.def, winPlies: c.winPlies })),
 			steps,
 			branches,
+			quiescenceNodes: quiescenceTracker.count,
 			depthCounts,
 			elapsedMs,
 			stepsPerSec,

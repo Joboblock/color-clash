@@ -279,21 +279,47 @@ function getAdjacentCoords(row, col, gridSize) {
 	].filter(([r, c]) => r >= 0 && r < gridSize && c >= 0 && c < gridSize);
 }
 
-function collectNoisyCells(simGrid, gridSize, cellExplodeThreshold) {
+function findNearValChains(simGrid, gridSize, cellExplodeThreshold) {
 	const nearVal = cellExplodeThreshold - 1;
-	const noisy = new Set();
+	const visited = new Set();
+	const chains = [];
 	for (let r = 0; r < gridSize; r++) {
 		for (let c = 0; c < gridSize; c++) {
 			const cell = simGrid[r][c];
 			if (!cell.player || cell.value !== nearVal) continue;
-			for (const [ar, ac] of getAdjacentCoords(r, c, gridSize)) {
-				const adjCell = simGrid[ar][ac];
-				if (!adjCell.player || adjCell.value !== nearVal) continue;
-				if (adjCell.player !== cell.player) {
-					noisy.add(`${r},${c}`);
-					noisy.add(`${ar},${ac}`);
+			const key = `${r},${c}`;
+			if (visited.has(key)) continue;
+			const owners = new Set();
+			const stack = [[r, c]];
+			const members = [];
+			visited.add(key);
+			while (stack.length) {
+				const [cr, cc] = stack.pop();
+				const current = simGrid[cr][cc];
+				members.push({ r: cr, c: cc });
+				if (current.player) owners.add(current.player);
+				for (const [ar, ac] of getAdjacentCoords(cr, cc, gridSize)) {
+					const adj = simGrid[ar][ac];
+					if (!adj.player || adj.value !== nearVal) continue;
+					const adjKey = `${ar},${ac}`;
+					if (visited.has(adjKey)) continue;
+					visited.add(adjKey);
+					stack.push([ar, ac]);
 				}
 			}
+			chains.push({ owners, members });
+		}
+	}
+	return chains;
+}
+
+function collectNoisyCells(simGrid, gridSize, cellExplodeThreshold) {
+	const noisy = new Set();
+	const chains = findNearValChains(simGrid, gridSize, cellExplodeThreshold);
+	for (const chain of chains) {
+		if (chain.owners.size <= 1) continue;
+		for (const member of chain.members) {
+			noisy.add(`${member.r},${member.c}`);
 		}
 	}
 	return noisy;

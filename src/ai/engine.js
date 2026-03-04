@@ -292,11 +292,13 @@ function findNearValChains(simGrid, gridSize, cellExplodeThreshold) {
 			const owners = new Set();
 			const stack = [[r, c]];
 			const members = [];
+			const memberSet = new Set();
 			visited.add(key);
 			while (stack.length) {
 				const [cr, cc] = stack.pop();
 				const current = simGrid[cr][cc];
 				members.push({ r: cr, c: cc });
+				memberSet.add(`${cr},${cc}`);
 				if (current.player) owners.add(current.player);
 				for (const [ar, ac] of getAdjacentCoords(cr, cc, gridSize)) {
 					const adj = simGrid[ar][ac];
@@ -307,7 +309,20 @@ function findNearValChains(simGrid, gridSize, cellExplodeThreshold) {
 					stack.push([ar, ac]);
 				}
 			}
-			chains.push({ owners, members });
+			let hasTwoByTwo = false;
+			for (const member of members) {
+				const r0 = member.r;
+				const c0 = member.c;
+				if (
+					memberSet.has(`${r0 + 1},${c0}`)
+					&& memberSet.has(`${r0},${c0 + 1}`)
+					&& memberSet.has(`${r0 + 1},${c0 + 1}`)
+				) {
+					hasTwoByTwo = true;
+					break;
+				}
+			}
+			chains.push({ owners, members, hasTwoByTwo });
 		}
 	}
 	return chains;
@@ -356,7 +371,8 @@ function combineNearValChains(simGrid, gridSize, cellExplodeThreshold, chains) {
 			}
 			if (adjacentChains.size <= 1) continue;
 			for (const [chainIdx, count] of counts.entries()) {
-				if (count < requiredAdj) continue;
+				const bonus = chains[chainIdx]?.hasTwoByTwo ? 1 : 0;
+				if ((count + bonus) < requiredAdj) continue;
 				for (const otherIdx of adjacentChains) {
 					if (otherIdx !== chainIdx) union(chainIdx, otherIdx);
 				}

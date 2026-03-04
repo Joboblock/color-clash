@@ -1479,6 +1479,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let menuGridSizeVal = 0; // set after initial clamps
     const startBtn = document.getElementById('startBtn');
     const practiceBtn = document.getElementById('practiceBtn');
+    const importPracticeBtn = document.getElementById('practiceImportBtn');
     const menuColorCycle = document.getElementById('menuColorCycle');
     // playerNameInput now handled via PlayerNameFields component (fetched at instantiation)
     const gridDecBtn = document.getElementById('gridDec');
@@ -1594,6 +1595,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const mainMenu = document.getElementById('mainMenu');
         const header = mainMenu ? mainMenu.querySelector('.game-header-panel') : null;
         const startBtn = document.getElementById('startBtn');
+        const importBtn = document.getElementById('practiceImportBtn');
         const playerNameInput = document.getElementById('playerName');
         if (!mainMenu) return;
         // Persist mode for later checks (e.g., connection banner gating)
@@ -1609,6 +1611,7 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (mode === 'host') startBtn.textContent = 'Host';
             else startBtn.textContent = 'Start';
         }
+        if (importBtn) importBtn.style.display = (mode === 'practice') ? '' : 'none';
         if (playerNameInput) playerNameInput.style.display = (mode === 'host') ? '' : 'none';
         const aiStrengthTile = document.getElementById('aiStrengthTile');
         if (aiStrengthTile) aiStrengthTile.style.display = (mode === 'practice') ? '' : 'none';
@@ -1889,6 +1892,128 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    const extractClipboardGrid = (text) => {
+        if (typeof text !== 'string' || !text) return null;
+        const start = text.indexOf('[');
+        if (start < 0) return null;
+        let depth = 0;
+        for (let i = start; i < text.length; i++) {
+            const ch = text[i];
+            if (ch === '[') depth++;
+            if (ch === ']') depth--;
+            if (depth === 0) return text.slice(start, i + 1);
+        }
+        return null;
+    };
+
+    const parseClipboardCell = (cell, paletteLookup, colorsFound) => {
+        let value = null;
+        let color = null;
+        const consume = (entry) => {
+            if (typeof entry === 'number' && Number.isFinite(entry) && value === null) value = entry;
+            if (typeof entry === 'string' && color === null) color = entry;
+        };
+        if (Array.isArray(cell)) {
+            cell.forEach(consume);
+        } else if (cell && typeof cell === 'object') {
+            Object.values(cell).forEach(consume);
+        } else {
+            consume(cell);
+        }
+        const normalizedValue = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+        let player = '';
+        if (typeof color === 'string') {
+            const key = color.trim().toLowerCase();
+            if (paletteLookup.has(key)) {
+                player = paletteLookup.get(key);
+                colorsFound.add(player);
+            }
+        }
+        return { value: normalizedValue, player };
+    };
+
+    const parseClipboardGrid = (text) => {
+        const snippet = extractClipboardGrid(text);
+        if (!snippet) return null;
+        let parsed = null;
+        try {
+            parsed = Function(`"use strict"; return (${snippet});`)();
+        } catch {
+            try { parsed = JSON.parse(snippet); } catch { parsed = null; }
+        }
+        if (!Array.isArray(parsed)) return null;
+        const rows = parsed.filter(row => Array.isArray(row));
+        if (!rows.length) return null;
+        const maxCols = Math.max(...rows.map(row => row.length || 0));
+        if (!Number.isFinite(maxCols) || maxCols <= 0) return null;
+        const size = Math.max(rows.length, maxCols);
+        const paletteLookup = new Map(playerColors.map(color => [String(color).toLowerCase(), color]));
+        const colorsFound = new Set();
+        const normalized = Array.from({ length: size }, (_, r) => {
+            const row = rows[r] || [];
+            return Array.from({ length: size }, (_, c) => parseClipboardCell(row[c], paletteLookup, colorsFound));
+        });
+        return { grid: normalized, size, colorsFound };
+    };
+
+    const applyImportedPracticeGrid = (payload) => {
+        const fallbackPlayers = clampPlayers(menuPlayerCount, playerColors.length);
+        const fallbackSize = defaultGridSizeForPlayers(fallbackPlayers);
+        const parsed = payload || null;
+        let size = fallbackSize;
+        let p = fallbackPlayers;
+        let gridData = null;
+        if (parsed && Array.isArray(parsed.grid)) {
+            const foundCount = parsed.colorsFound ? parsed.colorsFound.size : 0;
+            p = Math.max(2, Math.min(playerColors.length, foundCount || 2));
+            size = parsed.size || fallbackSize;
+            gridData = parsed.grid;
+            const colors = playerColors.filter(color => parsed.colorsFound && parsed.colorsFound.has(color));
+            while (colors.length < p) {
+                const next = playerColors.find(color => !colors.includes(color));
+                if (!next) break;
+                colors.push(next);
+            }
+            gameColors = colors.slice(0, p);
+        } else {
+            gameColors = computeSelectedColors(p);
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        params.delete('menu');
+        params.set('players', String(p));
+        params.set('size', String(size));
+        try {
+            const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
+            if (aiStrengthTile) params.set('ai_depth', String(aiStrengthTile.getStrength()));
+        } catch { /* ignore */ }
+        const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+        window.history.pushState({ mode: 'ai', players: p, size }, '', newUrl);
+
+        if (mainMenu) mainMenu.classList.add('hidden');
+        practiceMode = true;
+        practiceFreePlay = true;
+        try {
+            const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
+            aiStrength = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
+        } catch { /* ignore */ }
+        recreateGrid(size, p);
+        createEdgeCircles(p, getEdgeCircleState());
+        if (gridData) {
+            for (let r = 0; r < gridSize; r++) {
+                for (let c = 0; c < gridSize; c++) {
+                    const cell = gridData[r] && gridData[r][c] ? gridData[r][c] : { value: 0, player: '' };
+                    grid[r][c] = { value: cell.value || 0, player: cell.player || '' };
+                }
+            }
+            initialPlacements = Array(playerCount).fill(true);
+        }
+        updateGrid();
+        clearAIDebugUI();
+        maybeTriggerAIMove();
+        requestFullscreenIfMobile();
+    };
+
     startBtn.addEventListener('click', async () => {
         // Determine current menu mode from button text
         const mode = startBtn.textContent.toLowerCase();
@@ -1906,6 +2031,7 @@ document.addEventListener('DOMContentLoaded', () => {
             gameColors = computeSelectedColors(p);
             if (mainMenu) mainMenu.classList.add('hidden');
             practiceMode = false;
+            practiceFreePlay = false;
             recreateGrid(s, p);
             createEdgeCircles(p, getEdgeCircleState());
             requestFullscreenIfMobile();
@@ -1933,6 +2059,7 @@ document.addEventListener('DOMContentLoaded', () => {
             gameColors = computeSelectedColors(p);
             if (mainMenu) mainMenu.classList.add('hidden');
             practiceMode = true;
+            practiceFreePlay = false;
             try {
                 const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
                 aiStrength = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
@@ -1973,6 +2100,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Hide menu and start practice mode immediately
             if (mainMenu) mainMenu.classList.add('hidden');
             practiceMode = true;
+            practiceFreePlay = false;
             // Apply the chosen AI depth immediately for this session
             try {
                 const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
@@ -1981,6 +2109,18 @@ document.addEventListener('DOMContentLoaded', () => {
             recreateGrid(s, p);
             // Enter fullscreen on mobile after hiding menu and setting up game
             requestFullscreenIfMobile();
+        });
+    }
+    if (importPracticeBtn) {
+        importPracticeBtn.addEventListener('click', async () => {
+            let text = '';
+            try {
+                text = await navigator.clipboard.readText();
+            } catch {
+                text = '';
+            }
+            const parsed = parseClipboardGrid(text);
+            applyImportedPracticeGrid(parsed);
         });
     }
     //#endregion
@@ -2033,7 +2173,7 @@ document.addEventListener('DOMContentLoaded', () => {
             playerBoxSlider,
             menuColorCycle,
             startBtn,
-            setPracticeMode: (val) => { practiceMode = val; },
+            setPracticeMode: (val) => { practiceMode = val; practiceFreePlay = false; },
             setAiStrength: (val) => { aiStrength = val; },
             setGameColors: (val) => { gameColors = val; },
             getMyJoinedRoom: () => myJoinedRoom,
@@ -2176,6 +2316,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Practice mode globals
     let practiceMode = isPracticeMode;
+    let practiceFreePlay = false;
     const humanPlayer = 0; // first selected color is player index 0
 
     function getEdgeCircleState() {
@@ -2201,6 +2342,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getFocusPlayerIndex() {
         if (onlineGameActive && Number.isInteger(myOnlineIndex) && myOnlineIndex >= 0) return myOnlineIndex;
+        if (practiceMode && practiceFreePlay) return currentPlayer;
         if (practiceMode && typeof humanPlayer !== 'undefined') return humanPlayer;
         return currentPlayer;
     }
@@ -2218,6 +2360,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function isLocalFocusTurn() {
         if (onlineGameActive && Number.isInteger(myOnlineIndex) && myOnlineIndex >= 0) return currentPlayer === myOnlineIndex;
+        if (practiceMode && practiceFreePlay) return true;
         if (practiceMode && typeof humanPlayer !== 'undefined') return currentPlayer === humanPlayer;
         return true;
     }
@@ -2342,7 +2485,7 @@ document.addEventListener('DOMContentLoaded', () => {
             handleOnlineMove(row, col, 'keyboard');
             return;
         }
-        if (typeof practiceMode !== 'undefined' && practiceMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
+        if (typeof practiceMode !== 'undefined' && practiceMode && !practiceFreePlay && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
         if (Number.isInteger(row) && Number.isInteger(col)) {
             e.preventDefault();
             handleClick(row, col);
@@ -2432,14 +2575,16 @@ document.addEventListener('DOMContentLoaded', () => {
         // If practice mode is enabled, force human to be first color and
         // set the current player to the human (so they control the first color)
         if (practiceMode) {
-            // Ensure humanPlayer index is valid for current playerCount
-            // (humanPlayer is 0 by design; defensive check)
-            currentPlayer = Math.min(humanPlayer, playerCount - 1);
-            if (!menuOpen) {
-                document.body.className = activeColors()[currentPlayer];
+            if (!practiceFreePlay) {
+                // Ensure humanPlayer index is valid for current playerCount
+                // (humanPlayer is 0 by design; defensive check)
+                currentPlayer = Math.min(humanPlayer, playerCount - 1);
+                if (!menuOpen) {
+                    document.body.className = activeColors()[currentPlayer];
+                }
             }
             updateGrid();
-            // Trigger AI if the first randomly chosen currentPlayer isn't the human
+            // Trigger AI or preview as appropriate
             maybeTriggerAIMove();
         }
     }
@@ -3064,13 +3209,62 @@ document.addEventListener('DOMContentLoaded', () => {
     const aiDebug = true;
     let aiStrength = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_depth')) || 4);
 
+    function showAIPreviewFor(playerIndex) {
+        if (isProcessing || gameWon) return;
+        const result = computeAIMove({
+            grid,
+            initialPlacements,
+            playerIndex,
+            playerCount,
+            gridSize,
+            activeColors,
+            invalidInitialPositions
+        }, {
+            maxCellValue,
+            initialPlacementValue,
+            aiStrength,
+            cellExplodeThreshold,
+            debug: aiDebug
+        });
+        if (!aiDebug || !result || !result.debugInfo) return;
+        clearAIDebugUI();
+        markNoisyCells();
+        const move = result.chosen;
+        if (move) {
+            const aiCell = document.querySelector(`.cell[data-row="${move.r}"][data-col="${move.c}"]`);
+            if (aiCell) aiCell.classList.add('ai-highlight');
+        }
+        if (move && result.debugInfo && result.debugInfo.chosen && typeof result.debugInfo.chosen.gain === 'number') {
+            const chosenGain = result.debugInfo.chosen.gain;
+            const ordered = Array.isArray(result.debugInfo.ordered) ? result.debugInfo.ordered : [];
+            ordered
+                .filter(entry => entry && typeof entry.gain === 'number' && entry.gain === chosenGain)
+                .forEach(entry => {
+                    if (entry.r === move.r && entry.c === move.c) return;
+                    const cell = document.querySelector(`.cell[data-row="${entry.r}"][data-col="${entry.c}"]`);
+                    if (cell) cell.classList.add('ai-highlight-equal');
+                });
+        }
+        showAIDebugPanelWithResponse(result.debugInfo);
+    }
+
 
     /**
      * In practice mode, trigger AI move if it's currently an AI player's turn.
      * @returns {void} may schedule aiMakeMoveFor with a short delay.
      */
     function maybeTriggerAIMove() {
-        if (!practiceMode || gameWon || isProcessing || currentPlayer === humanPlayer) return;
+        if (!practiceMode || gameWon || isProcessing) return;
+        if (practiceFreePlay) {
+            if (isAnyMenuOpen && isAnyMenuOpen()) return;
+            setTimeout(() => {
+                if (isProcessing || gameWon) return;
+                if (isAnyMenuOpen && isAnyMenuOpen()) return;
+                showAIPreviewFor(currentPlayer);
+            }, 200);
+            return;
+        }
+        if (currentPlayer === humanPlayer) return;
         if (isAnyMenuOpen && isAnyMenuOpen()) return;
         setTimeout(() => {
             if (isProcessing || gameWon || currentPlayer === humanPlayer) return;

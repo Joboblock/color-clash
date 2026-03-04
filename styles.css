@@ -411,6 +411,14 @@ body {
     align-items: flex-start;
 }
 
+.practice-action-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+}
+
 .control-row label {
     width: 95px;
     font-weight: 600;

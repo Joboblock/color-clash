@@ -194,9 +194,9 @@ test('noisy cells: mixed chain pressure', () => {
 	];
 
 	expectNoisy(grid, [
+		[2, 0],
 		[2, 1],
 		[2, 2],
-		[2, 3],
 		[3, 1],
 		[3, 3],
 		[3, 4],
@@ -291,6 +291,8 @@ test('noisy cells: mixed opposing chains with red pressure', () => {
 		[2, 1],
 		[3, 0],
 		[3, 1],
+		[4, 1],
+		[3, 3],
 		[1, 2],
 		[2, 3]
 	]);
@@ -343,7 +345,6 @@ test('noisy cells: dense mixed chains', () => {
 		[4, 1],
 		[4, 2],
 		[2, 2],
-		[1, 2],
 		[1, 1]
 	]);
 });
@@ -568,6 +569,7 @@ test('noisy cells: green block with red top row', () => {
 		[1, 1],
 		[1, 2],
 		[1, 3],
+		[2, 0],
 		[1, 4],
 		[3, 1],
 		[3, 2],

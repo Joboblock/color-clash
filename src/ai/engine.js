@@ -724,7 +724,7 @@ function buildBenchmarkInfo(bench, meta = {}) {
 
 export function computeAIMove(state, config) {
 	const { grid, initialPlacements, playerIndex, playerCount, gridSize, activeColors, invalidInitialPositions } = state;
-	const { maxCellValue, initialPlacementValue, aiStrength, cellExplodeThreshold, debug, benchmark, quiescenceDepth: configQuiescenceDepth } = config;
+	const { maxCellValue, initialPlacementValue, aiStrength, cellExplodeThreshold, debug, benchmark, quiescenceDepth: configQuiescenceDepth, onProgress, progressEvery } = config;
 	// Default quiescence depth is half the AI strength, rounded up. If a config value
 	// is supplied, cap it to this limit to avoid excessive noisy-only search.
 	const quiescenceLimit = Math.max(0, Math.ceil((typeof aiStrength === 'number' && aiStrength > 0) ? (aiStrength / 2) : 1));
@@ -736,6 +736,22 @@ export function computeAIMove(state, config) {
 	}
 	const maxExplosionsToAssumeLoop = gridSize * 3;
 	const computationBudget = Math.pow(5, aiStrength);
+	const progressInterval = (Number.isFinite(progressEvery) && progressEvery > 0) ? Math.floor(progressEvery) : 250;
+	let cumulativeBranches = 0;
+	let lastProgressReport = 0;
+	const reportProgress = (depth, force = false, done = false) => {
+		if (typeof onProgress !== 'function') return;
+		if (!force && (cumulativeBranches - lastProgressReport) < progressInterval) return;
+		lastProgressReport = cumulativeBranches;
+		const budget = Math.max(1, computationBudget || 1);
+		onProgress({
+			evaluated: cumulativeBranches,
+			budget,
+			depth,
+			progress: Math.min(1, cumulativeBranches / budget),
+			done
+		});
+	};
 	const now = (typeof performance !== 'undefined' && performance.now) ? () => performance.now() : () => Date.now();
 	const bench = benchmark ? { marks: {} } : null;
 	const mark = (label) => { if (bench) bench.marks[label] = now(); };
@@ -803,11 +819,15 @@ export function computeAIMove(state, config) {
 				cand.branchCount = evalRes.branchCount;
 				cand.prunedCount = evalRes.prunedCount;
 			}
-			totalBranches += (typeof cand.branchCount === 'number' ? cand.branchCount : 1);
+			const branchCount = (typeof cand.branchCount === 'number' ? cand.branchCount : 1);
+			totalBranches += branchCount;
+			cumulativeBranches += branchCount;
 			totalPruned += (typeof cand.prunedCount === 'number' ? cand.prunedCount : 0);
+			reportProgress(depth);
 		}
 		depthCounts.push({ depth, count: totalBranches, pruned: totalPruned });
 		effectiveDepth = depth;
+		reportProgress(depth, true);
 		const winPlies = allCandidates
 			.filter(c => c.searchScore === Infinity && typeof c.winPlies === 'number')
 			.map(c => c.winPlies);
@@ -822,6 +842,7 @@ export function computeAIMove(state, config) {
 			}
 		}
 	}
+	reportProgress(effectiveDepth, true, true);
 	mark('search');
 	for (const cand of allCandidates) {
 		if (cand.runaway && cand.searchScore === Infinity) {

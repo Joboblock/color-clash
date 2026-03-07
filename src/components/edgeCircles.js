@@ -173,11 +173,20 @@ export function createEdgeCircles(playerCount, state = {}) {
         const d = document.createElement('div');
         d.className = 'edge-circle ' + posClass;
         d.dataset.playerIndex = String(idx);
+        d.setAttribute('role', 'progressbar');
+        d.setAttribute('aria-valuemin', '0');
+        d.setAttribute('aria-valuemax', '100');
+        d.setAttribute('aria-valuenow', '0');
+        d.setAttribute('aria-label', `Player ${idx + 1} progress`);
         const key = ac[idx % ac.length];
         const base = colorHex(key);
         d.style.setProperty('--circle-color', base);
         // Dim inactive circle color: mix original toward black (grayscale 0) by 25%
         d.style.setProperty('--circle-color-dim', mixTowardGray(base, 0, 0.25));
+        const progress = document.createElement('div');
+        progress.className = 'edge-circle-progress';
+        progress.setAttribute('aria-hidden', 'true');
+        d.appendChild(progress);
         container.appendChild(d);
     });
     document.body.appendChild(container);
@@ -187,6 +196,11 @@ export function createEdgeCircles(playerCount, state = {}) {
     requestAnimationFrame(() => {
         try {
             updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors);
+        } catch { /* ignore */ }
+        try {
+            if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+                window.dispatchEvent(new CustomEvent('edgecircles:active'));
+            }
         } catch { /* ignore */ }
     });
 }
@@ -236,4 +250,41 @@ export function updateEdgeCirclesActive(currentPlayer = 0, onlineGameActive = fa
             document.body.style.backgroundColor = '';
         }
     } catch { /* no-op */ }
+
+}
+
+/**
+ * Update per-player edge circle progress (0..1), used for AI/timer status.
+ * @param {number} playerIndex - player index whose edge circle to update.
+ * @param {number|null} progress - 0..1 progress value, or null to clear.
+ * @param {object} [opts]
+ * @param {string} [opts.label] - aria label for screen readers.
+ * @param {string} [opts.valueText] - aria-valuetext override.
+ * @param {string} [opts.kind] - arbitrary progress type for future uses.
+ * @returns {void}
+ */
+export function updateEdgeCircleProgress(playerIndex, progress, opts = {}) {
+    const container = document.getElementById('edgeCirclesContainer');
+    if (!container) return;
+    const circle = container.querySelector(`.edge-circle[data-player-index="${playerIndex}"]`);
+    if (!circle) return;
+    if (opts.kind) circle.dataset.progressKind = opts.kind;
+    if (typeof opts.label === 'string') circle.setAttribute('aria-label', opts.label);
+
+    if (progress === null || typeof progress === 'undefined') {
+        circle.style.setProperty('--progress-hole', '0%');
+        circle.classList.remove('progressing', 'progress-complete');
+        circle.setAttribute('aria-valuenow', '0');
+        circle.removeAttribute('aria-valuetext');
+        return;
+    }
+    const normalized = Math.max(0, Math.min(1, progress));
+    const percent = Math.round(normalized * 100);
+    const hole = Math.round(normalized * 1000) / 10;
+    circle.style.setProperty('--progress-hole', `${hole}%`);
+    circle.setAttribute('aria-valuenow', String(percent));
+    if (typeof opts.valueText === 'string') circle.setAttribute('aria-valuetext', opts.valueText);
+    else circle.removeAttribute('aria-valuetext');
+    circle.classList.toggle('progressing', normalized > 0 && normalized < 1);
+    circle.classList.toggle('progress-complete', normalized >= 1);
 }

@@ -19,7 +19,7 @@ import { createOnlineTurnTracker } from './src/online/onlineTurn.js';
 import { computeAIMove, getNoisyCells } from './src/ai/engine.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
 // Edge circles component
-import { createEdgeCircles, updateEdgeCirclesActive, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
+import { createEdgeCircles, updateEdgeCirclesActive, updateEdgeCircleProgress, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
 // Navigation and routing
 import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
 import { APP_VERSION } from './src/version.js';
@@ -633,7 +633,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const _turnColor = activeColors()[currentPlayer];
         document.body.className = _turnColor;
-        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    try { syncEdgeCircleProgressForTurn(); } catch { /* ignore */ }
         // Keep cell highlighting in sync with the current turn.
         // (Online mode doesn't use advanceSeqTurn(), so we refresh here.)
         try { updateGrid(); } catch { /* ignore */ }
@@ -2330,6 +2331,38 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    function getAIPlayerSet() {
+        if (!practiceMode || practiceFreePlay) return new Set();
+        const hp = (typeof humanPlayer === 'number') ? humanPlayer : 0;
+        const out = new Set();
+        const count = Math.max(0, Number(playerCount) || 0);
+        for (let i = 0; i < count; i++) {
+            if (i !== hp) out.add(i);
+        }
+        return out;
+    }
+
+    function syncEdgeCircleProgressForTurn() {
+        const count = Math.max(0, Number(playerCount) || 0);
+        if (!count) return;
+        const aiPlayers = getAIPlayerSet();
+        for (let i = 0; i < count; i++) {
+            if (!aiPlayers.has(i)) {
+                updateEdgeCircleProgress(i, 1, { label: 'Progress', valueText: '100%', kind: 'ai' });
+            } else {
+                updateEdgeCircleProgress(i, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' });
+            }
+        }
+    }
+
+    try {
+        if (typeof window !== 'undefined') {
+            window.addEventListener('edgecircles:active', () => {
+                try { syncEdgeCircleProgressForTurn(); } catch { /* ignore */ }
+            });
+        }
+    } catch { /* ignore */ }
+
     // Set gameColors based on initial playerCount (needed for edge circles to display correct count)
     if (hasPlayersOrSize) {
         gameColors = computeSelectedColors(playerCount);
@@ -2557,7 +2590,8 @@ document.addEventListener('DOMContentLoaded', () => {
             document.body.className = activeColors()[currentPlayer];
         }
         // Sync active circle emphasis after grid rebuild
-        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    try { syncEdgeCircleProgressForTurn(); } catch { /* ignore */ }
 
         // Reflect actual grid size in display value while menu is present
         menuGridSizeVal = Math.max(3, newSize);
@@ -2617,7 +2651,8 @@ document.addEventListener('DOMContentLoaded', () => {
             saveFocusForPlayer(prevPlayer);
         }
         document.body.className = activeColors()[currentPlayer];
-        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    try { syncEdgeCircleProgressForTurn(); } catch { /* ignore */ }
         if (!onlineGameActive && !(typeof practiceMode !== 'undefined' && practiceMode)) clearCellFocus();
         updateGrid();
         restorePlayerFocus();
@@ -3222,9 +3257,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return null;
         }
         aiWorker.addEventListener('message', (ev) => {
-            const { requestId, result, error } = ev.data || {};
+            const { requestId, result, error, progress } = ev.data || {};
             const pending = aiWorkerRequests.get(requestId);
             if (!pending) return;
+            if (progress && typeof pending.onProgress === 'function') {
+                pending.onProgress(progress);
+                return;
+            }
             aiWorkerRequests.delete(requestId);
             if (error) {
                 pending.reject(new Error(error));
@@ -3241,7 +3280,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return aiWorker;
     }
 
-    function computeAIMoveAsync(state, config) {
+    function computeAIMoveAsync(state, config, progressOpts = {}) {
         const worker = getAIWorker();
         if (!worker) {
             return new Promise((resolve) => {
@@ -3258,9 +3297,32 @@ document.addEventListener('DOMContentLoaded', () => {
             colors: state.activeColors(),
             invalidInitialPositions: state.invalidInitialPositions
         };
+        const progressMeta = (progressOpts && progressOpts.enabled)
+            ? { playerIndex: progressOpts.playerIndex, label: progressOpts.label, kind: progressOpts.kind }
+            : null;
         return new Promise((resolve, reject) => {
-            aiWorkerRequests.set(requestId, { resolve, reject });
-            worker.postMessage({ requestId, state: payload, config });
+            const onProgress = progressMeta
+                ? (info) => {
+                    const percent = Math.max(0, Math.min(1, typeof info.progress === 'number' ? info.progress : 0));
+                    const valueText = (typeof info.evaluated === 'number' && typeof info.budget === 'number')
+                        ? `${info.evaluated}/${info.budget}`
+                        : `${Math.round(percent * 100)}%`;
+                    updateEdgeCircleProgress(progressMeta.playerIndex, percent, {
+                        label: progressMeta.label || 'Progress',
+                        valueText,
+                        kind: progressMeta.kind
+                    });
+                }
+                : null;
+            aiWorkerRequests.set(requestId, { resolve, reject, onProgress });
+            if (progressMeta) {
+                updateEdgeCircleProgress(progressMeta.playerIndex, 0, {
+                    label: progressMeta.label || 'Progress',
+                    valueText: '0%',
+                    kind: progressMeta.kind
+                });
+            }
+            worker.postMessage({ requestId, state: payload, config, progress: progressMeta ? { enabled: true } : { enabled: false } });
         });
     }
 
@@ -3281,10 +3343,19 @@ document.addEventListener('DOMContentLoaded', () => {
             aiStrength,
             cellExplodeThreshold,
             debug: aiDebug
-        }).catch(() => null);
-        if (!result) return;
-        if (isProcessing || gameWon) return;
-        if (currentPlayer !== snapshotPlayer) return;
+        }, { enabled: false }).catch(() => null);
+        if (!result) {
+            updateEdgeCircleProgress(snapshotPlayer, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' });
+            return;
+        }
+        if (isProcessing || gameWon) {
+            updateEdgeCircleProgress(snapshotPlayer, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' });
+            return;
+        }
+        if (currentPlayer !== snapshotPlayer) {
+            updateEdgeCircleProgress(snapshotPlayer, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' });
+            return;
+        }
         if (!aiDebug || !result || !result.debugInfo) return;
         clearAIDebugUI();
         markNoisyCells();
@@ -3413,13 +3484,30 @@ document.addEventListener('DOMContentLoaded', () => {
             initialPlacementValue,
             aiStrength,
             cellExplodeThreshold,
-            debug: aiDebug
+            debug: aiDebug,
+            progressEvery: 250
+        }, {
+            enabled: true,
+            playerIndex: snapshotPlayer,
+            label: 'AI thinking',
+            kind: 'ai'
         }).catch(() => null);
         if (!result) return;
         if (isProcessing || gameWon) return;
         if (currentPlayer !== snapshotPlayer) return;
-        if (result.scheduleGameEnd) { scheduleGameEnd(); return; }
-        if (result.requireAdvanceTurn) { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; advanceSeqTurn(); return; }
+        if (result.scheduleGameEnd) {
+            updateEdgeCircleProgress(snapshotPlayer, 1, { label: 'AI thinking', valueText: '100%', kind: 'ai' });
+            scheduleGameEnd();
+            setTimeout(() => updateEdgeCircleProgress(snapshotPlayer, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' }), 200);
+            return;
+        }
+        if (result.requireAdvanceTurn) {
+            updateEdgeCircleProgress(snapshotPlayer, 1, { label: 'AI thinking', valueText: '100%', kind: 'ai' });
+            if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
+            advanceSeqTurn();
+            setTimeout(() => updateEdgeCircleProgress(snapshotPlayer, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' }), 200);
+            return;
+        }
         const move = result.chosen;
         if (aiDebug && result.debugInfo) {
             clearAIDebugUI();
@@ -3456,6 +3544,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         if (move) handleClick(move.r, move.c); else { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; advanceSeqTurn(); }
+        setTimeout(() => {
+            updateEdgeCircleProgress(snapshotPlayer, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' });
+        }, 200);
     }
 
     //#endregion

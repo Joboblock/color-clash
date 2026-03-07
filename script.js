@@ -3208,13 +3208,69 @@ document.addEventListener('DOMContentLoaded', () => {
     // AI parameters (core logic now in src/ai/engine.js)
     const aiDebug = true;
     let aiStrength = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_strength')) || 4);
+    let aiWorker = null;
+    let aiWorkerSeq = 0;
+    const aiWorkerRequests = new Map();
 
-    function showAIPreviewFor(playerIndex) {
+    function getAIWorker() {
+        if (aiWorker) return aiWorker;
+        if (typeof Worker === 'undefined') return null;
+        try {
+            aiWorker = new Worker(new URL('./src/ai/aiWorker.js', import.meta.url), { type: 'module' });
+        } catch {
+            aiWorker = null;
+            return null;
+        }
+        aiWorker.addEventListener('message', (ev) => {
+            const { requestId, result, error } = ev.data || {};
+            const pending = aiWorkerRequests.get(requestId);
+            if (!pending) return;
+            aiWorkerRequests.delete(requestId);
+            if (error) {
+                pending.reject(new Error(error));
+            } else {
+                pending.resolve(result);
+            }
+        });
+        aiWorker.addEventListener('error', (err) => {
+            for (const [id, pending] of aiWorkerRequests.entries()) {
+                pending.reject(err);
+                aiWorkerRequests.delete(id);
+            }
+        });
+        return aiWorker;
+    }
+
+    function computeAIMoveAsync(state, config) {
+        const worker = getAIWorker();
+        if (!worker) {
+            return new Promise((resolve) => {
+                setTimeout(() => resolve(computeAIMove(state, config)), 0);
+            });
+        }
+        const requestId = ++aiWorkerSeq;
+        const payload = {
+            grid: state.grid,
+            initialPlacements: state.initialPlacements,
+            playerIndex: state.playerIndex,
+            playerCount: state.playerCount,
+            gridSize: state.gridSize,
+            colors: state.activeColors(),
+            invalidInitialPositions: state.invalidInitialPositions
+        };
+        return new Promise((resolve, reject) => {
+            aiWorkerRequests.set(requestId, { resolve, reject });
+            worker.postMessage({ requestId, state: payload, config });
+        });
+    }
+
+    async function showAIPreviewFor(playerIndex) {
         if (isProcessing || gameWon) return;
-        const result = computeAIMove({
+        const snapshotPlayer = playerIndex;
+        const result = await computeAIMoveAsync({
             grid,
             initialPlacements,
-            playerIndex,
+            playerIndex: snapshotPlayer,
             playerCount,
             gridSize,
             activeColors,
@@ -3225,7 +3281,10 @@ document.addEventListener('DOMContentLoaded', () => {
             aiStrength,
             cellExplodeThreshold,
             debug: aiDebug
-        });
+        }).catch(() => null);
+        if (!result) return;
+        if (isProcessing || gameWon) return;
+        if (currentPlayer !== snapshotPlayer) return;
         if (!aiDebug || !result || !result.debugInfo) return;
         clearAIDebugUI();
         markNoisyCells();
@@ -3338,12 +3397,13 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.appendChild(panel);
     }
 
-    function aiMakeMoveFor(playerIndex) {
+    async function aiMakeMoveFor(playerIndex) {
         if (isProcessing || gameWon) return;
-        const result = computeAIMove({
+        const snapshotPlayer = playerIndex;
+        const result = await computeAIMoveAsync({
             grid,
             initialPlacements,
-            playerIndex,
+            playerIndex: snapshotPlayer,
             playerCount,
             gridSize,
             activeColors,
@@ -3354,7 +3414,10 @@ document.addEventListener('DOMContentLoaded', () => {
             aiStrength,
             cellExplodeThreshold,
             debug: aiDebug
-        });
+        }).catch(() => null);
+        if (!result) return;
+        if (isProcessing || gameWon) return;
+        if (currentPlayer !== snapshotPlayer) return;
         if (result.scheduleGameEnd) { scheduleGameEnd(); return; }
         if (result.requireAdvanceTurn) { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; advanceSeqTurn(); return; }
         const move = result.chosen;

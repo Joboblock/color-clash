@@ -1369,7 +1369,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Detect practice mode via URL param
     const urlParams = new URLSearchParams(window.location.search);
     // Practice mode is enabled if any AI-related parameter is present in the URL
-    const isPracticeMode = urlParams.has('ai_depth');
+    const isPracticeMode = urlParams.has('ai_strength');
 
     /**
      * Broad mobile detection using feature hints (coarse pointer, touch points, UA hints).
@@ -1985,7 +1985,7 @@ document.addEventListener('DOMContentLoaded', () => {
         params.set('size', String(size));
         try {
             const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
-            if (aiStrengthTile) params.set('ai_depth', String(aiStrengthTile.getStrength()));
+            if (aiStrengthTile) params.set('ai_strength', String(aiStrengthTile.getStrength()));
         } catch { /* ignore */ }
         const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
         window.history.pushState({ mode: 'ai', players: p, size }, '', newUrl);
@@ -2052,7 +2052,7 @@ document.addEventListener('DOMContentLoaded', () => {
             params.set('size', String(s));
             try {
                 const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
-                if (aiStrengthTile) params.set('ai_depth', String(aiStrengthTile.getStrength()));
+                if (aiStrengthTile) params.set('ai_strength', String(aiStrengthTile.getStrength()));
             } catch { /* ignore */ }
             const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
             window.history.pushState({ mode: 'ai', players: p, size: s }, '', newUrl);
@@ -2088,7 +2088,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Set AI strength parameter from the preview value (1..5)
             try {
                 const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
-                if (aiStrengthTile) params.set('ai_depth', String(aiStrengthTile.getStrength()));
+                if (aiStrengthTile) params.set('ai_strength', String(aiStrengthTile.getStrength()));
             } catch { /* ignore */ }
             const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
             // push a new history entry so Back returns to the menu instead of previous/blank
@@ -3207,7 +3207,7 @@ document.addEventListener('DOMContentLoaded', () => {
     //#region Practice / AI helpers (dataRespect + debug)
     // AI parameters (core logic now in src/ai/engine.js)
     const aiDebug = true;
-    let aiStrength = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_depth')) || 4);
+    let aiStrength = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_strength')) || 4);
 
     function showAIPreviewFor(playerIndex) {
         if (isProcessing || gameWon) return;

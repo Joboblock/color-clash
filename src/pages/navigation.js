@@ -22,7 +22,7 @@ export function getMenuParam() {
 
 /**
  * Set the menu parameter in the URL, updating history stack.
- * Removes game-only params (players, size, ai_depth) to keep URLs clean in menu states.
+ * Removes game-only params (players, size, ai_strength) to keep URLs clean in menu states.
  * @param {string} menuKey - Menu identifier to set in URL.
  * @param {boolean} [push=true] - If `true`, pushes a new history entry; otherwise replaces current.
  * @returns {void}
@@ -30,11 +30,11 @@ export function getMenuParam() {
 export function setMenuParam(menuKey, push = true) {
     const params = new URLSearchParams(window.location.search);
     params.set('menu', menuKey);
-    // In any menu state, remove game-only params (players, size, ai_depth) so URL stays clean.
+    // In any menu state, remove game-only params (players, size, ai_strength) so URL stays clean.
     if (menuKey !== null) {
         params.delete('players');
         params.delete('size');
-        params.delete('ai_depth');
+        params.delete('ai_strength');
     }
     // Preserve room key param if present while navigating menus
     const existingKey = (new URLSearchParams(window.location.search)).get('key');
@@ -143,7 +143,7 @@ export function applyStateFromUrl(ctx) {
         ctx.showMenuFor(typed || 'first');
         try { ctx.updateRandomTip(); } catch { /* ignore */ }
         // Reflect AI strength to UI if present
-        const ad = parseInt(params.get('ai_depth') || '', 10);
+        const ad = parseInt(params.get('ai_strength') || '', 10);
         if (!Number.isNaN(ad) && ad >= 1) {
             try {
                 const aiStrengthTile = ctx.pageRegistry.get('main')?.components?.aiStrengthTile;
@@ -167,9 +167,9 @@ export function applyStateFromUrl(ctx) {
     if (onlineMenu) ctx.setHidden(onlineMenu, true);
     // Enable practice mode if any AI-related parameter exists in the URL
     if (ctx.setPracticeMode) {
-        ctx.setPracticeMode(params.has('ai_depth'));
+        ctx.setPracticeMode(params.has('ai_strength'));
     }
-    const ad = parseInt(params.get('ai_depth') || '', 10);
+    const ad = parseInt(params.get('ai_strength') || '', 10);
     if (!Number.isNaN(ad) && ad >= 1) {
         try {
             if (ctx.setAiStrength) ctx.setAiStrength(Math.max(1, ad));

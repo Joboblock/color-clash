@@ -740,8 +740,8 @@ export function computeAIMove(state, config) {
 	let cumulativeBranches = 0;
 	let lastProgressReport = 0;
 	// Two-phase progress tracking:
-	//   Phase 1 (E < B): linear 0–30%
-	//   Phase 2 (overshoot): remaining 70% proportional to overshoot depth completion
+	//   Phase 1 (E < B): linear 0–50%
+	//   Phase 2 (overshoot): remaining 50% proportional to overshoot depth completion
 	const progressCtx = { prevDepthCumulative: 0, currentDepthTotal: 0 };
 	let budgetExceededDepth = null;
 	const reportProgress = (depth, force = false, done = false) => {
@@ -751,25 +751,23 @@ export function computeAIMove(state, config) {
 		const budget = Math.max(1, computationBudget || 1);
 		let progress;
 		let phase = 'phase1';
-		let debugMeta;
 		if (done) {
 			phase = 'done';
 			progress = 1;
 		} else if (cumulativeBranches <= budget) {
-			// Phase 1: linear 0–30%
-			progress = 0.3 * Math.min(1, cumulativeBranches / budget);
+			// Phase 1: linear 0–50% for budget
+			progress = 0.5 * Math.min(1, cumulativeBranches / budget);
 		} else {
 			phase = 'overshoot';
-			// Phase 2: overshoot — E > B
-			const eLessThanD = progressCtx.prevDepthCumulative; // E_<d : nodes from previous depths
-			const budgetInsideDepth = Math.max(0, budget - eLessThanD); // portion of depth d covered by budget
-			const tD = Math.max(1, progressCtx.currentDepthTotal); // T_d : total nodes at depth d
-			const remaining = Math.max(1, tD - budgetInsideDepth); // remaining nodes beyond budget
-			const eD = cumulativeBranches - eLessThanD; // E_d : nodes evaluated at depth d so far
-			const overshootDone = Math.max(0, eD - budgetInsideDepth); // nodes past the budget boundary
-			const overshootProgress = Math.min(1, overshootDone / remaining);
-			progress = 0.3 + 0.7 * overshootProgress;
-			debugMeta = { eLessThanD, budgetInsideDepth, tD, remaining, eD, overshootDone, overshootProgress };
+			// Overshoot: remaining 50% band
+			const evaluatedBeforeDepth = progressCtx.prevDepthCumulative; // nodes from previous depths
+			const budgetCoveredInDepth = Math.max(0, budget - evaluatedBeforeDepth); // portion of this depth covered by budget
+			const depthTotalNodes = Math.max(1, progressCtx.currentDepthTotal); // total nodes at this depth
+			const depthRemainingBeyondBudget = Math.max(1, depthTotalNodes - budgetCoveredInDepth); // nodes beyond budget
+			const evaluatedAtDepth = cumulativeBranches - evaluatedBeforeDepth; // nodes evaluated at this depth so far
+			const overshootEvaluated = Math.max(0, evaluatedAtDepth - budgetCoveredInDepth); // nodes past budget boundary
+			const overshootRatio = Math.min(1, overshootEvaluated / depthRemainingBeyondBudget);
+			progress = 0.5 + 0.5 * overshootRatio;
 		}
 		try {
 			console.debug('[AI progress]', {
@@ -780,7 +778,6 @@ export function computeAIMove(state, config) {
 				progress: Math.min(1, Math.max(0, progress)),
 				prevDepthCumulative: progressCtx.prevDepthCumulative,
 				currentDepthTotal: progressCtx.currentDepthTotal,
-				...debugMeta
 			});
 		} catch { /* ignore debug logging issues */ }
 		onProgress({

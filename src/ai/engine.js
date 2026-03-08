@@ -743,6 +743,7 @@ export function computeAIMove(state, config) {
 	//   Phase 1 (E < B): linear 0–30%
 	//   Phase 2 (overshoot): remaining 70% proportional to overshoot depth completion
 	const progressCtx = { prevDepthCumulative: 0, currentDepthTotal: 0 };
+	let budgetExceededDepth = null;
 	const reportProgress = (depth, force = false, done = false) => {
 		if (typeof onProgress !== 'function') return;
 		if (!force && (cumulativeBranches - lastProgressReport) < progressInterval) return;
@@ -833,13 +834,13 @@ export function computeAIMove(state, config) {
 	const quiescenceTracker = { count: 0 };
 	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal: beforeTotal, baseEnemyTotal: beforeEnemyTotal, quiescenceDepth, quiescenceTracker };
 	let effectiveDepth = 1;
-	let totalBranches = 0;
+	let depthBranches = 0;
 	const depthCounts = [];
 	let depthCap = Number.POSITIVE_INFINITY;
-	for (let depth = 1; totalBranches < computationBudget && depth <= depthCap; depth++) {
+	for (let depth = 1; cumulativeBranches < computationBudget && depth <= depthCap; depth++) {
 		progressCtx.prevDepthCumulative = cumulativeBranches;
 		progressCtx.currentDepthTotal = 0;
-		totalBranches = 0;
+		depthBranches = 0;
 		let totalPruned = 0;
 		let candidatesProcessed = 0;
 		for (const cand of allCandidates) {
@@ -861,23 +862,28 @@ export function computeAIMove(state, config) {
 				cand.prunedCount = evalRes.prunedCount;
 			}
 			const branchCount = (typeof cand.branchCount === 'number' ? cand.branchCount : 1);
-			totalBranches += branchCount;
+			depthBranches += branchCount;
 			cumulativeBranches += branchCount;
 			totalPruned += (typeof cand.prunedCount === 'number' ? cand.prunedCount : 0);
 			candidatesProcessed++;
 			// Estimate total nodes at this depth for overshoot progress
 			if (candidatesProcessed > 0 && candidatesProcessed < allCandidates.length) {
-				progressCtx.currentDepthTotal = Math.round(totalBranches * allCandidates.length / candidatesProcessed);
+				progressCtx.currentDepthTotal = Math.round(depthBranches * allCandidates.length / candidatesProcessed);
 			} else {
-				progressCtx.currentDepthTotal = totalBranches;
+				progressCtx.currentDepthTotal = depthBranches;
 			}
 			reportProgress(depth);
+			if (cumulativeBranches >= computationBudget) {
+				budgetExceededDepth = depth;
+				break;
+			}
 		}
 		// Finalize exact total for this depth
-		progressCtx.currentDepthTotal = totalBranches;
-		depthCounts.push({ depth, count: totalBranches, pruned: totalPruned });
+		progressCtx.currentDepthTotal = depthBranches;
+		depthCounts.push({ depth, count: depthBranches, pruned: totalPruned });
 		effectiveDepth = depth;
 		reportProgress(depth, true);
+		if (budgetExceededDepth === depth) break;
 		const winPlies = allCandidates
 			.filter(c => c.searchScore === Infinity && typeof c.winPlies === 'number')
 			.map(c => c.winPlies);
@@ -934,7 +940,7 @@ export function computeAIMove(state, config) {
 			candidates: candidates.length,
 			evaluated: allCandidates.length,
 			depth: effectiveDepth,
-			branches: totalBranches
+			branches: cumulativeBranches
 		});
 	}
 	if (debug) {
@@ -943,7 +949,8 @@ export function computeAIMove(state, config) {
 				aiStrength,
 				computationBudget,
 				effectiveDepth,
-				totalBranches,
+				depthBranches,
+				cumulativeBranches,
 				depthCounts
 			});
 		} catch { /* ignore */ }
@@ -970,7 +977,7 @@ export function computeAIMove(state, config) {
 			}
 		}
 		const steps = (chosen && chosen.searchScore === Infinity && typeof chosen.winPlies === 'number') ? chosen.winPlies : effectiveDepth;
-		const branches = totalBranches;
+		const branches = cumulativeBranches;
 		const endTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 		const elapsedMs = endTime - startTime;
 		const stepsPerSec = (typeof branches === 'number' && elapsedMs > 0) ? (branches / (elapsedMs / 1000)) : undefined;

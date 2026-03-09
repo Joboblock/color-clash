@@ -414,7 +414,7 @@ export class OnlineConnection {
 
 	/**
 	 * Return a short tag for the current WebSocket target.
-	 * @returns {'g'|'f'|'l'|null}
+	 * @returns {'g'|'r'|'l'|null}
 	 */
 	getConnectionTag() { return this._currentUrlTag || null; }
 
@@ -808,12 +808,12 @@ export class OnlineConnection {
 	 * Map a WebSocket URL to a short tag for UI display.
 	 * @private
 	 * @param {string} url
-	 * @returns {'g'|'f'|'l'|null}
+	 * @returns {'g'|'r'|'l'|null}
 	 */
 	_resolveUrlTag(url) {
 		try {
 			if (url === WS_PROD_BASE_URL) return 'g';
-			if (url === WS_PROD_FALLBACK_BASE_URL) return 'f';
+			if (url === WS_PROD_FALLBACK_BASE_URL) return 'r';
 			const lowered = String(url || '').toLowerCase();
 			if (lowered.includes('localhost') || lowered.includes('127.0.0.1') || lowered.includes('0.0.0.0')) {
 				return 'l';

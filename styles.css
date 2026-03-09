@@ -8,6 +8,12 @@
     font-display: swap;
 }
 
+@property --progress-hole {
+    syntax: '<percentage>';
+    inherits: true;
+    initial-value: 0%;
+}
+
 #qrOverlay {
     position: fixed;
     inset: 0;
@@ -67,7 +73,7 @@
     --circle-color-dim: #333;
     /* fallback dim */
     transform: translate(-50%, -50%) scale(0.5);
-    transition: transform 220ms ease, background-color 180ms ease;
+    transition: transform 220ms ease, background-color 180ms ease, --progress-hole 140ms linear;
     user-select: none;
     -webkit-user-select: none;
 }
@@ -1271,7 +1277,7 @@ body.magenta {
     opacity: 1;
     /* keep 100% opacity; fade using color */
     /* no animation; rely on transitions */
-    transition: transform 220ms ease, background-color 180ms ease;
+    transition: transform 220ms ease, background-color 180ms ease, --progress-hole 140ms linear;
 }
 
 /* remove keyframes: use transitions instead */

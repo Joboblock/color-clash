@@ -3409,8 +3409,8 @@ document.addEventListener('DOMContentLoaded', () => {
         style.id = 'aiDebugStyles';
         style.textContent = `
             .ai-highlight { outline: 4px solid rgba(255,235,59,0.95) !important; box-shadow: 0 0 18px rgba(255,235,59,0.6); z-index:50; }
-            .ai-highlight-equal { outline: 4px dotted rgba(255,235,59,0.95) !important; box-shadow: 0 0 18px rgba(255,235,59,0.6); z-index:50; }
-            .ai-noisy { outline: 3px dashed rgba(255,87,34,0.9) !important; box-shadow: 0 0 12px rgba(255,87,34,0.5); z-index:45; }
+            .ai-highlight-equal { outline: 3px dashed rgba(255,235,59,0.95) !important; box-shadow: 0 0 12px rgba(255,235,59,0.6); z-index:50; }
+            .ai-noisy { outline: 4px dotted rgba(255,87,34,0.9) !important; box-shadow: 0 0 18px rgba(255,87,34,0.5); z-index:45; }
             #aiDebugPanel { position:fixed; right:12px; bottom:12px; background:rgba(18,18,18,0.88); color:#eaeaea; padding:10px 12px; font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial; font-size:13px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.45); max-width:420px; z-index:1000; }
             #aiDebugPanel h4 { margin:0 0 6px 0; font-size:13px; }
             #aiDebugPanel pre { margin:6px 0 0 0; white-space:pre-wrap; font-family:monospace; font-size:12px; max-height:240px; overflow:auto; }
@@ -3426,7 +3426,12 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.ai-noisy').forEach(el => el.classList.remove('ai-noisy'));
     }
 
+    const ENABLE_NOISY_HIGHLIGHTS = false;
+
     function markNoisyCells() {
+        if (!ENABLE_NOISY_HIGHLIGHTS) {
+            return;
+        }
         ensureAIDebugStyles();
         const noisy = getNoisyCells(grid, gridSize, cellExplodeThreshold);
         if (!Array.isArray(noisy) || noisy.length === 0) return;

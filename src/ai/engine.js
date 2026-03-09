@@ -773,7 +773,7 @@ export function computeAIMove(state, config) {
 		}
 		// record last emitted percent (used above) - effectiveEvaluated tracked via transient/cumulative vars
 		try {
-			console.debug('[AI progress]', {
+			/*console.debug('[AI progress]', {
 				depth,
 				percent,
 				evaluated: effectiveEvaluated,
@@ -781,7 +781,7 @@ export function computeAIMove(state, config) {
 				progress: Math.min(1, Math.max(0, progress)),
 				prevDepthCumulative: progressCtx.prevDepthCumulative,
 				currentDepthTotal: progressCtx.currentDepthTotal,
-			});
+			});*/
 		} catch { /* ignore debug logging issues */ }
 		onProgress({
 			evaluated: effectiveEvaluated,

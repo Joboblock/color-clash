@@ -79,13 +79,15 @@
     width: 100%;
     height: 100%;
     border-radius: 50%;
+    /* Clip to a true circle and map mask percentages to the circle radius (not the square corner). */
+    clip-path: circle(50% at 50% 50%);
     background: var(--circle-color-dim, #333);
     transform: translate(-50%, -50%);
     opacity: 1;
     transition: opacity 160ms ease;
     pointer-events: none;
-    -webkit-mask-image: radial-gradient(circle, transparent var(--progress-hole, 0%), #000 calc(var(--progress-hole, 0%) + 1px));
-    mask-image: radial-gradient(circle, transparent var(--progress-hole, 0%), #000 calc(var(--progress-hole, 0%) + 1px));
+    -webkit-mask-image: radial-gradient(circle closest-side, transparent var(--progress-hole, 0%), #000 calc(var(--progress-hole, 0%) + 1px));
+    mask-image: radial-gradient(circle closest-side, transparent var(--progress-hole, 0%), #000 calc(var(--progress-hole, 0%) + 1px));
 }
 
 /* remove keyframes: use transitions instead */

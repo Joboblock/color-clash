@@ -431,6 +431,10 @@ function generateNoisyCoalitionCandidatesOnSim(simGrid, simInitialPlacements, fo
 
 function quiescenceEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts) {
 	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal, baseEnemyTotal, quiescenceTracker } = opts;
+	if (opts && typeof opts.nodeVisited === 'function') {
+		// notify outer progress tracker that we've entered a node (transient increment)
+		try { opts.nodeVisited(1, depth); } catch { /* ignore progress errors */ }
+	}
 	if (quiescenceTracker && typeof quiescenceTracker.count === 'number') quiescenceTracker.count += 1;
 	const terminal = detectTerminalOutcome(simGridInput, simInitialPlacementsInput, focusPlayerIndex, gridSize, activeColors);
 	if (terminal) {
@@ -560,6 +564,9 @@ function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, mo
  */
 function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts) {
 	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal, baseEnemyTotal, quiescenceDepth } = opts;
+	if (opts && typeof opts.nodeVisited === 'function') {
+		try { opts.nodeVisited(1, depth); } catch { /* ignore progress errors */ }
+	}
 	const terminal = detectTerminalOutcome(simGridInput, simInitialPlacementsInput, focusPlayerIndex, gridSize, activeColors);
 	if (terminal) {
 		return { value: terminal.value, runaway: true, stepsToInfinity: terminal.stepsToInfinity, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
@@ -724,7 +731,7 @@ function buildBenchmarkInfo(bench, meta = {}) {
 
 export function computeAIMove(state, config) {
 	const { grid, initialPlacements, playerIndex, playerCount, gridSize, activeColors, invalidInitialPositions } = state;
-	const { maxCellValue, initialPlacementValue, aiStrength, cellExplodeThreshold, debug, benchmark, quiescenceDepth: configQuiescenceDepth, onProgress, progressEvery } = config;
+	const { maxCellValue, initialPlacementValue, aiStrength, cellExplodeThreshold, debug, benchmark, quiescenceDepth: configQuiescenceDepth, onProgress } = config;
 	// Default quiescence depth is half the AI strength, rounded up. If a config value
 	// is supplied, cap it to this limit to avoid excessive noisy-only search.
 	const quiescenceLimit = Math.max(0, Math.ceil((typeof aiStrength === 'number' && aiStrength > 0) ? (aiStrength / 2) : 1));
@@ -736,44 +743,40 @@ export function computeAIMove(state, config) {
 	}
 	const maxExplosionsToAssumeLoop = gridSize * 3;
 	const computationBudget = Math.pow(5, aiStrength);
-	const progressInterval = (Number.isFinite(progressEvery) && progressEvery > 0) ? Math.floor(progressEvery) : 250;
 	let cumulativeBranches = 0;
-	let lastProgressReport = 0;
-	// Two-phase progress tracking:
-	//   Phase 1 (E < B): linear 0–50%
-	//   Phase 2 (overshoot): remaining 50% proportional to overshoot depth completion
-	const progressCtx = { prevDepthCumulative: 0, currentDepthTotal: 0 };
+	let transientBranches = 0; // nodes seen inside a long-running candidate (not yet added to cumulativeBranches)
+	let lastEmittedPercent = -1;
+	let lastProgressValue = 0;
+	// Linear progress tracking over 2x budget to smooth overshoot reporting.
 	let budgetExceededDepth = null;
+	const progressCtx = { prevDepthCumulative: 0, currentDepthTotal: 0 };
 	const reportProgress = (depth, force = false, done = false) => {
 		if (typeof onProgress !== 'function') return;
-		if (!force && (cumulativeBranches - lastProgressReport) < progressInterval) return;
-		lastProgressReport = cumulativeBranches;
 		const budget = Math.max(1, computationBudget || 1);
+		const effectiveEvaluated = cumulativeBranches + transientBranches;
 		let progress;
-		let phase = 'phase1';
 		if (done) {
-			phase = 'done';
 			progress = 1;
-		} else if (cumulativeBranches <= budget) {
-			// Phase 1: linear 0–50% for budget
-			progress = 0.5 * Math.min(1, cumulativeBranches / budget);
 		} else {
-			phase = 'overshoot';
-			// Overshoot: remaining 50% band
-			const evaluatedBeforeDepth = progressCtx.prevDepthCumulative; // nodes from previous depths
-			const budgetCoveredInDepth = Math.max(0, budget - evaluatedBeforeDepth); // portion of this depth covered by budget
-			const depthTotalNodes = Math.max(1, progressCtx.currentDepthTotal); // total nodes at this depth
-			const depthRemainingBeyondBudget = Math.max(1, depthTotalNodes - budgetCoveredInDepth); // nodes beyond budget
-			const evaluatedAtDepth = cumulativeBranches - evaluatedBeforeDepth; // nodes evaluated at this depth so far
-			const overshootEvaluated = Math.max(0, evaluatedAtDepth - budgetCoveredInDepth); // nodes past budget boundary
-			const overshootRatio = Math.min(1, overshootEvaluated / depthRemainingBeyondBudget);
-			progress = 0.5 + 0.5 * overshootRatio;
+			// Map 0..(2*budget) linearly to 0..1
+			progress = Math.min(1, effectiveEvaluated / (2 * budget));
 		}
+		// Prevent regressions when transientBranches resets between candidates.
+		progress = Math.max(lastProgressValue, progress);
+		lastProgressValue = progress;
+		const percent = Math.floor(progress * 100);
+		if (!done && percent <= lastEmittedPercent && !force) return;
+		if (done) {
+			lastEmittedPercent = 100;
+		} else if (percent > lastEmittedPercent) {
+			lastEmittedPercent = percent;
+		}
+		// record last emitted percent (used above) - effectiveEvaluated tracked via transient/cumulative vars
 		try {
 			console.debug('[AI progress]', {
 				depth,
-				phase,
-				evaluated: cumulativeBranches,
+				percent,
+				evaluated: effectiveEvaluated,
 				budget,
 				progress: Math.min(1, Math.max(0, progress)),
 				prevDepthCumulative: progressCtx.prevDepthCumulative,
@@ -781,7 +784,7 @@ export function computeAIMove(state, config) {
 			});
 		} catch { /* ignore debug logging issues */ }
 		onProgress({
-			evaluated: cumulativeBranches,
+			evaluated: effectiveEvaluated,
 			budget,
 			depth,
 			progress: Math.min(1, Math.max(0, progress)),
@@ -829,7 +832,10 @@ export function computeAIMove(state, config) {
 	mark('simulate');
 	const allCandidates = evaluated.slice();
 	const quiescenceTracker = { count: 0 };
-	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal: beforeTotal, baseEnemyTotal: beforeEnemyTotal, quiescenceDepth, quiescenceTracker };
+	const depthOpts = { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal: beforeTotal, baseEnemyTotal: beforeEnemyTotal, quiescenceDepth, quiescenceTracker,
+		// called by inner search nodes to report transient progress
+		nodeVisited: (count = 1, d) => { try { transientBranches += (typeof count === 'number' ? count : 1); reportProgress(d); } catch { /* ignore */ } }
+	};
 	let effectiveDepth = 1;
 	let depthBranches = 0;
 	const depthCounts = [];
@@ -848,6 +854,8 @@ export function computeAIMove(state, config) {
 				cand.branchCount = 1;
 				cand.prunedCount = 0;
 			} else {
+				// reset transient counter for this candidate's search
+				transientBranches = 0;
 				const nextMover = -1;
 				const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextMover, Math.max(0, depth - 1), -Infinity, Infinity, playerIndex, playerIndex, depthOpts);
 				cand.searchScore = evalRes.value;
@@ -861,6 +869,8 @@ export function computeAIMove(state, config) {
 			const branchCount = (typeof cand.branchCount === 'number' ? cand.branchCount : 1);
 			depthBranches += branchCount;
 			cumulativeBranches += branchCount;
+			// clear any transient nodes we counted for this candidate now that we've accounted for the full branchCount
+			transientBranches = 0;
 			totalPruned += (typeof cand.prunedCount === 'number' ? cand.prunedCount : 0);
 			candidatesProcessed++;
 			// Estimate total nodes at this depth for overshoot progress
@@ -875,8 +885,6 @@ export function computeAIMove(state, config) {
 				break;
 			}
 		}
-		// Finalize exact total for this depth
-		progressCtx.currentDepthTotal = depthBranches;
 		depthCounts.push({ depth, count: depthBranches, pruned: totalPruned });
 		effectiveDepth = depth;
 		reportProgress(depth, true);

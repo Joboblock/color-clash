@@ -11,8 +11,7 @@
 import {
 	computeInvalidInitialPositions,
 	isInitialPlacementInvalid,
-	getCellsToExplode,
-	computeExplosionTargets
+	resolveExplosionChain
 } from './gridCalc.js';
 import { computeAliveMask } from './turnCalc.js';
 
@@ -138,55 +137,11 @@ export function __resolveExplosionsForTest(state, rules, isInitialPlacementPhase
 }
 
 function resolveExplosions(state, rules, isInitialPlacementPhase) {
-	// process chain until stable
-	while (true) {
-		const cellsToExplode = getCellsToExplode(state.grid, state.gridSize, rules.CELL_EXPLODE_THRESHOLD);
-		if (!cellsToExplode.length) break;
-		for (const { row, col } of cellsToExplode) {
-			explodeCell(state, rules, row, col, isInitialPlacementPhase);
-		}
-	}
-}
-
-function explodeCell(state, rules, r, c, isInitialPlacementPhase) {
-	const cell = state.grid[r][c];
-	const owner = cell.player;
-	const value = cell.value;
-	if (!(value >= rules.CELL_EXPLODE_THRESHOLD)) return;
-
-	// Split-off value contract:
-	// - threshold 4 should split into 1s
-	// - value 5 should split into 2s
-	// Generally: fragmentValue = value - threshold + 1
-	const fragmentValue = value - rules.CELL_EXPLODE_THRESHOLD + 1;
-	cell.value = 0;
-	cell.player = '';
-
-	const { targets, extraBackToOrigin } = computeExplosionTargets(
-		state.gridSize,
-		r,
-		c,
-		fragmentValue,
+	resolveExplosionChain({
+		grid: state.grid,
+		gridSize: state.gridSize,
+		cellExplodeThreshold: rules.CELL_EXPLODE_THRESHOLD,
+		maxCellValue: rules.MAX_CELL_VALUE,
 		isInitialPlacementPhase
-	);
-
-	for (const t of targets) {
-		applyFragment(state, rules, t.row, t.col, t.value, owner);
-	}
-
-	// During initial placement, out-of-bounds fragments return to origin.
-	if (isInitialPlacementPhase && extraBackToOrigin > 0) {
-		// Important: each off-board fragment returns as a single orb.
-		// Otherwise corner explosions would add (extraBackToOrigin * fragmentValue)
-		// which is too large (e.g. value 5 => fragmentValue 2 => +4 back),
-		// causing unintended chained explosions and inflated neighbor values.
-		applyFragment(state, rules, r, c, extraBackToOrigin, owner);
-	}
-}
-
-function applyFragment(state, rules, r, c, addValue, owner) {
-	const cell = state.grid[r][c];
-	if (cell.value > rules.MAX_CELL_VALUE) return;
-	cell.value = Math.min(rules.MAX_CELL_VALUE, cell.value + addValue);
-	cell.player = owner;
+	});
 }

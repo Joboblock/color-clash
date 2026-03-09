@@ -2,7 +2,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "benchmark:ai": "node tmp/aiEngine.benchmark.mjs"
   },
   "dependencies": {
     "ws": "8.18.3"

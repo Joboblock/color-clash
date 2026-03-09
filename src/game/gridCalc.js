@@ -117,3 +117,130 @@ export function computeExplosionTargets(gridSize, row, col, explosionValue, isIn
 
     return { targets, extraBackToOrigin };
 }
+
+/**
+ * Compute fragment value for a given cell based on the explosion threshold.
+ * @param {number} cellValue
+ * @param {number} cellExplodeThreshold
+ * @returns {number}
+ */
+export function computeFragmentValue(cellValue, cellExplodeThreshold) {
+    return cellValue - cellExplodeThreshold + 1;
+}
+
+/**
+ * Default grid mutation helpers for explosions.
+ * @param {GridCell[][]} grid
+ * @param {number} maxCellValue
+ * @returns {{clearCell:(row:number,col:number)=>void, applyFragment:(row:number,col:number,addValue:number,owner:string)=>void}}
+ */
+export function getDefaultExplosionMutators(grid, maxCellValue) {
+    return {
+        clearCell: (row, col) => {
+            grid[row][col].value = 0;
+            grid[row][col].player = '';
+        },
+        applyFragment: (row, col, addValue, owner) => {
+            const cell = grid[row][col];
+            if (cell.value > maxCellValue) return;
+            cell.value = Math.min(maxCellValue, cell.value + addValue);
+            cell.player = owner;
+        }
+    };
+}
+
+/**
+ * Explode all current cells at/above threshold once (single wave).
+ *
+ * @param {Object} opts
+ * @param {GridCell[][]} opts.grid
+ * @param {number} opts.gridSize
+ * @param {number} opts.cellExplodeThreshold
+ * @param {number} opts.maxCellValue
+ * @param {boolean} opts.isInitialPlacementPhase
+ * @param {Array<{row:number,col:number,player:string,value:number}>} [opts.cellsToExplode]
+ * @param {(row:number,col:number,player:string,value:number)=>void} [opts.clearCell]
+ * @param {(row:number,col:number,addValue:number,owner:string)=>void} [opts.applyFragment]
+ * @param {(evt:{row:number,col:number,player:string,value:number,fragmentValue:number,targets:Array<{row:number,col:number,value:number}>,extraBackToOrigin:number})=>void} [opts.onExplode]
+ * @returns {{explosionCount:number,cellsToExplode:Array<{row:number,col:number,player:string,value:number}>}}
+ */
+export function explodeCellsOnce(opts) {
+    const {
+        grid,
+        gridSize,
+        cellExplodeThreshold,
+        maxCellValue,
+        isInitialPlacementPhase,
+        cellsToExplode,
+        clearCell,
+        applyFragment,
+        onExplode
+    } = opts;
+    const sources = cellsToExplode ?? getCellsToExplode(grid, gridSize, cellExplodeThreshold);
+    if (!sources.length) {
+        return { explosionCount: 0, cellsToExplode: sources };
+    }
+    const defaults = (!clearCell || !applyFragment) ? getDefaultExplosionMutators(grid, maxCellValue) : null;
+    const clear = clearCell ?? defaults.clearCell;
+    const apply = applyFragment ?? defaults.applyFragment;
+
+    for (const cell of sources) {
+        const { row, col, player, value } = cell;
+        const fragmentValue = computeFragmentValue(value, cellExplodeThreshold);
+        clear(row, col, player, value);
+        const { targets, extraBackToOrigin } = computeExplosionTargets(
+            gridSize,
+            row,
+            col,
+            fragmentValue,
+            isInitialPlacementPhase
+        );
+
+        if (onExplode) {
+            onExplode({ row, col, player, value, fragmentValue, targets, extraBackToOrigin });
+        }
+
+        for (const t of targets) {
+            apply(t.row, t.col, t.value, player);
+        }
+
+        if (isInitialPlacementPhase && extraBackToOrigin > 0) {
+            // Each off-board fragment returns as a single orb.
+            apply(row, col, extraBackToOrigin, player);
+        }
+    }
+
+    return { explosionCount: sources.length, cellsToExplode: sources };
+}
+
+/**
+ * Resolve explosion chains until stable or a max-iteration guard trips.
+ * @param {Object} opts
+ * @param {GridCell[][]} opts.grid
+ * @param {number} opts.gridSize
+ * @param {number} opts.cellExplodeThreshold
+ * @param {number} opts.maxCellValue
+ * @param {boolean} opts.isInitialPlacementPhase
+ * @param {number} [opts.maxIterations]
+ * @param {(row:number,col:number,player:string,value:number)=>void} [opts.clearCell]
+ * @param {(row:number,col:number,addValue:number,owner:string)=>void} [opts.applyFragment]
+ * @param {(evt:{row:number,col:number,player:string,value:number,fragmentValue:number,targets:Array<{row:number,col:number,value:number}>,extraBackToOrigin:number})=>void} [opts.onExplode]
+ * @returns {{explosionCount:number,runaway:boolean}}
+ */
+export function resolveExplosionChain(opts) {
+    const {
+        maxIterations = Number.POSITIVE_INFINITY,
+        ...rest
+    } = opts;
+    let explosionCount = 0;
+    let iterations = 0;
+    while (iterations < maxIterations) {
+        const res = explodeCellsOnce(rest);
+        if (!res.explosionCount) {
+            return { explosionCount, runaway: false };
+        }
+        explosionCount += res.explosionCount;
+        iterations += 1;
+    }
+    return { explosionCount, runaway: true };
+}

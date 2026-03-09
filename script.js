@@ -7,14 +7,19 @@ import { mainPage } from './src/pages/main.js';
 
 // General utilities (merged)
 import { sanitizeName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
-import { computeInvalidInitialPositions as calcInvalidInitialPositions, isInitialPlacementInvalid as calcIsInitialPlacementInvalid, getCellsToExplode as calcGetCellsToExplode, computeExplosionTargets as calcComputeExplosionTargets } from './src/game/gridCalc.js';
+import {
+    computeInvalidInitialPositions as calcInvalidInitialPositions,
+    isInitialPlacementInvalid as calcIsInitialPlacementInvalid,
+    getCellsToExplode as calcGetCellsToExplode,
+    explodeCellsOnce as calcExplodeCellsOnce
+} from './src/game/gridCalc.js';
 import { playerColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './src/game/palette.js';
 import { advanceTurnIndex } from './src/game/turnCalc.js';
 import { createOnlineTurnTracker } from './src/online/onlineTurn.js';
-import { computeAIMove } from './src/ai/engine.js';
+import { computeAIMove, getNoisyCells } from './src/ai/engine.js';
 import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
 // Edge circles component
-import { createEdgeCircles, updateEdgeCirclesActive, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
+import { createEdgeCircles, updateEdgeCirclesActive, updateEdgeCircleProgress, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
 // Navigation and routing
 import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
 import { APP_VERSION } from './src/version.js';
@@ -637,7 +642,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const _turnColor = activeColors()[currentPlayer];
         document.body.className = _turnColor;
-        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    try { syncEdgeCircleProgressForTurn(); } catch { /* ignore */ }
         // Keep cell highlighting in sync with the current turn.
         // (Online mode doesn't use advanceSeqTurn(), so we refresh here.)
         try { updateGrid(); } catch { /* ignore */ }
@@ -1373,7 +1379,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Detect practice mode via URL param
     const urlParams = new URLSearchParams(window.location.search);
     // Practice mode is enabled if any AI-related parameter is present in the URL
-    const isPracticeMode = urlParams.has('ai_depth') || urlParams.has('ai_k');
+    const isPracticeMode = urlParams.has('ai_strength');
 
     /**
      * Broad mobile detection using feature hints (coarse pointer, touch points, UA hints).
@@ -1483,6 +1489,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let menuGridSizeVal = 0; // set after initial clamps
     const startBtn = document.getElementById('startBtn');
     const practiceBtn = document.getElementById('practiceBtn');
+    const importPracticeBtn = document.getElementById('practiceImportBtn');
     const menuColorCycle = document.getElementById('menuColorCycle');
     // playerNameInput now handled via PlayerNameFields component (fetched at instantiation)
     const gridDecBtn = document.getElementById('gridDec');
@@ -1598,6 +1605,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const mainMenu = document.getElementById('mainMenu');
         const header = mainMenu ? mainMenu.querySelector('.game-header-panel') : null;
         const startBtn = document.getElementById('startBtn');
+        const importBtn = document.getElementById('practiceImportBtn');
         const playerNameInput = document.getElementById('playerName');
         if (!mainMenu) return;
         // Persist mode for later checks (e.g., connection banner gating)
@@ -1613,6 +1621,7 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (mode === 'host') startBtn.textContent = 'Host';
             else startBtn.textContent = 'Start';
         }
+        if (importBtn) importBtn.style.display = (mode === 'practice') ? '' : 'none';
         if (playerNameInput) playerNameInput.style.display = (mode === 'host') ? '' : 'none';
         const aiStrengthTile = document.getElementById('aiStrengthTile');
         if (aiStrengthTile) aiStrengthTile.style.display = (mode === 'practice') ? '' : 'none';
@@ -1893,6 +1902,128 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    const extractClipboardGrid = (text) => {
+        if (typeof text !== 'string' || !text) return null;
+        const start = text.indexOf('[');
+        if (start < 0) return null;
+        let depth = 0;
+        for (let i = start; i < text.length; i++) {
+            const ch = text[i];
+            if (ch === '[') depth++;
+            if (ch === ']') depth--;
+            if (depth === 0) return text.slice(start, i + 1);
+        }
+        return null;
+    };
+
+    const parseClipboardCell = (cell, paletteLookup, colorsFound) => {
+        let value = null;
+        let color = null;
+        const consume = (entry) => {
+            if (typeof entry === 'number' && Number.isFinite(entry) && value === null) value = entry;
+            if (typeof entry === 'string' && color === null) color = entry;
+        };
+        if (Array.isArray(cell)) {
+            cell.forEach(consume);
+        } else if (cell && typeof cell === 'object') {
+            Object.values(cell).forEach(consume);
+        } else {
+            consume(cell);
+        }
+        const normalizedValue = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+        let player = '';
+        if (typeof color === 'string') {
+            const key = color.trim().toLowerCase();
+            if (paletteLookup.has(key)) {
+                player = paletteLookup.get(key);
+                colorsFound.add(player);
+            }
+        }
+        return { value: normalizedValue, player };
+    };
+
+    const parseClipboardGrid = (text) => {
+        const snippet = extractClipboardGrid(text);
+        if (!snippet) return null;
+        let parsed = null;
+        try {
+            parsed = Function(`"use strict"; return (${snippet});`)();
+        } catch {
+            try { parsed = JSON.parse(snippet); } catch { parsed = null; }
+        }
+        if (!Array.isArray(parsed)) return null;
+        const rows = parsed.filter(row => Array.isArray(row));
+        if (!rows.length) return null;
+        const maxCols = Math.max(...rows.map(row => row.length || 0));
+        if (!Number.isFinite(maxCols) || maxCols <= 0) return null;
+        const size = Math.max(rows.length, maxCols);
+        const paletteLookup = new Map(playerColors.map(color => [String(color).toLowerCase(), color]));
+        const colorsFound = new Set();
+        const normalized = Array.from({ length: size }, (_, r) => {
+            const row = rows[r] || [];
+            return Array.from({ length: size }, (_, c) => parseClipboardCell(row[c], paletteLookup, colorsFound));
+        });
+        return { grid: normalized, size, colorsFound };
+    };
+
+    const applyImportedPracticeGrid = (payload) => {
+        const fallbackPlayers = clampPlayers(menuPlayerCount, playerColors.length);
+        const fallbackSize = defaultGridSizeForPlayers(fallbackPlayers);
+        const parsed = payload || null;
+        let size = fallbackSize;
+        let p = fallbackPlayers;
+        let gridData = null;
+        if (parsed && Array.isArray(parsed.grid)) {
+            const foundCount = parsed.colorsFound ? parsed.colorsFound.size : 0;
+            p = Math.max(2, Math.min(playerColors.length, foundCount || 2));
+            size = parsed.size || fallbackSize;
+            gridData = parsed.grid;
+            const colors = playerColors.filter(color => parsed.colorsFound && parsed.colorsFound.has(color));
+            while (colors.length < p) {
+                const next = playerColors.find(color => !colors.includes(color));
+                if (!next) break;
+                colors.push(next);
+            }
+            gameColors = colors.slice(0, p);
+        } else {
+            gameColors = computeSelectedColors(p);
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        params.delete('menu');
+        params.set('players', String(p));
+        params.set('size', String(size));
+        try {
+            const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
+            if (aiStrengthTile) params.set('ai_strength', String(aiStrengthTile.getStrength()));
+        } catch { /* ignore */ }
+        const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
+        window.history.pushState({ mode: 'ai', players: p, size }, '', newUrl);
+
+        if (mainMenu) mainMenu.classList.add('hidden');
+        practiceMode = true;
+        practiceFreePlay = true;
+        try {
+            const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
+            aiStrength = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
+        } catch { /* ignore */ }
+        recreateGrid(size, p);
+        createEdgeCircles(p, getEdgeCircleState());
+        if (gridData) {
+            for (let r = 0; r < gridSize; r++) {
+                for (let c = 0; c < gridSize; c++) {
+                    const cell = gridData[r] && gridData[r][c] ? gridData[r][c] : { value: 0, player: '' };
+                    grid[r][c] = { value: cell.value || 0, player: cell.player || '' };
+                }
+            }
+            initialPlacements = Array(playerCount).fill(true);
+        }
+        updateGrid();
+        clearAIDebugUI();
+        maybeTriggerAIMove();
+        requestFullscreenIfMobile();
+    };
+
     startBtn.addEventListener('click', async () => {
         // Determine current menu mode from button text
         const mode = startBtn.textContent.toLowerCase();
@@ -1910,6 +2041,7 @@ document.addEventListener('DOMContentLoaded', () => {
             gameColors = computeSelectedColors(p);
             if (mainMenu) mainMenu.classList.add('hidden');
             practiceMode = false;
+            practiceFreePlay = false;
             recreateGrid(s, p);
             createEdgeCircles(p, getEdgeCircleState());
             requestFullscreenIfMobile();
@@ -1930,16 +2062,17 @@ document.addEventListener('DOMContentLoaded', () => {
             params.set('size', String(s));
             try {
                 const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
-                if (aiStrengthTile) params.set('ai_depth', String(aiStrengthTile.getStrength()));
+                if (aiStrengthTile) params.set('ai_strength', String(aiStrengthTile.getStrength()));
             } catch { /* ignore */ }
             const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
             window.history.pushState({ mode: 'ai', players: p, size: s }, '', newUrl);
             gameColors = computeSelectedColors(p);
             if (mainMenu) mainMenu.classList.add('hidden');
             practiceMode = true;
+            practiceFreePlay = false;
             try {
                 const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
-                aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
+                aiStrength = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
             } catch { /* ignore */ }
             recreateGrid(s, p);
             createEdgeCircles(p, getEdgeCircleState());
@@ -1965,7 +2098,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Set AI strength parameter from the preview value (1..5)
             try {
                 const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
-                if (aiStrengthTile) params.set('ai_depth', String(aiStrengthTile.getStrength()));
+                if (aiStrengthTile) params.set('ai_strength', String(aiStrengthTile.getStrength()));
             } catch { /* ignore */ }
             const newUrl = `${window.location.pathname}?${params.toString()}${window.location.hash || ''}`;
             // push a new history entry so Back returns to the menu instead of previous/blank
@@ -1977,14 +2110,27 @@ document.addEventListener('DOMContentLoaded', () => {
             // Hide menu and start practice mode immediately
             if (mainMenu) mainMenu.classList.add('hidden');
             practiceMode = true;
+            practiceFreePlay = false;
             // Apply the chosen AI depth immediately for this session
             try {
                 const aiStrengthTile = pageRegistry.get('main')?.components?.aiStrengthTile;
-                aiDepth = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
+                aiStrength = Math.max(1, parseInt(String(aiStrengthTile ? aiStrengthTile.getStrength() : 1), 10));
             } catch { /* ignore */ }
             recreateGrid(s, p);
             // Enter fullscreen on mobile after hiding menu and setting up game
             requestFullscreenIfMobile();
+        });
+    }
+    if (importPracticeBtn) {
+        importPracticeBtn.addEventListener('click', async () => {
+            let text = '';
+            try {
+                text = await navigator.clipboard.readText();
+            } catch {
+                text = '';
+            }
+            const parsed = parseClipboardGrid(text);
+            applyImportedPracticeGrid(parsed);
         });
     }
     //#endregion
@@ -2037,8 +2183,8 @@ document.addEventListener('DOMContentLoaded', () => {
             playerBoxSlider,
             menuColorCycle,
             startBtn,
-            setPracticeMode: (val) => { practiceMode = val; },
-            setAiDepth: (val) => { aiDepth = val; },
+            setPracticeMode: (val) => { practiceMode = val; practiceFreePlay = false; },
+            setAiStrength: (val) => { aiStrength = val; },
             setGameColors: (val) => { gameColors = val; },
             getMyJoinedRoom: () => myJoinedRoom,
             getRoomKeyForRoom: (roomName) => (roomName === myJoinedRoom) ? myRoomKey : null,
@@ -2180,6 +2326,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Practice mode globals
     let practiceMode = isPracticeMode;
+    let practiceFreePlay = false;
     const humanPlayer = 0; // first selected color is player index 0
 
     function getEdgeCircleState() {
@@ -2193,6 +2340,38 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    function getAIPlayerSet() {
+        if (!practiceMode || practiceFreePlay) return new Set();
+        const hp = (typeof humanPlayer === 'number') ? humanPlayer : 0;
+        const out = new Set();
+        const count = Math.max(0, Number(playerCount) || 0);
+        for (let i = 0; i < count; i++) {
+            if (i !== hp) out.add(i);
+        }
+        return out;
+    }
+
+    function syncEdgeCircleProgressForTurn() {
+        const count = Math.max(0, Number(playerCount) || 0);
+        if (!count) return;
+        const aiPlayers = getAIPlayerSet();
+        for (let i = 0; i < count; i++) {
+            if (!aiPlayers.has(i)) {
+                updateEdgeCircleProgress(i, 1, { label: 'Progress', valueText: '100%', kind: 'ai' });
+            } else {
+                updateEdgeCircleProgress(i, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' });
+            }
+        }
+    }
+
+    try {
+        if (typeof window !== 'undefined') {
+            window.addEventListener('edgecircles:active', () => {
+                try { syncEdgeCircleProgressForTurn(); } catch { /* ignore */ }
+            });
+        }
+    } catch { /* ignore */ }
+
     // Set gameColors based on initial playerCount (needed for edge circles to display correct count)
     if (hasPlayersOrSize) {
         gameColors = computeSelectedColors(playerCount);
@@ -2205,6 +2384,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getFocusPlayerIndex() {
         if (onlineGameActive && Number.isInteger(myOnlineIndex) && myOnlineIndex >= 0) return myOnlineIndex;
+        if (practiceMode && practiceFreePlay) return currentPlayer;
         if (practiceMode && typeof humanPlayer !== 'undefined') return humanPlayer;
         return currentPlayer;
     }
@@ -2222,6 +2402,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function isLocalFocusTurn() {
         if (onlineGameActive && Number.isInteger(myOnlineIndex) && myOnlineIndex >= 0) return currentPlayer === myOnlineIndex;
+        if (practiceMode && practiceFreePlay) return true;
         if (practiceMode && typeof humanPlayer !== 'undefined') return currentPlayer === humanPlayer;
         return true;
     }
@@ -2346,7 +2527,7 @@ document.addEventListener('DOMContentLoaded', () => {
             handleOnlineMove(row, col, 'keyboard');
             return;
         }
-        if (typeof practiceMode !== 'undefined' && practiceMode && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
+        if (typeof practiceMode !== 'undefined' && practiceMode && !practiceFreePlay && typeof currentPlayer !== 'undefined' && typeof humanPlayer !== 'undefined' && currentPlayer !== humanPlayer) return;
         if (Number.isInteger(row) && Number.isInteger(col)) {
             e.preventDefault();
             handleClick(row, col);
@@ -2418,7 +2599,8 @@ document.addEventListener('DOMContentLoaded', () => {
             document.body.className = activeColors()[currentPlayer];
         }
         // Sync active circle emphasis after grid rebuild
-        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    try { syncEdgeCircleProgressForTurn(); } catch { /* ignore */ }
 
         // Reflect actual grid size in display value while menu is present
         menuGridSizeVal = Math.max(3, newSize);
@@ -2436,14 +2618,16 @@ document.addEventListener('DOMContentLoaded', () => {
         // If practice mode is enabled, force human to be first color and
         // set the current player to the human (so they control the first color)
         if (practiceMode) {
-            // Ensure humanPlayer index is valid for current playerCount
-            // (humanPlayer is 0 by design; defensive check)
-            currentPlayer = Math.min(humanPlayer, playerCount - 1);
-            if (!menuOpen) {
-                document.body.className = activeColors()[currentPlayer];
+            if (!practiceFreePlay) {
+                // Ensure humanPlayer index is valid for current playerCount
+                // (humanPlayer is 0 by design; defensive check)
+                currentPlayer = Math.min(humanPlayer, playerCount - 1);
+                if (!menuOpen) {
+                    document.body.className = activeColors()[currentPlayer];
+                }
             }
             updateGrid();
-            // Trigger AI if the first randomly chosen currentPlayer isn't the human
+            // Trigger AI or preview as appropriate
             maybeTriggerAIMove();
         }
     }
@@ -2476,7 +2660,8 @@ document.addEventListener('DOMContentLoaded', () => {
             saveFocusForPlayer(prevPlayer);
         }
         document.body.className = activeColors()[currentPlayer];
-        try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    try { updateEdgeCirclesActive(currentPlayer, onlineGameActive, myOnlineIndex, practiceMode, humanPlayer, gameColors); } catch { /* ignore */ }
+    try { syncEdgeCircleProgressForTurn(); } catch { /* ignore */ }
         if (!onlineGameActive && !(typeof practiceMode !== 'undefined' && practiceMode)) clearCellFocus();
         updateGrid();
         restorePlayerFocus();
@@ -2668,34 +2853,30 @@ document.addEventListener('DOMContentLoaded', () => {
             performanceMode = false;
         }
 
-        // Process each explosion
-        cellsToExplode.forEach(cell => {
-            const { row, col, player, value } = cell;
-            const explosionValue = value - 3;
-            grid[row][col].value = 0;
-            updateCell(row, col, 0, '', true);
-
-            // Determine if this explosion is from an initial placement
-            const isInitialPlacement = !initialPlacements.every(placement => placement);
-            const { targets: targetCells, extraBackToOrigin } = calcComputeExplosionTargets(
-                gridSize,
-                row,
-                col,
-                explosionValue,
-                isInitialPlacement
-            );
-
-            // Animate valid explosions
-            animateInnerCircles(document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`), targetCells, player, explosionValue);
-
-            // Update grid for valid explosion targets
-            targetCells.forEach(({ row, col, value }) => {
-                updateCell(row, col, value, player, true);
-            });
-
-            // Add out-of-bounds split-offs back to origin cell during initial placements
-            if (extraBackToOrigin > 0 && isInitialPlacement) {
-                updateCell(row, col, extraBackToOrigin, player, true);
+        // Process each explosion wave using shared grid helpers
+        const isInitialPlacement = !initialPlacements.every(placement => placement);
+        calcExplodeCellsOnce({
+            grid,
+            gridSize,
+            cellExplodeThreshold,
+            maxCellValue,
+            isInitialPlacementPhase: isInitialPlacement,
+            cellsToExplode,
+            clearCell: (row, col) => {
+                grid[row][col].value = 0;
+                grid[row][col].player = '';
+                updateCell(row, col, 0, '', true);
+            },
+            applyFragment: (row, col, addValue, owner) => {
+                updateCell(row, col, addValue, owner, true);
+            },
+            onExplode: ({ row, col, player, fragmentValue, targets }) => {
+                animateInnerCircles(
+                    document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`),
+                    targets,
+                    player,
+                    fragmentValue
+                );
             }
         });
 
@@ -3070,8 +3251,141 @@ document.addEventListener('DOMContentLoaded', () => {
     //#region Practice / AI helpers (dataRespect + debug)
     // AI parameters (core logic now in src/ai/engine.js)
     const aiDebug = true;
-    const dataRespectK = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_k')) || 25);
-    let aiDepth = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_depth')) || 4);
+    let aiStrength = Math.max(1, parseInt((new URLSearchParams(window.location.search)).get('ai_strength')) || 4);
+    let aiWorker = null;
+    let aiWorkerSeq = 0;
+    const aiWorkerRequests = new Map();
+
+    function getAIWorker() {
+        if (aiWorker) return aiWorker;
+        if (typeof Worker === 'undefined') return null;
+        try {
+            aiWorker = new Worker(new URL('./src/ai/aiWorker.js', import.meta.url), { type: 'module' });
+        } catch {
+            aiWorker = null;
+            return null;
+        }
+        aiWorker.addEventListener('message', (ev) => {
+            const { requestId, result, error, progress } = ev.data || {};
+            const pending = aiWorkerRequests.get(requestId);
+            if (!pending) return;
+            if (progress && typeof pending.onProgress === 'function') {
+                pending.onProgress(progress);
+                return;
+            }
+            aiWorkerRequests.delete(requestId);
+            if (error) {
+                pending.reject(new Error(error));
+            } else {
+                pending.resolve(result);
+            }
+        });
+        aiWorker.addEventListener('error', (err) => {
+            for (const [id, pending] of aiWorkerRequests.entries()) {
+                pending.reject(err);
+                aiWorkerRequests.delete(id);
+            }
+        });
+        return aiWorker;
+    }
+
+    function computeAIMoveAsync(state, config, progressOpts = {}) {
+        const worker = getAIWorker();
+        if (!worker) {
+            return new Promise((resolve) => {
+                setTimeout(() => resolve(computeAIMove(state, config)), 0);
+            });
+        }
+        const requestId = ++aiWorkerSeq;
+        const payload = {
+            grid: state.grid,
+            initialPlacements: state.initialPlacements,
+            playerIndex: state.playerIndex,
+            playerCount: state.playerCount,
+            gridSize: state.gridSize,
+            colors: state.activeColors(),
+            invalidInitialPositions: state.invalidInitialPositions
+        };
+        const progressMeta = (progressOpts && progressOpts.enabled)
+            ? { playerIndex: progressOpts.playerIndex, label: progressOpts.label, kind: progressOpts.kind }
+            : null;
+        return new Promise((resolve, reject) => {
+            const onProgress = progressMeta
+                ? (info) => {
+                    const percent = Math.max(0, Math.min(1, typeof info.progress === 'number' ? info.progress : 0));
+                    const valueText = (typeof info.evaluated === 'number' && typeof info.budget === 'number')
+                        ? `${info.evaluated}/${info.budget}`
+                        : `${Math.round(percent * 100)}%`;
+                    updateEdgeCircleProgress(progressMeta.playerIndex, percent, {
+                        label: progressMeta.label || 'Progress',
+                        valueText,
+                        kind: progressMeta.kind
+                    });
+                }
+                : null;
+            aiWorkerRequests.set(requestId, { resolve, reject, onProgress });
+            if (progressMeta) {
+                updateEdgeCircleProgress(progressMeta.playerIndex, 0, {
+                    label: progressMeta.label || 'Progress',
+                    valueText: '0%',
+                    kind: progressMeta.kind
+                });
+            }
+            worker.postMessage({ requestId, state: payload, config, progress: progressMeta ? { enabled: true } : { enabled: false } });
+        });
+    }
+
+    async function showAIPreviewFor(playerIndex) {
+        if (isProcessing || gameWon) return;
+        const snapshotPlayer = playerIndex;
+        const result = await computeAIMoveAsync({
+            grid,
+            initialPlacements,
+            playerIndex: snapshotPlayer,
+            playerCount,
+            gridSize,
+            activeColors,
+            invalidInitialPositions
+        }, {
+            maxCellValue,
+            initialPlacementValue,
+            aiStrength,
+            cellExplodeThreshold,
+            debug: aiDebug
+        }, { enabled: false }).catch(() => null);
+        if (!result) {
+            updateEdgeCircleProgress(snapshotPlayer, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' });
+            return;
+        }
+        if (isProcessing || gameWon) {
+            updateEdgeCircleProgress(snapshotPlayer, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' });
+            return;
+        }
+        if (currentPlayer !== snapshotPlayer) {
+            updateEdgeCircleProgress(snapshotPlayer, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' });
+            return;
+        }
+        if (!aiDebug || !result || !result.debugInfo) return;
+        clearAIDebugUI();
+        markNoisyCells();
+        const move = result.chosen;
+        if (move) {
+            const aiCell = document.querySelector(`.cell[data-row="${move.r}"][data-col="${move.c}"]`);
+            if (aiCell) aiCell.classList.add('ai-highlight');
+        }
+        if (move && result.debugInfo && result.debugInfo.chosen && typeof result.debugInfo.chosen.gain === 'number') {
+            const chosenGain = result.debugInfo.chosen.gain;
+            const ordered = Array.isArray(result.debugInfo.ordered) ? result.debugInfo.ordered : [];
+            ordered
+                .filter(entry => entry && typeof entry.gain === 'number' && entry.gain === chosenGain)
+                .forEach(entry => {
+                    if (entry.r === move.r && entry.c === move.c) return;
+                    const cell = document.querySelector(`.cell[data-row="${entry.r}"][data-col="${entry.c}"]`);
+                    if (cell) cell.classList.add('ai-highlight-equal');
+                });
+        }
+        showAIDebugPanelWithResponse(result.debugInfo);
+    }
 
 
     /**
@@ -3079,7 +3393,17 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {void} may schedule aiMakeMoveFor with a short delay.
      */
     function maybeTriggerAIMove() {
-        if (!practiceMode || gameWon || isProcessing || currentPlayer === humanPlayer) return;
+        if (!practiceMode || gameWon || isProcessing) return;
+        if (practiceFreePlay) {
+            if (isAnyMenuOpen && isAnyMenuOpen()) return;
+            setTimeout(() => {
+                if (isProcessing || gameWon) return;
+                if (isAnyMenuOpen && isAnyMenuOpen()) return;
+                showAIPreviewFor(currentPlayer);
+            }, 200);
+            return;
+        }
+        if (currentPlayer === humanPlayer) return;
         if (isAnyMenuOpen && isAnyMenuOpen()) return;
         setTimeout(() => {
             if (isProcessing || gameWon || currentPlayer === humanPlayer) return;
@@ -3094,6 +3418,8 @@ document.addEventListener('DOMContentLoaded', () => {
         style.id = 'aiDebugStyles';
         style.textContent = `
             .ai-highlight { outline: 4px solid rgba(255,235,59,0.95) !important; box-shadow: 0 0 18px rgba(255,235,59,0.6); z-index:50; }
+            .ai-highlight-equal { outline: 3px dashed rgba(255,235,59,0.95) !important; box-shadow: 0 0 12px rgba(255,235,59,0.6); z-index:50; }
+            .ai-noisy { outline: 4px dotted rgba(255,87,34,0.9) !important; box-shadow: 0 0 18px rgba(255,87,34,0.5); z-index:45; }
             #aiDebugPanel { position:fixed; right:12px; bottom:12px; background:rgba(18,18,18,0.88); color:#eaeaea; padding:10px 12px; font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial; font-size:13px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.45); max-width:420px; z-index:1000; }
             #aiDebugPanel h4 { margin:0 0 6px 0; font-size:13px; }
             #aiDebugPanel pre { margin:6px 0 0 0; white-space:pre-wrap; font-family:monospace; font-size:12px; max-height:240px; overflow:auto; }
@@ -3105,6 +3431,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const existing = document.getElementById('aiDebugPanel');
         if (existing) existing.remove();
         document.querySelectorAll('.ai-highlight').forEach(el => el.classList.remove('ai-highlight'));
+        document.querySelectorAll('.ai-highlight-equal').forEach(el => el.classList.remove('ai-highlight-equal'));
+        document.querySelectorAll('.ai-noisy').forEach(el => el.classList.remove('ai-noisy'));
+    }
+
+    const ENABLE_NOISY_HIGHLIGHTS = false;
+
+    function markNoisyCells() {
+        if (!ENABLE_NOISY_HIGHLIGHTS) {
+            return;
+        }
+        ensureAIDebugStyles();
+        const noisy = getNoisyCells(grid, gridSize, cellExplodeThreshold);
+        if (!Array.isArray(noisy) || noisy.length === 0) return;
+        noisy.forEach(({ r, c }) => {
+            const cell = document.querySelector(`.cell[data-row="${r}"][data-col="${c}"]`);
+            if (cell) cell.classList.add('ai-noisy');
+        });
     }
 
     function showAIDebugPanelWithResponse(info) {
@@ -3113,18 +3456,39 @@ document.addEventListener('DOMContentLoaded', () => {
         if (existing) existing.remove();
         const panel = document.createElement('div'); panel.id = 'aiDebugPanel';
         const title = document.createElement('h4'); title.textContent = `AI dataRespect — player ${currentPlayer} (${activeColors()[currentPlayer]})`; panel.appendChild(title);
-        const summary = document.createElement('div'); summary.innerHTML = `<strong>chosen gain:</strong> ${info.chosen ? info.chosen.gain : '—'} &nbsp; <strong>expl:</strong> ${info.chosen ? info.chosen.expl : '—'}`; panel.appendChild(summary);
-        const listTitle = document.createElement('div'); listTitle.style.marginTop = '8px'; listTitle.innerHTML = `<em>candidates (top ${info.topK}) ordered by AI gain:</em>`; panel.appendChild(listTitle);
-        const pre = document.createElement('pre'); pre.textContent = info.ordered.map((e, i) => `${i + 1}. (${e.r},${e.c}) src:${e.src} expl:${e.expl} gain:${e.gain} atk:${e.atk} def:${e.def}`).join('\n'); panel.appendChild(pre);
+        const formatVal = (val) => (typeof val === 'number' ? val : '-');
+        const formatEval = (val) => (typeof val === 'number' ? val.toFixed(1) : '-');
+        const stepsVal = (typeof info.steps === 'number' ? info.steps : '-');
+        const branchesVal = (typeof info.branches === 'number' ? info.branches : '-');
+        const quiescenceVal = (typeof info.quiescenceNodes === 'number' ? ` (${info.quiescenceNodes})` : '');
+        const elapsedVal = (typeof info.elapsedMs === 'number' ? `${info.elapsedMs.toFixed(0)}ms` : '-');
+        const speedVal = (typeof info.stepsPerSec === 'number' ? `${info.stepsPerSec.toFixed(1)} steps/s` : '-');
+        const currentAtkVal = formatVal(info.currentAtk);
+        const currentDefVal = formatVal(info.currentDef);
+        const summary1 = document.createElement('div');
+        summary1.innerHTML = `<strong>c. eval:</strong> ${info.chosen ? formatEval(info.chosen.gain) : '-'} &nbsp; <strong>steps:</strong> ${stepsVal} &nbsp; <strong>total:</strong> ${branchesVal}${quiescenceVal}`;
+        panel.appendChild(summary1);
+        const summary2 = document.createElement('div');
+        summary2.innerHTML = `<strong>time:</strong> ${elapsedVal} &nbsp; <strong>speed:</strong> ${speedVal}`;
+        panel.appendChild(summary2);
+        const summary3 = document.createElement('div');
+        summary3.innerHTML = `<strong>current atk/def:</strong> ${currentAtkVal}/${currentDefVal}`;
+        panel.appendChild(summary3);
+        const listTitle = document.createElement('div'); listTitle.style.marginTop = '8px'; listTitle.innerHTML = `<em>candidates ordered by AI eval:</em>`; panel.appendChild(listTitle);
+        const pre = document.createElement('pre');
+        const ordered = Array.isArray(info.ordered) ? info.ordered.slice(0, 16) : [];
+        pre.textContent = ordered.map((e, i) => `${i + 1}. (${e.r},${e.c}) eval:${formatEval(e.gain)} atk:${formatVal(e.atk)} def:${formatVal(e.def)}`).join('\n');
+        panel.appendChild(pre);
         document.body.appendChild(panel);
     }
 
-    function aiMakeMoveFor(playerIndex) {
+    async function aiMakeMoveFor(playerIndex) {
         if (isProcessing || gameWon) return;
-        const result = computeAIMove({
+        const snapshotPlayer = playerIndex;
+        const result = await computeAIMoveAsync({
             grid,
             initialPlacements,
-            playerIndex,
+            playerIndex: snapshotPlayer,
             playerCount,
             gridSize,
             activeColors,
@@ -3132,19 +3496,50 @@ document.addEventListener('DOMContentLoaded', () => {
         }, {
             maxCellValue,
             initialPlacementValue,
-            dataRespectK,
-            aiDepth,
+            aiStrength,
             cellExplodeThreshold,
-            debug: aiDebug
-        });
-        if (result.scheduleGameEnd) { scheduleGameEnd(); return; }
-        if (result.requireAdvanceTurn) { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; advanceSeqTurn(); return; }
+            debug: aiDebug,
+            progressEvery: 250
+        }, {
+            enabled: true,
+            playerIndex: snapshotPlayer,
+            label: 'AI thinking',
+            kind: 'ai'
+        }).catch(() => null);
+        if (!result) return;
+        if (isProcessing || gameWon) return;
+        if (currentPlayer !== snapshotPlayer) return;
+        if (result.scheduleGameEnd) {
+            updateEdgeCircleProgress(snapshotPlayer, 1, { label: 'AI thinking', valueText: '100%', kind: 'ai' });
+            scheduleGameEnd();
+            setTimeout(() => updateEdgeCircleProgress(snapshotPlayer, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' }), 200);
+            return;
+        }
+        if (result.requireAdvanceTurn) {
+            updateEdgeCircleProgress(snapshotPlayer, 1, { label: 'AI thinking', valueText: '100%', kind: 'ai' });
+            if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true;
+            advanceSeqTurn();
+            setTimeout(() => updateEdgeCircleProgress(snapshotPlayer, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' }), 200);
+            return;
+        }
         const move = result.chosen;
         if (aiDebug && result.debugInfo) {
             clearAIDebugUI();
+            markNoisyCells();
             if (move) {
                 const aiCell = document.querySelector(`.cell[data-row="${move.r}"][data-col="${move.c}"]`);
                 if (aiCell) aiCell.classList.add('ai-highlight');
+            }
+            if (move && result.debugInfo && result.debugInfo.chosen && typeof result.debugInfo.chosen.gain === 'number') {
+                const chosenGain = result.debugInfo.chosen.gain;
+                const ordered = Array.isArray(result.debugInfo.ordered) ? result.debugInfo.ordered : [];
+                ordered
+                    .filter(entry => entry && typeof entry.gain === 'number' && entry.gain === chosenGain)
+                    .forEach(entry => {
+                        if (entry.r === move.r && entry.c === move.c) return;
+                        const cell = document.querySelector(`.cell[data-row="${entry.r}"][data-col="${entry.c}"]`);
+                        if (cell) cell.classList.add('ai-highlight-equal');
+                    });
             }
             showAIDebugPanelWithResponse(result.debugInfo);
             if (move) {
@@ -3163,6 +3558,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         if (move) handleClick(move.r, move.c); else { if (!initialPlacements[playerIndex]) initialPlacements[playerIndex] = true; advanceSeqTurn(); }
+        setTimeout(() => {
+            updateEdgeCircleProgress(snapshotPlayer, 0, { label: 'AI thinking', valueText: '0%', kind: 'ai' });
+        }, 200);
     }
 
     //#endregion

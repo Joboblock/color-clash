@@ -951,6 +951,7 @@ export function computeAIMove(state, config) {
 		cand.netResult = (typeof cand.searchScore === 'number' ? cand.searchScore : cand.immediateGain);
 	}
 	mark('finalize');
+	allCandidates.sort(compareCandidatesByNetAndLinePlies);
 	const winning = allCandidates.filter(c => c.searchScore === Infinity);
 	let chosen;
 	if (winning.length) {
@@ -958,7 +959,6 @@ export function computeAIMove(state, config) {
 		const fastest = winning.filter(c => (typeof c.linePlies === 'number' ? c.linePlies : Number.POSITIVE_INFINITY) === minPlies);
 		chosen = fastest.length ? fastest[Math.floor(Math.random() * fastest.length)] : winning[0];
 	} else {
-		allCandidates.sort(compareCandidatesByNetAndLinePlies);
 		const bestNet = allCandidates[0] ? allCandidates[0].netResult : -Infinity;
 		const bestByNet = allCandidates.filter(t => t.netResult === bestNet);
 		let bestMoves = bestByNet.length ? bestByNet : [];
@@ -998,7 +998,8 @@ export function computeAIMove(state, config) {
 				depthCounts
 			});
 		} catch { /* ignore */ }
-		let ordered = allCandidates.slice().sort(compareCandidatesByNetAndLinePlies);
+		let ordered = allCandidates.slice();
+		// Put chosen move at the top of the debug list 
 		if (chosen) {
 			const chosenIdx = ordered.findIndex(c => c.r === chosen.r && c.c === chosen.c && c.isInitial === chosen.isInitial);
 			if (chosenIdx > 0) {

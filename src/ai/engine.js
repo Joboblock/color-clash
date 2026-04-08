@@ -40,7 +40,7 @@
 import { resolveExplosionChain } from '../game/gridCalc.js';
 
 /** @typedef {{r:number,c:number,isInitial:boolean,srcVal:number,sortKey:number}} Candidate */
-/** @typedef {{r:number,c:number,isInitial:boolean,srcVal:number,explosions:number,immediateGain:number,resultGrid:any,resultInitial:boolean[],runaway:boolean,searchScore?:number,winPlies?:number,atk?:number,def?:number,netResult?:number,finalGrid?:any}} Evaluated */
+/** @typedef {{r:number,c:number,isInitial:boolean,srcVal:number,explosions:number,immediateGain:number,resultGrid:any,resultInitial:boolean[],runaway:boolean,searchScore?:number,linePlies?:number,atk?:number,def?:number,netResult?:number,finalGrid?:any}} Evaluated */
 
 /**
  * Deep-copy a simulated grid structure to avoid mutation across branches.
@@ -265,7 +265,7 @@ function detectTerminalOutcome(simGridInput, simInitialPlacementsInput, focusPla
 		}
 	}
 	if (hasAny && activePlayers === 1) {
-		return { value: (soleIdx === focusPlayerIndex) ? Infinity : -Infinity, stepsToInfinity: 1 };
+		return { value: (soleIdx === focusPlayerIndex) ? Infinity : -Infinity, linePlies: 1 };
 	}
 	return null;
 }
@@ -429,6 +429,32 @@ function generateNoisyCoalitionCandidatesOnSim(simGrid, simInitialPlacements, fo
 	return out;
 }
 
+/**
+ * Comparator for final/root candidate ordering.
+ *
+ * Primary key: higher `netResult` first.
+ * Tie-break: for equal positive `netResult`, shorter `linePlies` first;
+ * for equal negative `netResult`, longer `linePlies` first.
+ *
+ * @param {Evaluated} a - first candidate.
+ * @param {Evaluated} b - second candidate.
+ * @returns {number} sort comparator value compatible with Array.prototype.sort.
+ */
+function compareCandidatesByNetAndLinePlies(a, b) {
+	const netDiff = (b.netResult - a.netResult);
+	if (netDiff !== 0 && !Number.isNaN(netDiff)) return netDiff;
+	if (a.netResult > 0) return (a.linePlies - b.linePlies);
+	if (a.netResult < 0) return (b.linePlies - a.linePlies);
+	return 0;
+}
+
+function prefersChainLengthForValue(value, candidateSteps, bestSteps) {
+	if (typeof candidateSteps !== 'number') return false;
+	if (value > 0) return (bestSteps === undefined || candidateSteps < bestSteps);
+	if (value < 0) return (bestSteps === undefined || candidateSteps > bestSteps);
+	return false;
+}
+
 function quiescenceEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts) {
 	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal, baseEnemyTotal, quiescenceTracker } = opts;
 	if (opts && typeof opts.nodeVisited === 'function') {
@@ -438,12 +464,12 @@ function quiescenceEvaluate(simGridInput, simInitialPlacementsInput, moverIndex,
 	if (quiescenceTracker && typeof quiescenceTracker.count === 'number') quiescenceTracker.count += 1;
 	const terminal = detectTerminalOutcome(simGridInput, simInitialPlacementsInput, focusPlayerIndex, gridSize, activeColors);
 	if (terminal) {
-		return { value: terminal.value, runaway: true, stepsToInfinity: terminal.stepsToInfinity, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
+		return { value: terminal.value, runaway: true, linePlies: terminal.linePlies, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
 	}
 	const noisyCells = collectNoisyCells(simGridInput, gridSize, cellExplodeThreshold);
 	if (depth === 0 || noisyCells.size === 0) {
 		const evalRes = evaluatePosition(simGridInput, focusPlayerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal, baseEnemyTotal });
-		return { value: evalRes.score, runaway: false, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
+		return { value: evalRes.score, runaway: false, linePlies: 0, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
 	}
 	const simGrid = deepCloneGrid(simGridInput, gridSize);
 	const simInitial = simInitialPlacementsInput.slice();
@@ -456,7 +482,7 @@ function quiescenceEvaluate(simGridInput, simInitialPlacementsInput, moverIndex,
 	}
 	if (!candidates.length) {
 		const evalRes = evaluatePosition(simGridInput, focusPlayerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal, baseEnemyTotal });
-		return { value: evalRes.score, runaway: false, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
+		return { value: evalRes.score, runaway: false, linePlies: 0, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
 	}
 	const evaluated = [];
 	const maxExplosionsToAssumeLoop = gridSize * 3;
@@ -472,26 +498,23 @@ function quiescenceEvaluate(simGridInput, simInitialPlacementsInput, moverIndex,
 	}
 	evaluated.sort((a, b) => isFocusTurn ? (b.value - a.value) : (a.value - b.value));
 	const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
-	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestSteps; let bestGrid = simGridInput; let branchCount = 0; let prunedCount = 0;
-	const prefersSteps = (value, candidateSteps) => {
-		if (typeof candidateSteps !== 'number') return false;
-		if (value === Infinity) return isFocusTurn ? (bestSteps === undefined || candidateSteps < bestSteps) : (bestSteps === undefined || candidateSteps > bestSteps);
-		if (value === -Infinity) return isFocusTurn ? (bestSteps === undefined || candidateSteps > bestSteps) : (bestSteps === undefined || candidateSteps < bestSteps);
-		return false;
-	};
+	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestLinePlies; let bestGrid = simGridInput; let branchCount = 0; let prunedCount = 0;
 	for (let i = 0; i < evaluated.length; i++) {
 		const entry = evaluated[i];
 		if (entry.value === Infinity || entry.value === -Infinity) {
 			prunedCount += Math.max(0, evaluated.length - (i + 1));
-			return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid, branchCount: 1, prunedCount };
+			const immediateValue = isFocusTurn ? Infinity : -Infinity;
+			return { value: immediateValue, runaway: true, linePlies: 1, bestGrid: entry.resultGrid, branchCount: 1, prunedCount };
 		}
 		const child = quiescenceEvaluate(entry.resultGrid, entry.simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts);
 		branchCount += typeof child.branchCount === 'number' ? child.branchCount : 1;
 		prunedCount += typeof child.prunedCount === 'number' ? child.prunedCount : 0;
-		const value = child.value; const childSteps = typeof child.stepsToInfinity === 'number' ? child.stepsToInfinity + 1 : undefined;
+		const value = child.value;
+		const childLinePlies = (typeof child.linePlies === 'number') ? (child.linePlies + 1) : undefined;
+		const tieBySign = (value === bestValue) && prefersChainLengthForValue(value, childLinePlies, bestLinePlies);
 		if (isFocusTurn) {
-			if (value > bestValue || (value === bestValue && (value === Infinity || value === -Infinity) && prefersSteps(value, childSteps))) {
-				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
+			if (value > bestValue || tieBySign) {
+				bestValue = value; bestLinePlies = childLinePlies; bestGrid = child.bestGrid || entry.resultGrid;
 			}
 			alpha = Math.max(alpha, bestValue);
 			if (alpha >= beta) {
@@ -499,8 +522,8 @@ function quiescenceEvaluate(simGridInput, simInitialPlacementsInput, moverIndex,
 				break;
 			}
 		} else {
-			if (value < bestValue || (value === bestValue && (value === Infinity || value === -Infinity) && prefersSteps(value, childSteps))) {
-				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
+			if (value < bestValue || tieBySign) {
+				bestValue = value; bestLinePlies = childLinePlies; bestGrid = child.bestGrid || entry.resultGrid;
 			}
 			beta = Math.min(beta, bestValue);
 			if (beta <= alpha) {
@@ -510,7 +533,14 @@ function quiescenceEvaluate(simGridInput, simInitialPlacementsInput, moverIndex,
 		}
 	}
 	const isInf = (bestValue === Infinity || bestValue === -Infinity);
-	return { value: bestValue, runaway: isInf, stepsToInfinity: isInf ? bestSteps : undefined, bestGrid, branchCount, prunedCount };
+	return {
+		value: bestValue,
+		runaway: isInf,
+		linePlies: (typeof bestLinePlies === 'number') ? bestLinePlies : 0,
+		bestGrid,
+		branchCount,
+		prunedCount
+	};
 }
 
 /**
@@ -560,7 +590,7 @@ function applyMoveAndSim(simGridInput, simInitialPlacementsInput, moverIndex, mo
  * @param {number} beta - beta value.
  * @param {number} maximizingPlayerIndex - maximizing player.
  * @param {number} focusPlayerIndex - player to evaluate for.
- * @returns {{value:number, runaway:boolean, stepsToInfinity?:number, bestGrid:Array<Array<{value:number,player:string}>>, branchCount:number, prunedCount:number}} evaluation score for focus player and plies to +/-Infinity if detected.
+ * @returns {{value:number, runaway:boolean, linePlies:number, bestGrid:Array<Array<{value:number,player:string}>>, branchCount:number, prunedCount:number}} evaluation score for focus player and line plies used for tie-breaks.
  */
 function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, depth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts) {
 	const { gridSize, activeColors, maxCellValue, initialPlacementValue, invalidInitialPositions, playerCount, cellExplodeThreshold, baseTotal, baseEnemyTotal, quiescenceDepth } = opts;
@@ -569,14 +599,14 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 	}
 	const terminal = detectTerminalOutcome(simGridInput, simInitialPlacementsInput, focusPlayerIndex, gridSize, activeColors);
 	if (terminal) {
-		return { value: terminal.value, runaway: true, stepsToInfinity: terminal.stepsToInfinity, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
+		return { value: terminal.value, runaway: true, linePlies: terminal.linePlies, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
 	}
 	if (depth === 0) {
 		if (quiescenceDepth > 0 && collectNoisyCells(simGridInput, gridSize, cellExplodeThreshold).size > 0) {
 			return quiescenceEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, quiescenceDepth, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts);
 		}
 		const evalRes = evaluatePosition(simGridInput, focusPlayerIndex, { gridSize, activeColors, cellExplodeThreshold, baseTotal, baseEnemyTotal });
-		return { value: evalRes.score, runaway: false, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
+		return { value: evalRes.score, runaway: false, linePlies: 0, bestGrid: simGridInput, branchCount: 1, prunedCount: 0 };
 	}
 	const simGrid = deepCloneGrid(simGridInput, gridSize);
 	const simInitial = simInitialPlacementsInput.slice();
@@ -606,26 +636,23 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 	evaluated.sort((a, b) => isFocusTurn ? (b.value - a.value) : (a.value - b.value));
 	const topCandidates = evaluated;
 	const nextMover = isFocusTurn ? -1 : focusPlayerIndex;
-	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestSteps; let bestGrid = simGridInput; let branchCount = 0; let prunedCount = 0;
-	const prefersSteps = (value, candidateSteps) => {
-		if (typeof candidateSteps !== 'number') return false;
-		if (value === Infinity) return isFocusTurn ? (bestSteps === undefined || candidateSteps < bestSteps) : (bestSteps === undefined || candidateSteps > bestSteps);
-		if (value === -Infinity) return isFocusTurn ? (bestSteps === undefined || candidateSteps > bestSteps) : (bestSteps === undefined || candidateSteps < bestSteps);
-		return false;
-	};
+	let bestValue = isFocusTurn ? -Infinity : Infinity; let bestLinePlies; let bestGrid = simGridInput; let branchCount = 0; let prunedCount = 0;
 	for (let i = 0; i < topCandidates.length; i++) {
 		const entry = topCandidates[i];
 		if (entry.value === Infinity || entry.value === -Infinity) {
 			prunedCount += Math.max(0, topCandidates.length - (i + 1));
-			return { value: isFocusTurn ? Infinity : -Infinity, runaway: true, stepsToInfinity: 1, bestGrid: entry.resultGrid, branchCount: 1, prunedCount };
+			const immediateValue = isFocusTurn ? Infinity : -Infinity;
+			return { value: immediateValue, runaway: true, linePlies: 1, bestGrid: entry.resultGrid, branchCount: 1, prunedCount };
 		}
 		const child = minimaxEvaluate(entry.resultGrid, entry.simInitial, nextMover, depth - 1, alpha, beta, maximizingPlayerIndex, focusPlayerIndex, opts);
 		branchCount += typeof child.branchCount === 'number' ? child.branchCount : 1;
 		prunedCount += typeof child.prunedCount === 'number' ? child.prunedCount : 0;
-		const value = child.value; const childSteps = typeof child.stepsToInfinity === 'number' ? child.stepsToInfinity + 1 : undefined;
+		const value = child.value;
+		const childLinePlies = (typeof child.linePlies === 'number') ? (child.linePlies + 1) : undefined;
+		const tieBySign = (value === bestValue) && prefersChainLengthForValue(value, childLinePlies, bestLinePlies);
 		if (isFocusTurn) {
-			if (value > bestValue || (value === bestValue && (value === Infinity || value === -Infinity) && prefersSteps(value, childSteps))) {
-				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
+			if (value > bestValue || tieBySign) {
+				bestValue = value; bestLinePlies = childLinePlies; bestGrid = child.bestGrid || entry.resultGrid;
 			}
 			alpha = Math.max(alpha, bestValue);
 			if (alpha >= beta) {
@@ -633,8 +660,8 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 				break;
 			}
 		} else {
-			if (value < bestValue || (value === bestValue && (value === Infinity || value === -Infinity) && prefersSteps(value, childSteps))) {
-				bestValue = value; bestSteps = childSteps; bestGrid = child.bestGrid || entry.resultGrid;
+			if (value < bestValue || tieBySign) {
+				bestValue = value; bestLinePlies = childLinePlies; bestGrid = child.bestGrid || entry.resultGrid;
 			}
 			beta = Math.min(beta, bestValue);
 			if (beta <= alpha) {
@@ -644,7 +671,14 @@ function minimaxEvaluate(simGridInput, simInitialPlacementsInput, moverIndex, de
 		}
 	}
 	const isInf = (bestValue === Infinity || bestValue === -Infinity);
-	return { value: bestValue, runaway: isInf, stepsToInfinity: isInf ? bestSteps : undefined, bestGrid, branchCount, prunedCount };
+	return {
+		value: bestValue,
+		runaway: isInf,
+		linePlies: (typeof bestLinePlies === 'number') ? bestLinePlies : 0,
+		bestGrid,
+		branchCount,
+		prunedCount
+	};
 }
 
 /**
@@ -849,7 +883,7 @@ export function computeAIMove(state, config) {
 		for (const cand of allCandidates) {
 			if (cand.runaway) {
 				cand.searchScore = (cand.immediateGain === Infinity) ? Infinity : -Infinity;
-				if (cand.searchScore === Infinity) cand.winPlies = 1;
+				cand.linePlies = 1;
 				cand.finalGrid = cand.resultGrid;
 				cand.branchCount = 1;
 				cand.prunedCount = 0;
@@ -859,9 +893,7 @@ export function computeAIMove(state, config) {
 				const nextMover = -1;
 				const evalRes = minimaxEvaluate(cand.resultGrid, cand.resultInitial, nextMover, Math.max(0, depth - 1), -Infinity, Infinity, playerIndex, playerIndex, depthOpts);
 				cand.searchScore = evalRes.value;
-				if ((evalRes.value === Infinity || evalRes.value === -Infinity) && typeof evalRes.stepsToInfinity === 'number') {
-					cand.winPlies = evalRes.stepsToInfinity;
-				}
+				if (typeof evalRes.linePlies === 'number') cand.linePlies = evalRes.linePlies;
 				cand.finalGrid = evalRes.bestGrid || cand.resultGrid;
 				cand.branchCount = evalRes.branchCount;
 				cand.prunedCount = evalRes.prunedCount;
@@ -890,12 +922,12 @@ export function computeAIMove(state, config) {
 		reportProgress(depth, true);
 		if (budgetExceededDepth === depth) break;
 		const winPlies = allCandidates
-			.filter(c => c.searchScore === Infinity && typeof c.winPlies === 'number')
-			.map(c => c.winPlies);
+			.filter(c => c.searchScore === Infinity && typeof c.linePlies === 'number')
+			.map(c => c.linePlies);
 		const hasForcedWin = winPlies.length > 0;
-		const hasForcedLoss = allCandidates.length > 0 && allCandidates.every(c => c.searchScore === -Infinity && typeof c.winPlies === 'number');
+		const hasForcedLoss = allCandidates.length > 0 && allCandidates.every(c => c.searchScore === -Infinity && typeof c.linePlies === 'number');
 		if (hasForcedWin || hasForcedLoss) {
-			const lossPlies = hasForcedLoss ? allCandidates.map(c => c.winPlies).filter(v => typeof v === 'number') : [];
+			const lossPlies = hasForcedLoss ? allCandidates.map(c => c.linePlies).filter(v => typeof v === 'number') : [];
 			const allPlies = hasForcedWin ? winPlies.concat(lossPlies) : lossPlies;
 			if (allPlies.length) {
 				const minWinPlies = Math.min(...allPlies);
@@ -922,14 +954,21 @@ export function computeAIMove(state, config) {
 	const winning = allCandidates.filter(c => c.searchScore === Infinity);
 	let chosen;
 	if (winning.length) {
-		const minPlies = Math.min(...winning.map(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY)));
-		const fastest = winning.filter(c => (typeof c.winPlies === 'number' ? c.winPlies : Number.POSITIVE_INFINITY) === minPlies);
+		const minPlies = Math.min(...winning.map(c => (typeof c.linePlies === 'number' ? c.linePlies : Number.POSITIVE_INFINITY)));
+		const fastest = winning.filter(c => (typeof c.linePlies === 'number' ? c.linePlies : Number.POSITIVE_INFINITY) === minPlies);
 		chosen = fastest.length ? fastest[Math.floor(Math.random() * fastest.length)] : winning[0];
 	} else {
-		allCandidates.sort((a, b) => (b.netResult - a.netResult));
+		allCandidates.sort(compareCandidatesByNetAndLinePlies);
 		const bestNet = allCandidates[0] ? allCandidates[0].netResult : -Infinity;
 		const bestByNet = allCandidates.filter(t => t.netResult === bestNet);
 		let bestMoves = bestByNet.length ? bestByNet : [];
+		if (bestMoves.length > 1 && bestNet > 0) {
+			const minPlies = Math.min(...bestMoves.map(m => (typeof m.linePlies === 'number' ? m.linePlies : Number.POSITIVE_INFINITY)));
+			bestMoves = bestMoves.filter(m => (typeof m.linePlies === 'number' ? m.linePlies : Number.POSITIVE_INFINITY) === minPlies);
+		} else if (bestMoves.length > 1 && bestNet < 0) {
+			const maxPlies = Math.max(...bestMoves.map(m => (typeof m.linePlies === 'number' ? m.linePlies : Number.NEGATIVE_INFINITY)));
+			bestMoves = bestMoves.filter(m => (typeof m.linePlies === 'number' ? m.linePlies : Number.NEGATIVE_INFINITY) === maxPlies);
+		}
 		if (!bestMoves || !bestMoves.length) bestMoves = allCandidates.length ? [allCandidates[0]] : [];
 		chosen = bestMoves.length ? bestMoves[Math.floor(Math.random() * bestMoves.length)] : null;
 	}
@@ -959,21 +998,7 @@ export function computeAIMove(state, config) {
 				depthCounts
 			});
 		} catch { /* ignore */ }
-		let ordered = allCandidates.slice();
-		if (winning.length) {
-			ordered = ordered.slice().sort((a, b) => {
-				if (a.searchScore === Infinity && b.searchScore === Infinity) {
-					const aPlies = typeof a.winPlies === 'number' ? a.winPlies : Number.POSITIVE_INFINITY;
-					const bPlies = typeof b.winPlies === 'number' ? b.winPlies : Number.POSITIVE_INFINITY;
-					return aPlies - bPlies;
-				}
-				if (a.searchScore === Infinity) return -1;
-				if (b.searchScore === Infinity) return 1;
-				return (b.netResult - a.netResult);
-			});
-		} else {
-			ordered = ordered.slice().sort((a, b) => (b.netResult - a.netResult));
-		}
+		let ordered = allCandidates.slice().sort(compareCandidatesByNetAndLinePlies);
 		if (chosen) {
 			const chosenIdx = ordered.findIndex(c => c.r === chosen.r && c.c === chosen.c && c.isInitial === chosen.isInitial);
 			if (chosenIdx > 0) {
@@ -981,7 +1006,7 @@ export function computeAIMove(state, config) {
 				ordered.unshift(chosenEntry);
 			}
 		}
-		const steps = (chosen && chosen.searchScore === Infinity && typeof chosen.winPlies === 'number') ? chosen.winPlies : effectiveDepth;
+		const steps = (chosen && chosen.searchScore === Infinity && typeof chosen.linePlies === 'number') ? chosen.linePlies : effectiveDepth;
 		const branches = cumulativeBranches;
 		const endTime = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 		const elapsedMs = endTime - startTime;
@@ -989,9 +1014,9 @@ export function computeAIMove(state, config) {
 		const currentAtkDef = computeAtkDefForGrid(grid, gridSize, activeColors, cellExplodeThreshold, playerIndex);
 		result.debugInfo = {
 			chosen: chosen ? {
-				r: chosen.r, c: chosen.c, src: chosen.srcVal, expl: chosen.explosions, gain: chosen.searchScore, atk: chosen.atk, def: chosen.def, winPlies: chosen.winPlies
+				r: chosen.r, c: chosen.c, src: chosen.srcVal, expl: chosen.explosions, gain: chosen.searchScore, atk: chosen.atk, def: chosen.def, linePlies: chosen.linePlies
 			} : null,
-			ordered: ordered.map(c => ({ r: c.r, c: c.c, src: c.srcVal, expl: c.explosions, gain: c.searchScore, atk: c.atk, def: c.def, winPlies: c.winPlies })),
+			ordered: ordered.map(c => ({ r: c.r, c: c.c, src: c.srcVal, expl: c.explosions, gain: c.searchScore, atk: c.atk, def: c.def, linePlies: c.linePlies })),
 			steps,
 			branches,
 			quiescenceNodes: quiescenceTracker.count,

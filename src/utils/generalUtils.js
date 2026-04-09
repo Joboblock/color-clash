@@ -113,15 +113,29 @@ export function sanitizeName(raw) {
 }
 
 /**
- * Reflect validity state on an input element (invalid when 0 < length < 3).
- * Adds/removes 'invalid' class and aria-invalid attribute.
- * @param {HTMLInputElement} inputEl - Target input element.
- * @param {string} val - Current value.
+ * Decide whether a sanitized player name is eligible to be persisted/sent as an identity.
+ * Purpose: keep client-side storage and server identity behavior aligned so short/long
+ * placeholders are treated as "no name" rather than becoming semi-valid player identities.
+ * @param {string} val - Candidate sanitized name.
+ * @returns {boolean} True when length is inside configured min/max bounds.
+ */
+export function isNameLengthValid(val) {
+    if (typeof val !== 'string') return false;
+    return val.length >= MIN_PLAYER_NAME_LENGTH && val.length <= MAX_PLAYER_NAME_LENGTH;
+}
+
+/**
+ * Reflect the "accepted as player identity" policy in the input UI.
+ * Purpose: communicate whether the current text will actually be used as the
+ * player's name (persisted and sent), while allowing empty input to stay neutral
+ * because empty is treated as unnamed fallback state.
+ * @param {HTMLInputElement|null} inputEl - Input to decorate with validity state.
+ * @param {string} val - Current input value (ideally sanitized).
  * @returns {void}
  */
 export function checkNameLengthValidity(inputEl, val) {
     if (!inputEl) return;
-    const validLength = val.length >= MIN_PLAYER_NAME_LENGTH && val.length <= MAX_PLAYER_NAME_LENGTH;
+    const validLength = val.length === 0 || isNameLengthValid(val);
     if (validLength) {
         inputEl.classList.remove('invalid');
         inputEl.removeAttribute('aria-invalid');
@@ -183,6 +197,7 @@ export default {
     defaultGridSizeForPlayers,
     clampPlayers,
     sanitizeName,
+    isNameLengthValid,
     reflectValidity: checkNameLengthValidity,
     getDeviceTips,
     pickWeightedTip

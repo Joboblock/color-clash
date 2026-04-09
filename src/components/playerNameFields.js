@@ -4,7 +4,7 @@
  * for the local and online player name input fields. Falls back gracefully if one
  * of the fields is absent.
  */
-import { sanitizeName, checkNameLengthValidity } from '../utils/generalUtils.js';
+import { sanitizeName, checkNameLengthValidity, isNameLengthValid } from '../utils/generalUtils.js';
 import { MAX_PLAYER_NAME_LENGTH } from '../config/index.js';
 
 export class PlayerNameFields {
@@ -59,7 +59,11 @@ export class PlayerNameFields {
 		const cleaned = sanitizeName(name || '');
 		if (cleaned === this.currentName) return;
 		this.currentName = cleaned;
-		localStorage.setItem(this.storageKey, cleaned);
+		if (isNameLengthValid(cleaned)) {
+			localStorage.setItem(this.storageKey, cleaned);
+		} else {
+			localStorage.removeItem(this.storageKey);
+		}
 		this._applyToAll(cleaned);
 		if (this.onNameChange) {
 			try { this.onNameChange(cleaned); } catch { /* ignore */ }

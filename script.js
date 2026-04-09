@@ -6,7 +6,7 @@ import { onlinePage } from './src/pages/online.js';
 import { mainPage } from './src/pages/main.js';
 
 // General utilities (merged)
-import { sanitizeName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
+import { sanitizeName, isNameLengthValid, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
 import {
     computeInvalidInitialPositions as calcInvalidInitialPositions,
     isInitialPlacementInvalid as calcIsInitialPlacementInvalid,
@@ -24,7 +24,6 @@ import { createEdgeCircles, updateEdgeCirclesActive, updateEdgeCircleProgress, g
 import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
 import { APP_VERSION } from './src/version.js';
 
-// MAX_PLAYER_NAME_LENGTH now imported from nameUtils.js
 document.addEventListener('DOMContentLoaded', () => {
     let serverVersion = null;
     let connectionTag = null;
@@ -1073,8 +1072,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const name = onlinePlayerNameInput.value.trim() || 'Player';
         function sendHost() {
             try {
-                let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput.value || 'Player'));
-                myPlayerName = debugPlayerName;
+                const candidateName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput.value || ''));
+                const debugPlayerName = isNameLengthValid(candidateName) ? candidateName : undefined;
+                myPlayerName = debugPlayerName || 'Player';
                 const selectedPlayers = Math.max(2, Math.min(playerColors.length, Math.floor(menuPlayerCount || 2)));
                 const desiredGrid = Number.isInteger(menuGridSizeVal) ? Math.max(3, Math.min(16, menuGridSizeVal)) : Math.max(3, selectedPlayers + 3);
                 hostedDesiredGridSize = desiredGrid;
@@ -1090,7 +1090,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.joinRoom = function joinRoom(roomName) {
         if (!clientFullyInitialized) return;
         // For debug: send player name, but do not use for logic
-        let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput?.value || 'Player'));
+        let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput?.value || ''));
+        if (!isNameLengthValid(debugPlayerName)) debugPlayerName = 'Player';
         // Check for duplicate names in the room list
         let rooms = window.lastRoomList || {};
         let takenNames = [];

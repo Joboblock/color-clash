@@ -9,8 +9,8 @@ import { WebSocketServer } from 'ws';
 import { APP_VERSION } from './src/version.js';
 import { createInitialRoomGridState, validateAndApplyMove } from './src/game/serverGridEngine.js';
 import { advanceTurnIndex, computeAliveMask } from './src/game/turnCalc.js';
+import { isNameLengthValid } from './src/utils/generalUtils.js';
 import {
-    MIN_PLAYER_NAME_LENGTH,
     MAX_PLAYER_NAME_LENGTH,
     MAX_CELL_VALUE,
     INITIAL_PLACEMENT_VALUE,
@@ -1410,7 +1410,7 @@ function clampPlayers(n) {
     return Math.max(2, Math.min(8, v));
 }
 
-// Sanitize an incoming name and enforce base length 12.
+// Sanitize an incoming token for room/name usage and enforce max base length.
 function sanitizeBaseName(raw) {
     try {
         let s = String(raw || '').trim();
@@ -1422,6 +1422,13 @@ function sanitizeBaseName(raw) {
     } catch {
         return 'Player';
     }
+}
+
+// Normalize player names to server identity policy: invalid length => unnamed fallback.
+function sanitizePlayerBaseName(raw) {
+    const s = sanitizeBaseName(raw);
+    if (!isNameLengthValid(s)) return 'Player';
+    return s;
 }
 
 // Pick a unique name within a room by appending a single-digit suffix 2..9 in the 13th position if needed.
@@ -1439,10 +1446,11 @@ function pickUniqueFromTaken(raw, takenArray) {
 
 // Pick a unique player name within a room, or null if variants exhausted
 function pickUniqueName(room, raw) {
+    const normalized = sanitizePlayerBaseName(raw);
     const taken = room && Array.isArray(room.participants)
         ? room.participants.map(p => p.name)
         : [];
-    return pickUniqueFromTaken(raw, taken);
+    return pickUniqueFromTaken(normalized, taken);
 }
 
 // Pick a unique room name across all rooms using the same pattern; or null if exhausted

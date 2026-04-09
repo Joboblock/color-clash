@@ -11,7 +11,8 @@
 
 // 1. Game Parameters --------------------------------------------------------
 export const GameParams = Object.freeze({
-    PLAYER_NAME_LENGTH: 12,          // base name length (suffix may extend shown length)
+    MIN_PLAYER_NAME_LENGTH: 3,        // min name length
+    MAX_PLAYER_NAME_LENGTH: 12,      // max name length (suffix may extend shown length)
     MAX_CELL_VALUE: 5,               // cap value for a cell (dots)
     INITIAL_PLACEMENT_VALUE: 5,      // starting value when placing first orb
     CELL_EXPLODE_THRESHOLD: 4,       // value at which cell explodes and distributes
@@ -23,7 +24,8 @@ export const GameParams = Object.freeze({
 
 // Named exports (for selective import convenience)
 export const {
-    PLAYER_NAME_LENGTH,
+    MIN_PLAYER_NAME_LENGTH,
+    MAX_PLAYER_NAME_LENGTH,
     MAX_CELL_VALUE,
     INITIAL_PLACEMENT_VALUE,
     CELL_EXPLODE_THRESHOLD,

@@ -1,4 +1,7 @@
-import { PLAYER_NAME_LENGTH } from '../config/index.js';
+import { 
+    MIN_PLAYER_NAME_LENGTH,
+    MAX_PLAYER_NAME_LENGTH 
+} from '../config/index.js';
 
 // Color helpers -----------------------------------------------------------
 /**
@@ -105,7 +108,7 @@ export function sanitizeName(raw) {
     if (typeof raw !== 'string') return '';
     let s = raw.replace(/\s/g, '_');
     s = s.replace(/[^A-Za-z0-9_]/g, '');
-    if (s.length > PLAYER_NAME_LENGTH) s = s.slice(0, PLAYER_NAME_LENGTH);
+    if (s.length > MAX_PLAYER_NAME_LENGTH) s = s.slice(0, MAX_PLAYER_NAME_LENGTH);
     return s;
 }
 
@@ -116,15 +119,16 @@ export function sanitizeName(raw) {
  * @param {string} val - Current value.
  * @returns {void}
  */
-export function reflectValidity(inputEl, val) {
+export function checkNameLengthValidity(inputEl, val) {
     if (!inputEl) return;
-    const tooShort = val.length > 0 && val.length < 3;
-    if (tooShort) {
-        inputEl.classList.add('invalid');
-        inputEl.setAttribute('aria-invalid', 'true');
-    } else {
+    const validLength = val.length >= MIN_PLAYER_NAME_LENGTH && val.length <= MAX_PLAYER_NAME_LENGTH;
+    if (validLength) {
         inputEl.classList.remove('invalid');
         inputEl.removeAttribute('aria-invalid');
+    }
+    else {
+        inputEl.classList.add('invalid');
+        inputEl.setAttribute('aria-invalid', 'true');
     }
 }
 
@@ -179,7 +183,7 @@ export default {
     defaultGridSizeForPlayers,
     clampPlayers,
     sanitizeName,
-    reflectValidity,
+    reflectValidity: checkNameLengthValidity,
     getDeviceTips,
     pickWeightedTip
 };

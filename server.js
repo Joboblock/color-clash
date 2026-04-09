@@ -1,5 +1,3 @@
-// Player name length limit (base, not including suffix)
-const PLAYER_NAME_LENGTH = 12;
 import http from 'http';
 import process from 'node:process';
 import * as crypto from 'node:crypto';
@@ -12,6 +10,8 @@ import { APP_VERSION } from './src/version.js';
 import { createInitialRoomGridState, validateAndApplyMove } from './src/game/serverGridEngine.js';
 import { advanceTurnIndex, computeAliveMask } from './src/game/turnCalc.js';
 import {
+    MIN_PLAYER_NAME_LENGTH,
+    MAX_PLAYER_NAME_LENGTH,
     MAX_CELL_VALUE,
     INITIAL_PLACEMENT_VALUE,
     CELL_EXPLODE_THRESHOLD,
@@ -1417,7 +1417,7 @@ function sanitizeBaseName(raw) {
         if (!s) s = 'Player';
         // Align with client: replace spaces with underscores and drop non-alphanumerics/underscore
         s = s.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '');
-        if (s.length > PLAYER_NAME_LENGTH) s = s.slice(0, PLAYER_NAME_LENGTH);
+        if (s.length > MAX_PLAYER_NAME_LENGTH) s = s.slice(0, MAX_PLAYER_NAME_LENGTH);
         return s;
     } catch {
         return 'Player';
@@ -1431,7 +1431,7 @@ function pickUniqueFromTaken(raw, takenArray) {
     const taken = Array.isArray(takenArray) ? takenArray : [];
     if (!taken.includes(base)) return base;
     for (let i = 2; i <= 9; i++) {
-        const candidate = base.slice(0, PLAYER_NAME_LENGTH) + String(i);
+        const candidate = base.slice(0, MAX_PLAYER_NAME_LENGTH) + String(i);
         if (!taken.includes(candidate)) return candidate;
     }
     return null; // signal exhaustion instead of falling back to base

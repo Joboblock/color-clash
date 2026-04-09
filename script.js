@@ -17,14 +17,14 @@ import { playerColors, getStartingColorIndex, setStartingColorIndex, computeSele
 import { advanceTurnIndex } from './src/game/turnCalc.js';
 import { createOnlineTurnTracker } from './src/online/onlineTurn.js';
 import { computeAIMove, getNoisyCells } from './src/ai/engine.js';
-import { PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
+import { MAX_PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
 // Edge circles component
 import { createEdgeCircles, updateEdgeCirclesActive, updateEdgeCircleProgress, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
 // Navigation and routing
 import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
 import { APP_VERSION } from './src/version.js';
 
-// PLAYER_NAME_LENGTH now imported from nameUtils.js
+// MAX_PLAYER_NAME_LENGTH now imported from nameUtils.js
 document.addEventListener('DOMContentLoaded', () => {
     let serverVersion = null;
     let connectionTag = null;
@@ -1097,11 +1097,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (rooms[roomName] && Array.isArray(rooms[roomName].players)) {
             takenNames = rooms[roomName].players.map(p => p.name);
         }
-        let baseName = debugPlayerName.slice(0, PLAYER_NAME_LENGTH);
+        let baseName = debugPlayerName.slice(0, MAX_PLAYER_NAME_LENGTH);
         let suffix = 2; // reserve 13th char for a single-digit suffix starting at 2
         let candidate = baseName;
         while (takenNames.includes(candidate) && suffix <= 9) {
-            candidate = baseName.slice(0, PLAYER_NAME_LENGTH) + String(suffix);
+            candidate = baseName.slice(0, MAX_PLAYER_NAME_LENGTH) + String(suffix);
             suffix++;
         }
         if (takenNames.includes(candidate)) {

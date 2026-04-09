@@ -4,8 +4,8 @@
  * for the local and online player name input fields. Falls back gracefully if one
  * of the fields is absent.
  */
-import { sanitizeName, reflectValidity } from '../utils/generalUtils.js';
-import { PLAYER_NAME_LENGTH } from '../config/index.js';
+import { sanitizeName, checkNameLengthValidity } from '../utils/generalUtils.js';
+import { MAX_PLAYER_NAME_LENGTH } from '../config/index.js';
 
 export class PlayerNameFields {
 	/**
@@ -39,7 +39,7 @@ export class PlayerNameFields {
 
 	_wire(el) {
 		if (!el) return;
-		try { el.maxLength = PLAYER_NAME_LENGTH; } catch { /* ignore */ }
+		try { el.maxLength = MAX_PLAYER_NAME_LENGTH; } catch { /* ignore */ }
 		el.addEventListener('input', this._boundInputHandler);
 		el.addEventListener('blur', this._boundInputHandler);
 		el.addEventListener('change', this._boundInputHandler);
@@ -73,11 +73,11 @@ export class PlayerNameFields {
 	_applyToAll(name) {
 		if (this.localInputEl) {
 			this.localInputEl.value = name;
-			reflectValidity(this.localInputEl, name);
+			checkNameLengthValidity(this.localInputEl, name);
 		}
 		if (this.onlineInputEl) {
 			this.onlineInputEl.value = name;
-			reflectValidity(this.onlineInputEl, name);
+			checkNameLengthValidity(this.onlineInputEl, name);
 		}
 	}
 
@@ -86,11 +86,11 @@ export class PlayerNameFields {
 		const raw = el.value;
 		const cleaned = sanitizeName(raw);
 		if (raw !== cleaned) {
-			const pos = Math.min(cleaned.length, PLAYER_NAME_LENGTH);
+			const pos = Math.min(cleaned.length, MAX_PLAYER_NAME_LENGTH);
 			el.value = cleaned;
 			try { el.setSelectionRange(pos, pos); } catch { /* ignore */ }
 		}
-		reflectValidity(el, el.value);
+		checkNameLengthValidity(el, el.value);
 		this.setName(el.value); // will sanitize again but cheap
 	}
 

@@ -39,7 +39,6 @@ export const mainPage = {
         const playerBoxSliderEl = document.getElementById('playerBoxSlider');
         const menuColorCycle = document.getElementById('menuColorCycle');
         const onlineMenuColorCycle = document.getElementById('onlineMenuColorCycle');
-        const localPlayerName = document.getElementById('playerName');
         const onlinePlayerName = document.getElementById('onlinePlayerName');
 
         // Grid size tile
@@ -80,7 +79,6 @@ export const mainPage = {
         let playerNameFields = null;
         try {
             playerNameFields = new PlayerNameFields({
-                localInputEl: localPlayerName,
                 onlineInputEl: onlinePlayerName,
                 onNameChange: () => { /* optional hook */ }
             });

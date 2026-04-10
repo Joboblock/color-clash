@@ -4,6 +4,8 @@
  * and cycling a strength value (1..5) on click. Provides API to set starting color index
  * and retrieve current strength.
  */
+import { AI_STRENGTH } from '../config/index.js';
+
 export class AIStrengthTile {
     /**
      * @param {Object} opts
@@ -13,12 +15,12 @@ export class AIStrengthTile {
      * @param {(val:number) => void} [opts.onStrengthChange] - Callback invoked when strength cycles.
      * @param {number} [opts.initialStrength=1] - Initial strength value (1..5).
      */
-    constructor({ previewCellEl, getPlayerColors, getStartingColorIndex, onStrengthChange, initialStrength = 1, updateValueCircles, storageKey = 'aiStrength' }) {
+    constructor({ previewCellEl, getPlayerColors, getStartingColorIndex, onStrengthChange, initialStrength = 1, updateValueCircles, storageKey = AI_STRENGTH }) {
         this.previewCellEl = previewCellEl || null;
         this.getPlayerColors = typeof getPlayerColors === 'function' ? getPlayerColors : () => [];
         this.getStartingColorIndex = typeof getStartingColorIndex === 'function' ? getStartingColorIndex : () => 0;
         this.onStrengthChange = typeof onStrengthChange === 'function' ? onStrengthChange : null;
-        this.storageKey = typeof storageKey === 'string' && storageKey ? storageKey : 'aiStrength';
+        this.storageKey = typeof storageKey === 'string' && storageKey ? storageKey : AI_STRENGTH;
         this.strength = this._clampStrength(initialStrength);
         // Restore persisted strength if present
         try {

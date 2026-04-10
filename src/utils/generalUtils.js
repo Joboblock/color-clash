@@ -1,6 +1,7 @@
 import { 
     MIN_PLAYER_NAME_LENGTH,
-    MAX_PLAYER_NAME_LENGTH 
+    MAX_PLAYER_NAME_LENGTH,
+    PLAYER_NAME
 } from '../config/index.js';
 
 // Color helpers -----------------------------------------------------------
@@ -146,6 +147,26 @@ export function checkNameLengthValidity(inputEl, val) {
     }
 }
 
+/**
+ * Read the client's desired player name from the online name input or localStorage,
+ * sanitize it, enforce length policy, and return a final name string.
+ * Order of preference: input field value (if present) -> localStorage.
+ * If the sanitized value fails `isNameLengthValid`, returns 'Player'.
+ * @param {HTMLInputElement|null} [opts.inputEl] - Input to read value from.
+ * @returns {string}
+ */
+export function getClientName(inputEl) {
+    try {
+        const inputVal = inputEl?.value;
+        const stored = localStorage.getItem(PLAYER_NAME);
+        const raw = inputVal || stored;
+        const cleaned = sanitizeName(raw);
+        return isNameLengthValid(cleaned) ? cleaned : 'Player';
+    } catch {
+        return 'Anomaly';
+    }
+}
+
 // Tips helpers ------------------------------------------------------------
 /**
  * Build weighted tips list with optional mobile variants.
@@ -198,6 +219,7 @@ export default {
     clampPlayers,
     sanitizeName,
     isNameLengthValid,
+    getClientName,
     reflectValidity: checkNameLengthValidity,
     getDeviceTips,
     pickWeightedTip

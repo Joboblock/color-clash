@@ -1,4 +1,5 @@
 // ES Module version of ColorCycler
+import { COLOR_INDEX } from '../config/index.js';
 
 /**
  * ColorCycler manages the starting color selection UI across one or two cycler elements.
@@ -14,7 +15,7 @@
  * @param {(idx:number) => void} options.setIndex - Sets current starting color index (0-based).
  * @param {(idx:number, reason:'click'|'init') => void} [options.onChange] - Notified when index changes.
  * @param {() => boolean} [options.isMenuOpen] - If true, body background is tinted on change.
- * @param {string} [options.storageKey='colorIndex'] - LocalStorage key for persistence.
+ * @param {string} [options.storageKey=COLOR_INDEX] - LocalStorage key for persistence.
  */
 function ColorCycler(options) {
 	const opts = options || {};
@@ -26,7 +27,7 @@ function ColorCycler(options) {
 	this.setIndex = ensureFn(opts.setIndex, function () { });
 	this.onChange = typeof opts.onChange === 'function' ? opts.onChange : null;
 	this.isMenuOpen = typeof opts.isMenuOpen === 'function' ? opts.isMenuOpen : () => false;
-	this.storageKey = typeof opts.storageKey === 'string' ? opts.storageKey : 'colorIndex';
+	this.storageKey = typeof opts.storageKey === 'string' ? opts.storageKey : COLOR_INDEX;
 
 	this._clickHandler = this._onClick.bind(this);
 

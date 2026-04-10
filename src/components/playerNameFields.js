@@ -1,25 +1,20 @@
 /**
  * PlayerNameFields component
- * Encapsulates synchronization, sanitization, validity reflection and event wiring
- * for the local and online player name input fields. Falls back gracefully if one
- * of the fields is absent.
+ * Encapsulates sanitization, validity reflection and event wiring
+ * for the online player name input field.
  */
-import { sanitizeName, checkNameLengthValidity, isNameLengthValid } from '../utils/generalUtils.js';
-import { MAX_PLAYER_NAME_LENGTH } from '../config/index.js';
+import { sanitizeName, checkNameLengthValidity, getClientName } from '../utils/generalUtils.js';
+import { MAX_PLAYER_NAME_LENGTH, PLAYER_NAME } from '../config/index.js';
 
 export class PlayerNameFields {
 	/**
 	 * @param {Object} opts
-	 * @param {HTMLInputElement|null} opts.localInputEl - The local game menu name input.
 	 * @param {HTMLInputElement|null} opts.onlineInputEl - The online menu name input.
 	 * @param {() => void} [opts.onNameChange] - Callback after sanitized name changes.
-	 * @param {string} [opts.storageKey] - localStorage key (default 'playerName').
 	 */
-	constructor({ localInputEl, onlineInputEl, onNameChange, storageKey = 'playerName' }) {
-		this.localInputEl = localInputEl || null;
+	constructor({ onlineInputEl, onNameChange}) {
 		this.onlineInputEl = onlineInputEl || null;
 		this.onNameChange = typeof onNameChange === 'function' ? onNameChange : null;
-		this.storageKey = storageKey;
 		this.currentName = '';
 		this._boundInputHandler = (e) => this._handleSanitize(e);
 		this._boundKeyHandler = (e) => this._handleKeydown(e);
@@ -27,17 +22,14 @@ export class PlayerNameFields {
 	}
 
 	_init() {
-		// Load initial name from storage or existing field value precedence: stored > local > online
-		const stored = localStorage.getItem(this.storageKey);
-		const fallback = this.localInputEl?.value || this.onlineInputEl?.value || 'Player';
-		const initial = sanitizeName(stored || fallback);
-		this.currentName = initial;
-		this._applyToAll(initial);
-		this._wire(this.localInputEl);
-		this._wire(this.onlineInputEl);
+		if (!this.onlineInputEl) return;
+		this.currentName = getClientName(this.onlineInputEl);
+		this._apply(this.currentName);
+		this._wire();
 	}
 
-	_wire(el) {
+	_wire() {
+		const el = this.onlineInputEl;
 		if (!el) return;
 		try { el.maxLength = MAX_PLAYER_NAME_LENGTH; } catch { /* ignore */ }
 		el.addEventListener('input', this._boundInputHandler);
@@ -46,7 +38,8 @@ export class PlayerNameFields {
 		el.addEventListener('keydown', this._boundKeyHandler);
 	}
 
-	_unwire(el) {
+	_unwire() {
+		const el = this.onlineInputEl;
 		if (!el) return;
 		el.removeEventListener('input', this._boundInputHandler);
 		el.removeEventListener('blur', this._boundInputHandler);
@@ -59,12 +52,8 @@ export class PlayerNameFields {
 		const cleaned = sanitizeName(name);
 		if (cleaned === this.currentName) return;
 		this.currentName = cleaned;
-		if (isNameLengthValid(cleaned)) {
-			localStorage.setItem(this.storageKey, cleaned);
-		} else {
-			localStorage.removeItem(this.storageKey);
-		}
-		this._applyToAll(cleaned);
+		localStorage.setItem(PLAYER_NAME, cleaned);
+		this._apply(cleaned);
 		if (this.onNameChange) {
 			try { this.onNameChange(cleaned); } catch { /* ignore */ }
 		}
@@ -74,15 +63,11 @@ export class PlayerNameFields {
 		return this.currentName;
 	}
 
-	_applyToAll(name) {
-		if (this.localInputEl) {
-			if (this.localInputEl.value !== name) this.localInputEl.value = name;
-			checkNameLengthValidity(this.localInputEl, name);
-		}
-		if (this.onlineInputEl) {
-			if (this.onlineInputEl.value !== name) this.onlineInputEl.value = name;
-			checkNameLengthValidity(this.onlineInputEl, name);
-		}
+	_apply(name) {
+		const el = this.onlineInputEl;
+		if (!el) return;
+		if (el.value !== name) el.value = name;
+		checkNameLengthValidity(el, name);
 	}
 
 	_handleSanitize(e) {
@@ -114,8 +99,7 @@ export class PlayerNameFields {
 	}
 
 	destroy() {
-		this._unwire(this.localInputEl);
-		this._unwire(this.onlineInputEl);
+		this._unwire();
 	}
 }
 

@@ -18,15 +18,13 @@ export class OnlineRoomList {
      * @param {Object} opts
      * @param {HTMLElement|null} opts.rootEl <ul> element that will contain <li> room entries.
      * @param {() => string|null} opts.getCurrentRoom Returns the room name the client is currently in.
-     * @param {() => string} opts.getPlayerName Returns current local player name for hosting fallback.
      * @param {() => void} [opts.onHost] Invoked when user clicks the Host placeholder button.
      * @param {(roomName:string) => void} [opts.onJoin] Invoked when user wants to join a room.
      * @param {(roomName:string) => void} [opts.onLeave] Invoked when user wants to leave their room.
      */
-    constructor({ rootEl, getCurrentRoom, getPlayerName, onHost, onJoin, onLeave }) {
+    constructor({ rootEl, getCurrentRoom, onHost, onJoin, onLeave }) {
         this.rootEl = rootEl;
         this.getCurrentRoom = getCurrentRoom || (() => null);
-        this.getPlayerName = getPlayerName || (() => 'Player');
         this.onHost = onHost || (() => { });
         this.onJoin = onJoin || (() => { });
         this.onLeave = onLeave || (() => { });

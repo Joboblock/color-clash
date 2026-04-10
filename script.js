@@ -6,7 +6,7 @@ import { onlinePage } from './src/pages/online.js';
 import { mainPage } from './src/pages/main.js';
 
 // General utilities (merged)
-import { sanitizeName, isNameLengthValid, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
+import { getClientName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
 import {
     computeInvalidInitialPositions as calcInvalidInitialPositions,
     isInitialPlacementInvalid as calcIsInitialPlacementInvalid,
@@ -80,27 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el) observer.observe(el, { attributes: true, attributeFilter: ['class'] });
     }
 
-    // Shared name sanitization and validity functions (top-level)
-    /**
-     * Read the client's desired player name from the online name input or localStorage,
-     * sanitize it, enforce length policy, and return a final name string.
-     * Order of preference: input field value (if present) -> localStorage -> empty string.
-     * If the sanitized value fails `isNameLengthValid`, returns 'Player'.
-     * @returns {string}
-     */
-    function getClientName() {
-        try {
-            const inputVal = (typeof onlinePlayerNameInput !== 'undefined' && onlinePlayerNameInput && typeof onlinePlayerNameInput.value === 'string')
-                ? onlinePlayerNameInput.value
-                : '';
-            const stored = (typeof localStorage !== 'undefined') ? (localStorage.getItem('playerName') || '') : '';
-            const raw = inputVal || stored;
-            const cleaned = sanitizeName(raw);
-            return isNameLengthValid(cleaned) ? cleaned : 'Player';
-        } catch {
-            return 'Anomaly';
-        }
-    }
+    // Shared client-name resolver now lives in src/utils/generalUtils.js
     // On load, if grid is visible and no menu is open, show edge circles
     setTimeout(() => {
         const gridEl = document.querySelector('.grid');
@@ -1091,7 +1071,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!clientFullyInitialized) return;
         function sendHost() {
             try {
-                const clientName = getClientName();
+                const clientName = getClientName({ inputEl: onlinePlayerNameInput });
                 myPlayerName = clientName;
                 const selectedPlayers = Math.max(2, Math.min(playerColors.length, Math.floor(menuPlayerCount || 2)));
                 const desiredGrid = Number.isInteger(menuGridSizeVal) ? Math.max(3, Math.min(16, menuGridSizeVal)) : Math.max(3, selectedPlayers + 3);
@@ -1107,7 +1087,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Expose to onlinePage via context (used there)
     window.joinRoom = function joinRoom(roomName) {
         if (!clientFullyInitialized) return;
-        const baseName = getClientName();
+    const baseName = getClientName({ inputEl: onlinePlayerNameInput });
         // Check for duplicate names in the room list
         let rooms = window.lastRoomList || {};
         let takenNames = [];
@@ -1686,7 +1666,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = pendingAutoJoinKey;
         pendingAutoJoinKey = null;
         const sendJoinKey = () => {
-            onlineConnection.joinByKey(key, getClientName());
+            onlineConnection.joinByKey(key, getClientName({ inputEl: onlinePlayerNameInput }));
             // Remove this handler after it's called once to prevent re-joining on reconnect
             onlineConnection.off('open', sendJoinKey);
         };

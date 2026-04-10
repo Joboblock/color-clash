@@ -12,7 +12,6 @@ export const onlinePage = {
 			roomListView = new OnlineRoomList({
 				rootEl: roomListElement,
 				getCurrentRoom: () => ctx.getMyJoinedRoom && ctx.getMyJoinedRoom(),
-				getPlayerName: () => ctx.getPlayerName && ctx.getPlayerName(),
 				onHost: () => ctx.hostRoom && ctx.hostRoom(),
 				onJoin: (roomName) => ctx.joinRoom && ctx.joinRoom(roomName),
 				onLeave: (roomName) => ctx.leaveRoom && ctx.leaveRoom(roomName)

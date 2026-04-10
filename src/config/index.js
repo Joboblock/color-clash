@@ -62,6 +62,15 @@ export const OnlineParams = Object.freeze({
     WS_PROD_FALLBACK_BASE_URL: 'wss://color-clash-im8u.onrender.com/ws'
 });
 
+// Local storage keys ------------------------------------------------------
+export const StorageKeys = Object.freeze({
+    PLAYER_NAME: 'playerName',
+    AI_STRENGTH: 'aiStrength',
+    COLOR_INDEX: 'colorIndex'
+});
+
+export const { PLAYER_NAME, AI_STRENGTH, COLOR_INDEX } = StorageKeys;
+
 export const {
     WS_INITIAL_BACKOFF_MS,
     WS_MAX_BACKOFF_MS,
@@ -79,5 +88,6 @@ export const {
 export default {
     GameParams,
     UIParams,
-    OnlineParams
+    OnlineParams,
+    StorageKeys
 };

@@ -55,8 +55,8 @@ export class PlayerNameFields {
 	}
 
 	/** External setter; will sanitize automatically */
-	setName(name) {
-		const cleaned = sanitizeName(name || '');
+	setLocalStorageName(name) {
+		const cleaned = sanitizeName(name);
 		if (cleaned === this.currentName) return;
 		this.currentName = cleaned;
 		if (isNameLengthValid(cleaned)) {
@@ -76,11 +76,11 @@ export class PlayerNameFields {
 
 	_applyToAll(name) {
 		if (this.localInputEl) {
-			this.localInputEl.value = name;
+			if (this.localInputEl.value !== name) this.localInputEl.value = name;
 			checkNameLengthValidity(this.localInputEl, name);
 		}
 		if (this.onlineInputEl) {
-			this.onlineInputEl.value = name;
+			if (this.onlineInputEl.value !== name) this.onlineInputEl.value = name;
 			checkNameLengthValidity(this.onlineInputEl, name);
 		}
 	}
@@ -90,18 +90,19 @@ export class PlayerNameFields {
 		const raw = el.value;
 		const cleaned = sanitizeName(raw);
 		if (raw !== cleaned) {
-			const pos = cleaned.length;
+			const pos = el.selectionStart ?? raw.length;
+			const nextPos = sanitizeName(raw.slice(0, pos)).length;
 			el.value = cleaned;
-			try { el.setSelectionRange(pos, pos); } catch { /* ignore */ }
+			try { el.setSelectionRange(nextPos, nextPos); } catch { /* ignore */ }
 		}
 		checkNameLengthValidity(el, el.value);
-		this.setName(el.value); // will sanitize again but cheap
+		this.setLocalStorageName(el.value);
 	}
 
 	_handleKeydown(e) {
 		if (e.key === 'Enter') {
 			// On Enter, commit current sanitized value
-			this.setName(e.target.value);
+			this.setLocalStorageName(e.target.value);
 		}
 		const el = e.target;
 		// Allow slider / external arrow navigation if input is empty.

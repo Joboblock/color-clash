@@ -1860,6 +1860,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Global keydown handler for menu navigation (angle-based)
     document.addEventListener('keydown', (e) => {
         if (!isAnyMenuOpen()) return;
+        if (e.key === 'Escape') {
+            const openMenus = [mainMenu, firstMenu, document.getElementById('onlineMenu')].filter(m => m && !m.classList.contains('hidden'));
+            const openMenu = openMenus[0] || null;
+            const focused = document.activeElement;
+            if (openMenu && focused && openMenu.contains(focused) && typeof focused.blur === 'function') {
+                e.preventDefault();
+                try { focused.blur(); } catch { /* ignore */ }
+                return;
+            }
+        }
         // Prevent WASD navigation mapping when an editable element is focused
         const ae = document.activeElement;
         const tag = ae && ae.tagName && ae.tagName.toLowerCase();
@@ -2418,6 +2428,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isAnyMenuOpen()) return;
         const gridEl = document.querySelector('.grid');
         if (!gridEl) return;
+        if (e.key === 'Escape' || e.key === 'Esc') {
+            const focused = document.activeElement;
+            if (focused && focused.classList && focused.classList.contains('cell')) {
+                e.preventDefault();
+                clearCellFocus();
+                return;
+            }
+        }
         const key = e.key;
         // Move mapping first
         let mappedKey = key;

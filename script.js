@@ -17,7 +17,7 @@ import { playerColors, getStartingColorIndex, setStartingColorIndex, computeSele
 import { advanceTurnIndex } from './src/game/turnCalc.js';
 import { createOnlineTurnTracker } from './src/online/onlineTurn.js';
 import { computeAIMove, getNoisyCells } from './src/ai/engine.js';
-import { MAX_PLAYER_NAME_LENGTH, MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
+import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
 // Edge circles component
 import { createEdgeCircles, updateEdgeCirclesActive, updateEdgeCircleProgress, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
 // Navigation and routing
@@ -81,6 +81,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Shared name sanitization and validity functions (top-level)
+    /**
+     * Read the client's desired player name from the online name input or localStorage,
+     * sanitize it, enforce length policy, and return a final name string.
+     * Order of preference: input field value (if present) -> localStorage -> empty string.
+     * If the sanitized value fails `isNameLengthValid`, returns 'Player'.
+     * @returns {string}
+     */
+    function getClientName() {
+        try {
+            const inputVal = (typeof onlinePlayerNameInput !== 'undefined' && onlinePlayerNameInput && typeof onlinePlayerNameInput.value === 'string')
+                ? onlinePlayerNameInput.value
+                : '';
+            const stored = (typeof localStorage !== 'undefined') ? (localStorage.getItem('playerName') || '') : '';
+            const raw = inputVal || stored;
+            const cleaned = sanitizeName(raw);
+            return isNameLengthValid(cleaned) ? cleaned : 'Player';
+        } catch {
+            return 'Anomaly';
+        }
+    }
     // On load, if grid is visible and no menu is open, show edge circles
     setTimeout(() => {
         const gridEl = document.querySelector('.grid');
@@ -1069,16 +1089,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function hostRoom() {
         if (!clientFullyInitialized) return;
-        const name = onlinePlayerNameInput.value.trim() || 'Player';
         function sendHost() {
             try {
-                const candidateName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput.value || ''));
-                const debugPlayerName = isNameLengthValid(candidateName) ? candidateName : undefined;
-                myPlayerName = debugPlayerName || 'Player';
+                const clientName = getClientName();
+                myPlayerName = clientName;
                 const selectedPlayers = Math.max(2, Math.min(playerColors.length, Math.floor(menuPlayerCount || 2)));
                 const desiredGrid = Number.isInteger(menuGridSizeVal) ? Math.max(3, Math.min(16, menuGridSizeVal)) : Math.max(3, selectedPlayers + 3);
                 hostedDesiredGridSize = desiredGrid;
-                onlineConnection.host({ roomName: name, maxPlayers: selectedPlayers, gridSize: desiredGrid, debugName: debugPlayerName });
+                onlineConnection.host({ roomName: clientName, maxPlayers: selectedPlayers, gridSize: desiredGrid, debugName: clientName });
             } catch { /* ignore */ }
         }
         const sendHostOnce = () => { sendHost(); onlineConnection.off('open', sendHostOnce); };
@@ -1089,31 +1107,27 @@ document.addEventListener('DOMContentLoaded', () => {
     // Expose to onlinePage via context (used there)
     window.joinRoom = function joinRoom(roomName) {
         if (!clientFullyInitialized) return;
-        // For debug: send player name, but do not use for logic
-        let debugPlayerName = sanitizeName((localStorage.getItem('playerName') || onlinePlayerNameInput?.value || ''));
-        if (!isNameLengthValid(debugPlayerName)) debugPlayerName = 'Player';
+        const baseName = getClientName();
         // Check for duplicate names in the room list
         let rooms = window.lastRoomList || {};
         let takenNames = [];
         if (rooms[roomName] && Array.isArray(rooms[roomName].players)) {
             takenNames = rooms[roomName].players.map(p => p.name);
         }
-        let baseName = debugPlayerName.slice(0, MAX_PLAYER_NAME_LENGTH);
         let suffix = 2; // reserve 13th char for a single-digit suffix starting at 2
         let candidate = baseName;
         while (takenNames.includes(candidate) && suffix <= 9) {
-            candidate = baseName.slice(0, MAX_PLAYER_NAME_LENGTH) + String(suffix);
+            candidate = baseName + String(suffix);
             suffix++;
         }
         if (takenNames.includes(candidate)) {
             showModalError('All name variants are taken in this room. Please choose a different name.');
             return;
         }
-        debugPlayerName = candidate;
-        myPlayerName = debugPlayerName;
+        myPlayerName = candidate;
 
         // Ensure connection and send once open
-        const doJoin = () => { onlineConnection.join(roomName, debugPlayerName); };
+        const doJoin = () => { onlineConnection.join(roomName, candidate); };
         const doJoinOnce = () => { doJoin(); onlineConnection.off('open', doJoinOnce); };
         onlineConnection.ensureConnected();
         if (onlineConnection.isConnected()) doJoin(); else { showConnBanner('Connecting to server…', 'info'); onlineConnection.on('open', doJoinOnce); }
@@ -1672,7 +1686,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = pendingAutoJoinKey;
         pendingAutoJoinKey = null;
         const sendJoinKey = () => {
-            onlineConnection.joinByKey(key, (localStorage.getItem('playerName') || 'Player'));
+            onlineConnection.joinByKey(key, getClientName());
             // Remove this handler after it's called once to prevent re-joining on reconnect
             onlineConnection.off('open', sendJoinKey);
         };

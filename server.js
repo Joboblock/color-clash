@@ -1431,14 +1431,13 @@ function sanitizePlayerBaseName(raw) {
     return s;
 }
 
-// Pick a unique name within a room by appending a single-digit suffix 2..9 in the 13th position if needed.
-// Generic unique name picker with suffixing 2..9 in 13th position; returns null if exhausted
+// Pick a unique name within a room by appending a single-digit suffix 2..9 if needed. (May extend name length by 1)
 function pickUniqueFromTaken(raw, takenArray) {
-    const base = sanitizeBaseName(raw);
+    const base = sanitizePlayerBaseName(raw);
     const taken = Array.isArray(takenArray) ? takenArray : [];
     if (!taken.includes(base)) return base;
     for (let i = 2; i <= 9; i++) {
-        const candidate = base.slice(0, MAX_PLAYER_NAME_LENGTH) + String(i);
+        const candidate = base + String(i);
         if (!taken.includes(candidate)) return candidate;
     }
     return null; // signal exhaustion instead of falling back to base

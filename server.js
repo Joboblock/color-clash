@@ -9,9 +9,8 @@ import { WebSocketServer } from 'ws';
 import { APP_VERSION } from './src/version.js';
 import { createInitialRoomGridState, validateAndApplyMove } from './src/game/serverGridEngine.js';
 import { advanceTurnIndex, computeAliveMask } from './src/game/turnCalc.js';
-import { isNameLengthValid } from './src/utils/generalUtils.js';
+import { isNameLengthValid, sanitizeName } from './src/utils/generalUtils.js';
 import {
-    MAX_PLAYER_NAME_LENGTH,
     MAX_CELL_VALUE,
     INITIAL_PLACEMENT_VALUE,
     CELL_EXPLODE_THRESHOLD,
@@ -1410,23 +1409,9 @@ function clampPlayers(n) {
     return Math.max(2, Math.min(8, v));
 }
 
-// Sanitize an incoming token for room/name usage and enforce max base length.
-function sanitizeBaseName(raw) {
-    try {
-        let s = String(raw || '').trim();
-        if (!s) s = 'Player';
-        // Align with client: replace spaces with underscores and drop non-alphanumerics/underscore
-        s = s.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '');
-        if (s.length > MAX_PLAYER_NAME_LENGTH) s = s.slice(0, MAX_PLAYER_NAME_LENGTH);
-        return s;
-    } catch {
-        return 'Player';
-    }
-}
-
 // Normalize player names to server identity policy: invalid length => unnamed fallback.
 function sanitizePlayerBaseName(raw) {
-    const s = sanitizeBaseName(raw);
+    const s = sanitizeName(raw);
     if (!isNameLengthValid(s)) return 'Player';
     return s;
 }

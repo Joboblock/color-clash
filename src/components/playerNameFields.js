@@ -90,7 +90,7 @@ export class PlayerNameFields {
 		const raw = el.value;
 		const cleaned = sanitizeName(raw);
 		if (raw !== cleaned) {
-			const pos = Math.min(cleaned.length, MAX_PLAYER_NAME_LENGTH);
+			const pos = cleaned.length;
 			el.value = cleaned;
 			try { el.setSelectionRange(pos, pos); } catch { /* ignore */ }
 		}

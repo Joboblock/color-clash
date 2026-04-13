@@ -1,28 +1,28 @@
-import { OnlineConnection } from './src/online/connection.js';
+import { OnlineConnection } from './online/connection.js';
 // Page modules & registry (menu modularization). Component imports moved into page modules.
-import { pageRegistry } from './src/pages/registry.js';
-import { firstPage } from './src/pages/first.js';
-import { onlinePage } from './src/pages/online.js';
-import { mainPage } from './src/pages/main.js';
+import { pageRegistry } from './pages/registry.js';
+import { firstPage } from './pages/first.js';
+import { onlinePage } from './pages/online.js';
+import { mainPage } from './pages/main.js';
 
 // General utilities (merged)
-import { getClientName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './src/utils/generalUtils.js';
+import { getClientName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './utils/generalUtils.js';
 import {
     computeInvalidInitialPositions as calcInvalidInitialPositions,
     isInitialPlacementInvalid as calcIsInitialPlacementInvalid,
     getCellsToExplode as calcGetCellsToExplode,
     explodeCellsOnce as calcExplodeCellsOnce
-} from './src/game/gridCalc.js';
-import { playerColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './src/game/palette.js';
-import { advanceTurnIndex } from './src/game/turnCalc.js';
-import { createOnlineTurnTracker } from './src/online/onlineTurn.js';
-import { computeAIMove, getNoisyCells } from './src/ai/engine.js';
-import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './src/config/index.js';
+} from './game/gridCalc.js';
+import { playerColors, getStartingColorIndex, setStartingColorIndex, computeSelectedColors, computeStartPlayerIndex, activeColors as paletteActiveColors, applyPaletteCssVariables } from './game/palette.js';
+import { advanceTurnIndex } from './game/turnCalc.js';
+import { createOnlineTurnTracker } from './online/onlineTurn.js';
+import { computeAIMove, getNoisyCells } from './ai/engine.js';
+import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_EXPLOSION_MS, DELAY_ANIMATION_MS, DELAY_GAME_END_MS, PERFORMANCE_MODE_CUTOFF, DOUBLE_TAP_THRESHOLD_MS, WS_INITIAL_BACKOFF_MS, WS_MAX_BACKOFF_MS } from './config/index.js';
 // Edge circles component
-import { createEdgeCircles, updateEdgeCirclesActive, updateEdgeCircleProgress, getRestrictionType, computeEdgeCircleSize } from './src/components/edgeCircles.js';
+import { createEdgeCircles, updateEdgeCirclesActive, updateEdgeCircleProgress, getRestrictionType, computeEdgeCircleSize } from './components/edgeCircles.js';
 // Navigation and routing
-import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, ensureHistoryStateInitialized, applyStateFromUrl } from './src/pages/navigation.js';
-import { APP_VERSION } from './src/version.js';
+import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, ensureHistoryStateInitialized, applyStateFromUrl } from './pages/navigation.js';
+import { APP_VERSION } from './version.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     let serverVersion = null;

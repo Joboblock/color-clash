@@ -89,8 +89,15 @@ const server = http.createServer(async (req, res) => {
         res.statusCode = 200;
         res.setHeader('content-type', ct);
         createReadStream(absPath).pipe(res);
-    } catch { //TODO: No fallbacks
-        // Fallback to index.html for SPA routes
+    } catch {
+        // Fallback only for extensionless SPA routes.
+        // Missing files like *.js must return 404 to avoid MIME errors in browsers.
+        const reqPath = (req.url || '/').split('?')[0];
+        const hasFileExtension = /\.[a-z0-9]+$/i.test(reqPath);
+        if (hasFileExtension) {
+            sendError(res, 404);
+            return;
+        }
         try {
             const absIndex = path.join(__dirname, 'index.html');
             const ext = '.html';

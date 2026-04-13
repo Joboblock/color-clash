@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OnlineConnection } from '../src/online/connection.js';
+import { OnlineConnection } from '../dist/online/connection.js';
 
 function seedPendingMove(conn, { seq = 1, fromIndex = 0, row = 2, col = 3 } = {}) {
 	const key = `move:${fromIndex}:${row}:${col}`;

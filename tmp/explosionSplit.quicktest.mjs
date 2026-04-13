@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
-import { createInitialRoomGridState, validateAndApplyMove } from '../src/game/serverGridEngine.js';
-import { GameParams } from '../src/config/index.js';
+import { createInitialRoomGridState, validateAndApplyMove } from '../dist/game/serverGridEngine.js';
+import { GameParams } from '../dist/config/index.js';
 
 function makeRules(overrides = {}) {
 	return {

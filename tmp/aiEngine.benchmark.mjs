@@ -1,7 +1,7 @@
 import { performance } from 'node:perf_hooks';
-import { computeAIMove } from '../src/ai/engine.js';
-import { computeInvalidInitialPositions } from '../src/game/gridCalc.js';
-import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD } from '../src/config/index.js';
+import { computeAIMove } from '../dist/ai/engine.js';
+import { computeInvalidInitialPositions } from '../dist/game/gridCalc.js';
+import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD } from '../dist/config/index.js';
 
 const rng = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 

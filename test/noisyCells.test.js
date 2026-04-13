@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getNoisyCells } from '../src/ai/engine.js';
+import { getNoisyCells } from '../dist/ai/engine.js';
 
 const threshold = 4;
 const gridSize = 5;

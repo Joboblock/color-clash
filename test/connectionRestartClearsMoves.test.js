@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OnlineConnection } from '../src/online/connection.js';
+import { OnlineConnection } from '../dist/online/connection.js';
 
 function seedPendingMove(conn) {
 	const key = 'move:0:0:0';

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createOnlineTurnTracker } from '../src/online/onlineTurn.js';
+import { createOnlineTurnTracker } from '../dist/online/onlineTurn.js';
 
 function makeEmptyGrid(size) {
 	return Array.from({ length: size }, () => Array.from({ length: size }, () => ({ value: 0, player: '' })));

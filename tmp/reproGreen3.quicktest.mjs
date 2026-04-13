@@ -1,5 +1,5 @@
-import { createInitialRoomGridState, validateAndApplyMove } from '../src/game/serverGridEngine.js';
-import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD } from '../src/config/index.js';
+import { createInitialRoomGridState, validateAndApplyMove } from '../dist/game/serverGridEngine.js';
+import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD } from '../dist/config/index.js';
 
 const state = createInitialRoomGridState({ gridSize: 6, playerColors: ['red', 'green'] });
 const rules = { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD };

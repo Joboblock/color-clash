@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { advanceTurnIndex, computeAliveMask, playerIndexForTurnWithSkips } from '../src/game/turnCalc.js';
-import { createInitialRoomGridState } from '../src/game/serverGridEngine.js';
+import { advanceTurnIndex, computeAliveMask, playerIndexForTurnWithSkips } from '../dist/game/turnCalc.js';
+import { createInitialRoomGridState } from '../dist/game/serverGridEngine.js';
 
 function makeEmptyGrid(size) {
 	return Array.from({ length: size }, () => Array.from({ length: size }, () => ({ value: 0, player: '' })));

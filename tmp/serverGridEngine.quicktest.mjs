@@ -1,6 +1,6 @@
-import { createInitialRoomGridState, validateAndApplyMove } from '../src/game/serverGridEngine.js';
-import { computeAliveMask, nextAliveIndex } from '../src/game/turnCalc.js';
-import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD } from '../src/config/index.js';
+import { createInitialRoomGridState, validateAndApplyMove } from '../dist/game/serverGridEngine.js';
+import { computeAliveMask, nextAliveIndex } from '../dist/game/turnCalc.js';
+import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD } from '../dist/config/index.js';
 
 function assert(cond, msg) {
 	if (!cond) throw new Error(msg || 'assertion failed');

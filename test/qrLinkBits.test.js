@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { encodeLinkToBits } from '../src/qrCode/linkToBits.js';
-import { smallestVersionForLink } from '../src/qrCode/versionCalc.js';
-import { buildByteModeBitStream } from '../src/qrCode/bytePadding.js';
-import { buildInterleavedCodewords } from '../src/qrCode/reedSolomonECC.js';
-import { buildFixedPattern, computeFormatBits } from '../src/qrCode/patternBuilder.js';
-import { placeDataBits, fillNullModules } from '../src/qrCode/dataPlacement.js';
-import { applyMaskPattern } from '../src/qrCode/maskPatterns.js';
-import { buildQrCodeMatrix } from '../src/qrCode/index.js';
+import { encodeLinkToBits } from '../dist/qrCode/linkToBits.js';
+import { smallestVersionForLink } from '../dist/qrCode/versionCalc.js';
+import { buildByteModeBitStream } from '../dist/qrCode/bytePadding.js';
+import { buildInterleavedCodewords } from '../dist/qrCode/reedSolomonECC.js';
+import { buildFixedPattern, computeFormatBits } from '../dist/qrCode/patternBuilder.js';
+import { placeDataBits, fillNullModules } from '../dist/qrCode/dataPlacement.js';
+import { applyMaskPattern } from '../dist/qrCode/maskPatterns.js';
+import { buildQrCodeMatrix } from '../dist/qrCode/index.js';
 
 test('qr: encode link to 8-bit lines', () => {
     const link = 'https://joboblock.github.io/color-clash/?menu=online&key=tZ4o7xx4qw';

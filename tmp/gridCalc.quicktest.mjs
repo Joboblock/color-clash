@@ -4,7 +4,7 @@ import {
     isInitialPlacementInvalid,
     computeExplosionTargets,
     getCellsToExplode
-} from '../src/game/gridCalc.js';
+} from '../dist/game/gridCalc.js';
 
 const mkGrid = (size) => Array.from({ length: size }, () => Array.from({ length: size }, () => ({ value: 0, player: '' })));
 

@@ -12,8 +12,6 @@
     "types": ["node"]
   },
   "include": [
-    "server.js",
-    "script.js",
     "src/**/*",
     "test/**/*",
     "tmp/**/*"

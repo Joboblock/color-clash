@@ -2,6 +2,9 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
+    "start:dist": "node dist/server.js",
+    "clean": "node -e \"import('node:fs').then(fs=>fs.rmSync('dist',{recursive:true,force:true}))\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json && node scripts/copy-static.mjs",
     "test": "node --test",
     "benchmark:ai": "node tmp/aiEngine.benchmark.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"

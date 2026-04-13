@@ -8,7 +8,7 @@
       "type": "node",
       "request": "launch",
       "name": "Server Start",
-      "program": "${workspaceFolder}/server.js",
+      "program": "${workspaceFolder}/src/server.js",
       "console": "integratedTerminal",
       "serverReadyAction": {
         "pattern": "Server running at (https?://[^\\s]+)",

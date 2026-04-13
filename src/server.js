@@ -6,10 +6,10 @@ import { fileURLToPath } from 'url';
 import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import { WebSocketServer } from 'ws';
-import { APP_VERSION } from './src/version.js';
-import { createInitialRoomGridState, validateAndApplyMove } from './src/game/serverGridEngine.js';
-import { advanceTurnIndex, computeAliveMask } from './src/game/turnCalc.js';
-import { isNameLengthValid, sanitizeName } from './src/utils/generalUtils.js';
+import { APP_VERSION } from './version.js';
+import { createInitialRoomGridState, validateAndApplyMove } from './game/serverGridEngine.js';
+import { advanceTurnIndex, computeAliveMask } from './game/turnCalc.js';
+import { isNameLengthValid, sanitizeName } from './utils/generalUtils.js';
 import {
     MAX_CELL_VALUE,
     INITIAL_PLACEMENT_VALUE,
@@ -19,7 +19,7 @@ import {
     PACKET_DELAY_MIN_MS,
     PACKET_DELAY_MAX_MS,
     PACKET_DISCONNECT_RATE
-} from './src/config/index.js';
+} from './config/index.js';
 
 // Keep server rules aligned with client constants (single source of truth).
 
@@ -29,6 +29,7 @@ const PORT = Number.parseInt(process.env.PORT || '', 10) || 8080;
 // Resolve current directory (ESM)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const __projectRoot = path.resolve(__dirname, '..');
 
 // Simple static file server for index.html, script.js, styles.css
 const contentTypes = new Map([
@@ -74,12 +75,15 @@ const server = http.createServer(async (req, res) => {
             .normalize(reqPath)
             .replace(/^\.\.(?:\/|\\|$)/, '')
             .replace(/^\/+/, ''); // strip any leading slashes so join is relative
-        const absPath = path.join(__dirname, safePath);
-        const st = await stat(absPath);
-        if (!st.isFile()) {
-            sendError(res, 404);
-            return;
+        let absPath = path.join(__dirname, safePath);
+        let st;
+        try {
+            st = await stat(absPath);
+        } catch {
+            absPath = path.join(__projectRoot, safePath);
+            st = await stat(absPath);
         }
+        if (!st.isFile()) { sendError(res, 404); return; }
         const ext = path.extname(absPath).toLowerCase();
         const ct = contentTypes.get(ext) || 'application/octet-stream';
         res.statusCode = 200;

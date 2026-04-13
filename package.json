@@ -1,7 +1,7 @@
 {
   "type": "module",
   "scripts": {
-    "start": "node server.js",
+    "start": "node src/server.js",
     "test": "node --test",
     "benchmark:ai": "node tmp/aiEngine.benchmark.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"

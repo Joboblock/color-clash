@@ -1,8 +1,15 @@
-import { 
+import {
     MIN_PLAYER_NAME_LENGTH,
     MAX_PLAYER_NAME_LENGTH,
     PLAYER_NAME
 } from '../config/index.js';
+
+type Rgb = { r: number; g: number; b: number };
+
+export type Tip = {
+    text: string;
+    weight: number;
+};
 
 // Color helpers -----------------------------------------------------------
 /**
@@ -12,13 +19,13 @@ import {
  * @param {number} [factor=0.5] - Blend factor (0 returns original color, 1 returns full gray).
  * @returns {string} CSS rgb() string of the blended color.
  */
-export function mixTowardGray(color, gray = 128, factor = 0.5) {
-    if (typeof gray !== 'number' || isNaN(gray)) gray = 128;
+export function mixTowardGray(color: string, gray: number = 128, factor: number = 0.5): string {
+    if (typeof gray !== 'number' || Number.isNaN(gray)) gray = 128;
     gray = Math.max(0, Math.min(255, Math.round(gray)));
-    if (typeof factor !== 'number' || isNaN(factor)) factor = 0.5;
+    if (typeof factor !== 'number' || Number.isNaN(factor)) factor = 0.5;
     factor = Math.max(0, Math.min(1, factor));
     const { r, g, b } = cssColorToRgb(color);
-    const mix = (c) => Math.round((1 - factor) * c + factor * gray);
+    const mix = (c: number) => Math.round((1 - factor) * c + factor * gray);
     return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
 }
 
@@ -27,7 +34,7 @@ export function mixTowardGray(color, gray = 128, factor = 0.5) {
  * @param {string} color - CSS color input.
  * @returns {{r:number,g:number,b:number}} Object with channel integers 0..255.
  */
-export function cssColorToRgb(color) {
+export function cssColorToRgb(color: string): Rgb {
     if (!color || typeof color !== 'string') return { r: 0, g: 0, b: 0 };
     const c = color.trim();
     if (c.startsWith('#')) return hexToRgb(c);
@@ -46,7 +53,7 @@ export function cssColorToRgb(color) {
  * @param {string} hex - Hexadecimal color string with or without leading '#'.
  * @returns {{r:number,g:number,b:number}} RGB components.
  */
-export function hexToRgb(hex) {
+export function hexToRgb(hex: string): Rgb {
     const h = hex.replace('#', '');
     const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
     const bigint = parseInt(full, 16);
@@ -59,7 +66,7 @@ export function hexToRgb(hex) {
  * @param {string} param - Parameter key.
  * @returns {string|null} Value if present, else null.
  */
-export function getQueryParam(param) {
+export function getQueryParam(param: string): string | null {
     const urlParams = new URLSearchParams(window.location.search);
     return urlParams.get(param);
 }
@@ -71,7 +78,7 @@ export function getQueryParam(param) {
  * @param {number} p - Player count.
  * @returns {number} Recommended grid dimension.
  */
-export function recommendedGridSize(p) {
+export function recommendedGridSize(p: number): number {
     if (p <= 2) return 3;
     if (p <= 4) return 4;
     if (p === 5) return 5;
@@ -83,8 +90,8 @@ export function recommendedGridSize(p) {
  * @param {number} playerCount - Player count.
  * @returns {number} Default grid dimension (playerCount + 3).
  */
-export function defaultGridSizeForPlayers(playerCount) {
-    return Math.max(3, (parseInt(playerCount, 10) || 0) + 3);
+export function defaultGridSizeForPlayers(playerCount: number | string): number {
+    return Math.max(3, (parseInt(String(playerCount), 10) || 0) + 3);
 }
 
 /**
@@ -93,7 +100,7 @@ export function defaultGridSizeForPlayers(playerCount) {
  * @param {number} maxPlayers - Upper bound (typically available colors length).
  * @returns {number} Clamped player count >=2.
  */
-export function clampPlayers(n, maxPlayers) {
+export function clampPlayers(n: number, maxPlayers: number): number {
     const v = Math.max(2, Math.min(maxPlayers, Math.floor(n) || 2));
     return v;
 }
@@ -105,7 +112,7 @@ export function clampPlayers(n, maxPlayers) {
  * @param {string} raw - Raw input string.
  * @returns {string} Sanitized name (may be empty).
  */
-export function sanitizeName(raw) {
+export function sanitizeName(raw: string): string {
     if (typeof raw !== 'string') return '';
     let s = raw.replace(/\s/g, '_');
     s = s.replace(/[^A-Za-z0-9_]/g, '');
@@ -120,7 +127,7 @@ export function sanitizeName(raw) {
  * @param {string} val - Candidate sanitized name.
  * @returns {boolean} True when length is inside configured min/max bounds.
  */
-export function isNameLengthValid(val) {
+export function isNameLengthValid(val: string): boolean {
     if (typeof val !== 'string') return false;
     return val.length >= MIN_PLAYER_NAME_LENGTH && val.length <= MAX_PLAYER_NAME_LENGTH;
 }
@@ -134,7 +141,7 @@ export function isNameLengthValid(val) {
  * @param {string} val - Current input value (ideally sanitized).
  * @returns {void}
  */
-export function checkNameLengthValidity(inputEl, val) {
+export function checkNameLengthValidity(inputEl: HTMLInputElement | null, val: string): void {
     if (!inputEl) return;
     const validLength = val.length === 0 || isNameLengthValid(val);
     if (validLength) {
@@ -152,15 +159,15 @@ export function checkNameLengthValidity(inputEl, val) {
  * sanitize it, enforce length policy, and return a final name string.
  * Order of preference: input field value (if present) -> localStorage.
  * If the sanitized value fails `isNameLengthValid`, returns 'Player'.
- * @param {HTMLInputElement|null} [opts.inputEl] - Input to read value from.
+ * @param {HTMLInputElement|null} [inputEl] - Input to read value from.
  * @returns {string}
  */
-export function getClientName(inputEl) {
+export function getClientName(inputEl?: HTMLInputElement | null): string {
     try {
         const inputVal = inputEl?.value;
         const stored = localStorage.getItem(PLAYER_NAME);
         const raw = inputVal || stored;
-        const cleaned = sanitizeName(raw);
+        const cleaned = sanitizeName(raw || '');
         return isNameLengthValid(cleaned) ? cleaned : 'Player';
     } catch {
         return 'Anomaly';
@@ -171,20 +178,21 @@ export function getClientName(inputEl) {
 /**
  * Build weighted tips list with optional mobile variants.
  * @param {boolean|null} [isMobile=null] - Override mobile detection; null triggers heuristic.
- * @returns {Array<{text:string,weight?:number,html?:boolean}>} Tips list.
+ * @returns {Array<{text:string,weight:number}>} Tips list.
  */
-export function getDeviceTips(isMobile = null) {
+export function getDeviceTips(isMobile: boolean | null = null): Tip[] {
     const mobile = (isMobile !== null) ? !!isMobile : (typeof navigator !== 'undefined' && (
-        (navigator.userAgentData && navigator.userAgentData.mobile === true) ||
+        ((navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile === true) ||
         (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer:coarse)').matches) ||
         (navigator.maxTouchPoints > 1)
     ));
-    const tips = [
-        { text: 'Tip: You can also set <code>?players=\u003Cn\u003E&size=\u003Cn\u003E</code> in the URL.', weight: 1, html: true },
+    const tips: Tip[] = [
+        { text: 'Tip: You can also set <code>?players=&lt;n&gt;&size=&lt;n&gt;</code> in the URL.', weight: 1 },
+        { text: 'Tip: You can exceed the ai strength limit by changing <code>?ai_strength=&lt;n&gt;</code> in the URL.', weight: 1 },
         { text: 'Tip: Grid size defaults to a recommended value but can be adjusted manually.', weight: 2 },
         { text: 'Tip: Use Practice mode to observe AI behavior and learn strategies.', weight: 1 },
-        { text: 'Tip: <a href="https://joboblock.github.io" target="_blank">joboblock.github.io</a> redirects to this game.', weight: 2, html: true },
-        { text: 'Tip: Give this project a <a href="https://github.com/Joboblock/color-clash" target="_blank">Star</a> to support development!', weight: 2, html: true },
+        { text: 'Tip: <a href="https://joboblock.github.io" target="_blank">joboblock.github.io</a> redirects to this game.', weight: 2 },
+        { text: 'Tip: Give this project a <a href="https://github.com/Joboblock/color-clash" target="_blank">Star</a> to support development!', weight: 2 },
         { text: 'Tip: This is a rare message.', weight: 0.1 },
         { text: 'Tip: Praise the Raute, embrace the Raute!', weight: 0.1 }
     ];
@@ -195,15 +203,15 @@ export function getDeviceTips(isMobile = null) {
 
 /**
  * Select one entry from a weighted list using linear scan.
- * @param {Array<{text:string,weight?:number,html?:boolean}>} list - Source weighted tips.
- * @returns {{text:string,weight?:number,html?:boolean}} Selected tip object.
+ * @param {Array<{text:string,weight:number}>} list - Source weighted tips.
+ * @returns {{text:string,weight:number}} Selected tip object.
  */
-export function pickWeightedTip(list) {
+export function pickWeightedTip(list: Tip[]): Tip {
     let total = 0;
-    for (const t of list) total += (typeof t.weight === 'number' ? t.weight : 1);
+    for (const t of list) total += t.weight;
     let roll = Math.random() * total;
     for (const t of list) {
-        roll -= (typeof t.weight === 'number' ? t.weight : 1);
+        roll -= t.weight;
         if (roll <= 0) return t;
     }
     return list[list.length - 1];

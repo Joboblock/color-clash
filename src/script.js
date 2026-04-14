@@ -2198,19 +2198,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
-     * Pick a random entry from a weighted list of tips.
-     * @param {Array<{text:string, weight?:number, html?:boolean}>} list - candidate tips.
-     * @returns {{text:string, weight?:number, html?:boolean}} chosen tip.
-     */
-
-    /**
      * Update the menu hint with a randomly picked weighted tip.
      * @returns {void}
      */
     function updateRandomTip() {
         if (!menuHint) return;
         const tip = pickWeightedTip(getDeviceTips());
-        if (tip && tip.html) menuHint.innerHTML = tip.text; else menuHint.textContent = tip ? tip.text : '';
+        menuHint.innerHTML = tip.text;
     }
 
     // computeStartPlayerIndex moved to palette.js (use dynamic gameColors)

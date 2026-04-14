@@ -1,13 +1,14 @@
 // ES Module: MenuCloseButton
 // Encapsulates the logic for the top-right "X" buttons that close or navigate
 // between menus. Supports multiple button elements sharing the same behavior.
+/** @typedef {import('../utils/generalUtils.js').MenuType} MenuType */
 /**
  * @typedef {Object} MenuCloseButtonOptions
  * @property {HTMLElement[]|HTMLElement|null} buttons - One or more button elements.
- * @property {() => string|null} getCurrentMenu - Returns current menu slug from URL/state.
- * @property {(target:string) => void} navigateToMenu - Function to show target menu (no history push).
- * @property {(menu:string, push:boolean) => void} setMenuParam - Update URL/menu param (replace/push).
- * @property {string[]} menuHistoryStack - Reference to shared history stack (mutable array).
+ * @property {() => MenuType|null} getCurrentMenu - Returns current menu slug from URL/state.
+ * @property {(target:MenuType) => void} navigateToMenu - Function to show target menu (no history push).
+ * @property {(menu:MenuType, push:boolean) => void} setMenuParam - Update URL/menu param (replace/push).
+ * @property {MenuType[]} menuHistoryStack - Reference to shared history stack (mutable array).
  */
 export class MenuCloseButton {
     /**
@@ -33,6 +34,7 @@ export class MenuCloseButton {
         }
     }
 
+    /** @param {MenuType|null} current */
     _computeTargetMenu(current) {
         if (!current) return null;
         // Match original script.js logic

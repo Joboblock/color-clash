@@ -11,6 +11,19 @@ export type Tip = {
     weight: number;
 };
 
+export const MENU_TYPES = ['first', 'local', 'online', 'host', 'practice'] as const;
+
+export type MenuType = (typeof MENU_TYPES)[number];
+
+/**
+ * Runtime type guard for menu identifiers.
+ * @param {unknown} value
+ * @returns {value is MenuType}
+ */
+export function isMenuType(value: unknown): value is MenuType {
+    return typeof value === 'string' && (MENU_TYPES as readonly string[]).includes(value);
+}
+
 // Color helpers -----------------------------------------------------------
 /**
  * Blend a given color toward a grayscale target producing a pastel/dimmed variant.

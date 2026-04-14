@@ -22,6 +22,8 @@ import { MAX_CELL_VALUE, INITIAL_PLACEMENT_VALUE, CELL_EXPLODE_THRESHOLD, DELAY_
 import { createEdgeCircles, updateEdgeCirclesActive, updateEdgeCircleProgress, getRestrictionType, computeEdgeCircleSize } from './components/edgeCircles.js';
 // Navigation and routing
 import { menuHistoryStack, getMenuParam, setMenuParam, updateUrlRoomKey, removeUrlRoomKey, ensureHistoryStateInitialized, applyStateFromUrl } from './pages/navigation.js';
+
+/** @typedef {import('./utils/generalUtils.js').MenuType} MenuType */
 import { APP_VERSION } from './version.js';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1528,6 +1530,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Navigation functions now imported from src/pages/navigation.js
 
     // Modular menu display now delegated to PageRegistry & page modules.
+    /** @param {MenuType} menuKey */
     function showMenuFor(menuKey) {
         // If the user opens a menu mid-chain, ensure we leave performance mode.
         // Guarded because performanceMode is declared later in the file.
@@ -1565,6 +1568,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    /** @param {MenuType} menuKey */
     function navigateToMenu(menuKey) {
         // If navigating to online or host, ensure WS is (re)connecting.
         // If leaving online/host menus entirely, close the connection.

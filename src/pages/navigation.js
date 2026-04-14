@@ -1,33 +1,36 @@
 // Menu navigation and URL routing logic
+import { isMenuType, MENU_TYPES } from '../utils/generalUtils.js';
+
+/** @typedef {import('../utils/generalUtils.js').MenuType} MenuType */
 
 /**
  * In-memory stack tracking menu navigation for back button behavior.
- * @type {string[]}
+ * @type {MenuType[]}
  */
 export let menuHistoryStack = [];
 
 /**
  * Get the current menu parameter from the URL query string.
- * @returns {string | null} Menu key ('first', 'local', 'online', 'host', 'practice') or `null` if missing/invalid.
+ * @returns {MenuType | null} Menu key ('first', 'local', 'online', 'host', 'practice') or `null` if missing/invalid.
  */
 export function getMenuParam() {
     try {
         const val = (new URLSearchParams(window.location.search)).get('menu');
         if (!val) return null;
         if (val === 'true') return 'first'; // backward compat
-        const allowed = ['first', 'local', 'online', 'host', 'practice'];
-        return allowed.includes(val) ? val : null;
+        return isMenuType(val) ? val : null;
     } catch { return null; }
 }
 
 /**
  * Set the menu parameter in the URL, updating history stack.
  * Removes game-only params (players, size, ai_strength) to keep URLs clean in menu states.
- * @param {string} menuKey - Menu identifier to set in URL.
+ * @param {MenuType} menuKey - Menu identifier to set in URL.
  * @param {boolean} [push=true] - If `true`, pushes a new history entry; otherwise replaces current.
  * @returns {void}
  */
 export function setMenuParam(menuKey, push = true) {
+     if (!isMenuType(menuKey)) return;
     const params = new URLSearchParams(window.location.search);
     params.set('menu', menuKey);
     // In any menu state, remove game-only params (players, size, ai_strength) so URL stays clean.
@@ -105,7 +108,7 @@ export function removeMenuParam() {
  */
 export function ensureHistoryStateInitialized() {
     try {
-        const current = getMenuParam() || 'first';
+        const current = getMenuParam() || MENU_TYPES[0];
         if (!window.history.state || typeof window.history.state.menu === 'undefined') {
             window.history.replaceState({ menu: current }, '', window.location.href);
         }
@@ -117,7 +120,7 @@ export function ensureHistoryStateInitialized() {
  * Sync menu/game UI from current URL state (back/forward navigation handler).
  * Requires external context for game functions (showMenuFor, recreateGrid, etc).
  * @param {object} ctx - Context object with references to game state and functions.
- * @param {Function} ctx.showMenuFor - Function to display a specific menu.
+ * @param {(menu:MenuType)=>void} ctx.showMenuFor - Function to display a specific menu.
  * @param {Function} ctx.updateRandomTip - Function to update tip display.
  * @param {Function} ctx.clampPlayers - Function to clamp player count.
  * @param {Function} ctx.computeSelectedColors - Function to compute color array.
@@ -140,7 +143,7 @@ export function applyStateFromUrl(ctx) {
     const hasPS = params.has('players') || params.has('size');
     if (typed || !hasPS) {
         // Show the requested or default menu
-        ctx.showMenuFor(typed || 'first');
+        ctx.showMenuFor(typed || MENU_TYPES[0]);
         try { ctx.updateRandomTip(); } catch { /* ignore */ }
         // Reflect AI strength to UI if present
         const ad = parseInt(params.get('ai_strength') || '', 10);

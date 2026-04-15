@@ -6,7 +6,7 @@ import { onlinePage } from './pages/online.js';
 import { mainPage } from './pages/main.js';
 
 // General utilities (merged)
-import { getClientName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip } from './utils/generalUtils.js';
+import { getClientName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip, isMobileDevice } from './utils/generalUtils.js';
 import {
     computeInvalidInitialPositions as calcInvalidInitialPositions,
     isInitialPlacementInvalid as calcIsInitialPlacementInvalid,
@@ -1377,28 +1377,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     // Practice mode is enabled if any AI-related parameter is present in the URL
     const isPracticeMode = urlParams.has('ai_strength');
-
-    /**
-     * Broad mobile detection using feature hints (coarse pointer, touch points, UA hints).
-     * @returns {boolean} true if device is likely mobile/touch-centric.
-     */
-    function isMobileDevice() {
-        // 1) UA Client Hints (Chromium): navigator.userAgentData?.mobile
-        if (navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean') {
-            if (navigator.userAgentData.mobile) return true;
-        }
-        // 2) Coarse pointer (touch-centric devices)
-        if (typeof window.matchMedia === 'function') {
-            try {
-                if (window.matchMedia('(pointer: coarse)').matches) return true;
-            } catch (e) { /* ignore */ void e; }
-        }
-        // 3) Multiple touch points (covers iPadOS that reports as Mac)
-        if (typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1) {
-            return true;
-        }
-        return false;
-    }
 
     /**
      * Request fullscreen on mobile devices if possible; ignore failures silently.

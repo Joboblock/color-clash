@@ -187,6 +187,27 @@ export function getClientName(inputEl?: HTMLInputElement | null): string {
     }
 }
 
+// Device helpers ----------------------------------------------------------
+/**
+ * Broad mobile detection using feature hints (coarse pointer, touch points, UA hints).
+ * @returns {boolean} True if device is likely mobile/touch-centric.
+ */
+export function isMobileDevice(): boolean {
+    if (typeof navigator !== 'undefined') {
+        const uaDataMobile = (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile;
+        if (typeof uaDataMobile === 'boolean' && uaDataMobile) return true;
+        if (typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1) return true;
+    }
+
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        try {
+            if (window.matchMedia('(pointer: coarse)').matches) return true;
+        } catch (e) { /* ignore */ void e; }
+    }
+
+    return false;
+}
+
 // Tips helpers ------------------------------------------------------------
 /**
  * Build weighted tips list with optional mobile variants.
@@ -194,11 +215,7 @@ export function getClientName(inputEl?: HTMLInputElement | null): string {
  * @returns {Array<{text:string,weight:number}>} Tips list.
  */
 export function getDeviceTips(isMobile: boolean | null = null): Tip[] {
-    const mobile = (isMobile !== null) ? !!isMobile : (typeof navigator !== 'undefined' && (
-        ((navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile === true) ||
-        (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer:coarse)').matches) ||
-        (navigator.maxTouchPoints > 1)
-    ));
+    const mobile = (isMobile !== null) ? !!isMobile : isMobileDevice();
     const tips: Tip[] = [
         { text: 'Tip: You can also set <code>?players=&lt;n&gt;&size=&lt;n&gt;</code> in the URL.', weight: 1 },
         { text: 'Tip: You can exceed the ai strength limit by changing <code>?ai_strength=&lt;n&gt;</code> in the URL.', weight: 1 },
@@ -242,6 +259,7 @@ export default {
     isNameLengthValid,
     getClientName,
     reflectValidity: checkNameLengthValidity,
+    isMobileDevice,
     getDeviceTips,
     pickWeightedTip
 };

@@ -6,7 +6,7 @@ import { onlinePage } from './pages/online.js';
 import { mainPage } from './pages/main.js';
 
 // General utilities (merged)
-import { getClientName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getDeviceTips, pickWeightedTip, isMobileDevice } from './utils/generalUtils.js';
+import { getClientName, getQueryParam, recommendedGridSize, defaultGridSizeForPlayers, clampPlayers, getContextTips, pickWeightedTip, isMobileDevice } from './utils/generalUtils.js';
 import {
     computeInvalidInitialPositions as calcInvalidInitialPositions,
     isInitialPlacementInvalid as calcIsInitialPlacementInvalid,
@@ -2185,7 +2185,7 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function updateRandomTip() {
         if (!menuHint) return;
-        const tip = pickWeightedTip(getDeviceTips());
+        const tip = pickWeightedTip(getContextTips());
         menuHint.innerHTML = tip.text;
     }
 

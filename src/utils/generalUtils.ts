@@ -211,11 +211,10 @@ export function isMobileDevice(): boolean {
 // Tips helpers ------------------------------------------------------------
 /**
  * Build weighted tips list with optional mobile variants.
- * @param {boolean|null} [isMobile=null] - Override mobile detection; null triggers heuristic.
  * @returns {Array<{text:string,weight:number}>} Tips list.
  */
-export function getDeviceTips(isMobile: boolean | null = null): Tip[] {
-    const mobile = (isMobile !== null) ? !!isMobile : isMobileDevice();
+export function getContextTips(): Tip[] {
+    const mobile = isMobileDevice();
     const tips: Tip[] = [
         { text: 'Tip: You can also set <code>?players=&lt;n&gt;&size=&lt;n&gt;</code> in the URL.', weight: 1 },
         { text: 'Tip: You can exceed the ai strength limit by changing <code>?ai_strength=&lt;n&gt;</code> in the URL.', weight: 1 },
@@ -260,6 +259,6 @@ export default {
     getClientName,
     reflectValidity: checkNameLengthValidity,
     isMobileDevice,
-    getDeviceTips,
+    getContextTips,
     pickWeightedTip
 };

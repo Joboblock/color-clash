@@ -3,6 +3,7 @@ import {
     MAX_PLAYER_NAME_LENGTH,
     PLAYER_NAME
 } from '../config/index.js';
+import { getMenuParam } from '../pages/navigation.js';
 
 type Rgb = { r: number; g: number; b: number };
 
@@ -214,17 +215,26 @@ export function isMobileDevice(): boolean {
  * @returns {Array<{text:string,weight:number}>} Tips list.
  */
 export function getContextTips(): Tip[] {
-    const mobile = isMobileDevice();
+    const mobile: boolean = isMobileDevice();
+    const menu: MenuType = getMenuParam() || MENU_TYPES[0];
     const tips: Tip[] = [
-        { text: 'Tip: You can also set <code>?players=&lt;n&gt;&size=&lt;n&gt;</code> in the URL.', weight: 1 },
-        { text: 'Tip: You can exceed the ai strength limit by changing <code>?ai_strength=&lt;n&gt;</code> in the URL.', weight: 1 },
-        { text: 'Tip: Grid size defaults to a recommended value but can be adjusted manually.', weight: 2 },
-        { text: 'Tip: Use Practice mode to observe AI behavior and learn strategies.', weight: 1 },
+        { text: 'Tip: Grid size defaults to a recommended value but can be adjusted manually.', weight: 1 },
         { text: 'Tip: <a href="https://joboblock.github.io" target="_blank">joboblock.github.io</a> redirects to this game.', weight: 2 },
         { text: 'Tip: Give this project a <a href="https://github.com/Joboblock/color-clash" target="_blank">Star</a> to support development!', weight: 2 },
         { text: 'Tip: This is a rare message.', weight: 0.1 },
         { text: 'Tip: Praise the Raute, embrace the Raute!', weight: 0.1 }
     ];
+
+    // Menu-specific tips
+    if (menu === 'local') {
+        tips.push({ text: 'Tip: You can also set <code>?players=&lt;n&gt;&size=&lt;n&gt;</code> in the URL.', weight: 1 });
+    }
+    if (menu === 'practice') {
+        tips.push({ text: 'Tip: You can exceed the ai strength limit by changing <code>?ai_strength=&lt;n&gt;</code> in the URL.', weight: 2 });
+    } else {
+        tips.push({ text: 'Tip: Use Practice mode to observe AI behavior and learn strategies.', weight: 1 });
+    }
+
     if (mobile) tips.push({ text: 'Tip: Double-tap outside the grid to toggle fullscreen on mobile.', weight: 3 });
     else tips.push({ text: 'Tip: Use WASD or Arrow keys to move between menu controls and grid cells.', weight: 2 });
     return tips;

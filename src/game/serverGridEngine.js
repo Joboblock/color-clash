@@ -114,13 +114,16 @@ export function validateAndApplyMove(state, move, rules) {
 		cell.player = moverColor;
 	}
 
-	resolveExplosions(state, rules, isInitialPlacementPhase);
+	const explosionResult = resolveExplosions(state, rules, isInitialPlacementPhase);
 
 	// Advance *exactly one* seq per accepted move.
 	state.seq += 1;
 
 	const alive = computeAliveMask(state.grid, state.playerColors, state.seq);
 	state.alive = alive;
+	if (explosionResult.runaway) {
+		return { ok: true, gameOver: true, runaway: true, alive };
+	}
 
 	const aliveCount = alive.filter(Boolean).length;
 	if (aliveCount <= 1) {
@@ -133,15 +136,17 @@ export function validateAndApplyMove(state, move, rules) {
 // Test hook: resolve explosion chains without applying the +1 placement rule.
 // This is intentionally not used by production server flow.
 export function __resolveExplosionsForTest(state, rules, isInitialPlacementPhase = false) {
-	resolveExplosions(state, rules, isInitialPlacementPhase);
+	return resolveExplosions(state, rules, isInitialPlacementPhase);
 }
 
 function resolveExplosions(state, rules, isInitialPlacementPhase) {
-	resolveExplosionChain({
+	const maxIterations = Math.max(1, state.gridSize * 3);
+	return resolveExplosionChain({
 		grid: state.grid,
 		gridSize: state.gridSize,
 		cellExplodeThreshold: rules.CELL_EXPLODE_THRESHOLD,
 		maxCellValue: rules.MAX_CELL_VALUE,
-		isInitialPlacementPhase
+		isInitialPlacementPhase,
+		maxIterations
 	});
 }

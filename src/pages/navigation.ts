@@ -1,19 +1,47 @@
+// TODO: Finish port
 // Menu navigation and URL routing logic
-import { isMenuType, MENU_TYPES } from '../utils/generalUtils.js';
+import { isMenuType, MENU_TYPES, type MenuType } from '../utils/generalUtils.js';
 
-/** @typedef {import('../utils/generalUtils.js').MenuType} MenuType */
+type AiStrengthTile = {
+    setStrength: (strength: number) => void;
+    onStartingColorChanged?: () => void;
+};
+
+type PageRegistry = {
+    get: (id: string) => { components?: { aiStrengthTile?: AiStrengthTile } } | undefined;
+};
+
+type NavigationContext = {
+    showMenuFor: (menu: MenuType) => void;
+    updateRandomTip: () => void;
+    clampPlayers: (n: number, maxPlayers: number) => number;
+    computeSelectedColors: (playerCount: number) => string[];
+    recreateGrid: (size: number, playerCount: number) => void;
+    createEdgeCircles: () => void;
+    exitFullscreenIfPossible: () => void | Promise<void>;
+    setHidden: (el: HTMLElement | null, hidden: boolean) => void;
+    pageRegistry: PageRegistry;
+    playerColors: string[];
+    playerBoxSlider?: HTMLElement | null;
+    menuColorCycle?: HTMLElement | null;
+    startBtn?: HTMLElement | null;
+    setPracticeMode?: (enabled: boolean) => void;
+    setAiStrength?: (strength: number) => void;
+    setGameColors?: (colors: string[]) => void;
+    getMyJoinedRoom?: () => string | null;
+    getRoomKeyForRoom?: (roomName: string) => string | null;
+};
 
 /**
  * In-memory stack tracking menu navigation for back button behavior.
- * @type {MenuType[]}
  */
-export let menuHistoryStack = [];
+export const menuHistoryStack: MenuType[] = [];
 
 /**
  * Get the current menu parameter from the URL query string.
- * @returns {MenuType | null} Menu key ('first', 'local', 'online', 'host', 'practice') or `null` if missing/invalid.
+ * @returns Menu key ('first', 'local', 'online', 'host', 'practice') or `null` if missing/invalid.
  */
-export function getMenuParam() {
+export function getMenuParam(): MenuType | null {
     try {
         const val = (new URLSearchParams(window.location.search)).get('menu');
         if (!val) return null;
@@ -25,12 +53,11 @@ export function getMenuParam() {
 /**
  * Set the menu parameter in the URL, updating history stack.
  * Removes game-only params (players, size, ai_strength) to keep URLs clean in menu states.
- * @param {MenuType} menuKey - Menu identifier to set in URL.
- * @param {boolean} [push=true] - If `true`, pushes a new history entry; otherwise replaces current.
- * @returns {void}
+ * @param menuKey - Menu identifier to set in URL.
+ * @param push - If `true`, pushes a new history entry; otherwise replaces current.
  */
-export function setMenuParam(menuKey, push = true) {
-     if (!isMenuType(menuKey)) return;
+export function setMenuParam(menuKey: MenuType, push: boolean = true): void {
+    if (!isMenuType(menuKey)) return;
     const params = new URLSearchParams(window.location.search);
     params.set('menu', menuKey);
     // In any menu state, remove game-only params (players, size, ai_strength) so URL stays clean.
@@ -55,10 +82,9 @@ export function setMenuParam(menuKey, push = true) {
 
 /**
  * Update the URL with a room key parameter (for online games).
- * @param {string} key - Room key to set in URL.
- * @returns {void}
+ * @param key - Room key to set in URL.
  */
-export function updateUrlRoomKey(key) {
+export function updateUrlRoomKey(key: string): void {
     try {
         if (typeof key !== 'string' || !key.trim()) {
             removeUrlRoomKey();
@@ -75,9 +101,8 @@ export function updateUrlRoomKey(key) {
 
 /**
  * Remove the room key parameter from the URL.
- * @returns {void}
  */
-export function removeUrlRoomKey() {
+export function removeUrlRoomKey(): void {
     try {
         const params = new URLSearchParams(window.location.search);
         params.delete('key');
@@ -89,9 +114,8 @@ export function removeUrlRoomKey() {
 
 /**
  * Remove the menu parameter from the URL (used when game starts).
- * @returns {void}
  */
-export function removeMenuParam() {
+export function removeMenuParam(): void {
     try {
         const params = new URLSearchParams(window.location.search);
         params.delete('menu');
@@ -104,9 +128,8 @@ export function removeMenuParam() {
 
 /**
  * Ensure the current history entry has a state and initialize the in-memory stack.
- * @returns {void}
  */
-export function ensureHistoryStateInitialized() {
+export function ensureHistoryStateInitialized(): void {
     try {
         const current = getMenuParam() || MENU_TYPES[0];
         if (!window.history.state || typeof window.history.state.menu === 'undefined') {
@@ -119,22 +142,8 @@ export function ensureHistoryStateInitialized() {
 /**
  * Sync menu/game UI from current URL state (back/forward navigation handler).
  * Requires external context for game functions (showMenuFor, recreateGrid, etc).
- * @param {object} ctx - Context object with references to game state and functions.
- * @param {(menu:MenuType)=>void} ctx.showMenuFor - Function to display a specific menu.
- * @param {Function} ctx.updateRandomTip - Function to update tip display.
- * @param {Function} ctx.clampPlayers - Function to clamp player count.
- * @param {Function} ctx.computeSelectedColors - Function to compute color array.
- * @param {Function} ctx.recreateGrid - Function to recreate the game grid.
- * @param {Function} ctx.createEdgeCircles - Function to create edge circles.
- * @param {Function} ctx.exitFullscreenIfPossible - Function to exit fullscreen.
- * @param {Function} ctx.setHidden - Function to hide/show elements.
- * @param {object} ctx.pageRegistry - Registry of page components.
- * @param {string[]} ctx.playerColors - Array of player color keys.
- * @param {Function} [ctx.getMyJoinedRoom] - Function to get the currently joined room.
- * @param {Function} [ctx.getRoomKeyForRoom] - Function to get the room key for a given room.
- * @returns {void}
  */
-export function applyStateFromUrl(ctx) {
+export function applyStateFromUrl(ctx: NavigationContext): void {
     // Intentionally do NOT sync room membership into the URL from here.
     // Room keys are updated by online join/rejoin events, and must not affect browser history.
 
@@ -150,11 +159,13 @@ export function applyStateFromUrl(ctx) {
         if (!Number.isNaN(ad) && ad >= 1) {
             try {
                 const aiStrengthTile = ctx.pageRegistry.get('main')?.components?.aiStrengthTile;
-                aiStrengthTile && aiStrengthTile.setStrength(Math.max(1, Math.min(5, ad)));
-                aiStrengthTile && aiStrengthTile.onStartingColorChanged && aiStrengthTile.onStartingColorChanged();
+                if (aiStrengthTile) {
+                    aiStrengthTile.setStrength(Math.max(1, Math.min(5, ad)));
+                    if (aiStrengthTile.onStartingColorChanged) aiStrengthTile.onStartingColorChanged();
+                }
             } catch { /* ignore */ }
         }
-        try { (ctx.playerBoxSlider || ctx.menuColorCycle || ctx.startBtn)?.focus(); } catch { /* ignore */ }
+        try { (ctx.playerBoxSlider || ctx.menuColorCycle || ctx.startBtn)?.focus?.(); } catch { /* ignore */ }
         //ctx.exitFullscreenIfPossible();
         return;
     }

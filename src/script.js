@@ -3249,7 +3249,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (aiWorker) return aiWorker;
         if (typeof Worker === 'undefined') return null;
         try {
-            aiWorker = new Worker(new URL('./src/ai/aiWorker.js', import.meta.url), { type: 'module' });
+            aiWorker = new Worker(new URL('./ai/aiWorker.js', import.meta.url), { type: 'module' });
         } catch {
             aiWorker = null;
             return null;

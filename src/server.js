@@ -29,7 +29,6 @@ const PORT = Number.parseInt(process.env.PORT || '', 10) || 8080;
 // Resolve current directory (ESM)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const __projectRoot = path.resolve(__dirname, '..');
 
 // Simple static file server for index.html, script.js, styles.css
 const contentTypes = new Map([
@@ -75,14 +74,11 @@ const server = http.createServer(async (req, res) => {
             .normalize(reqPath)
             .replace(/^\.\.(?:\/|\\|$)/, '')
             .replace(/^\/+/, ''); // strip any leading slashes so join is relative
-        let absPath = path.join(__dirname, safePath);
-        let st;
-        try {
-            st = await stat(absPath);
-        } catch {
-            absPath = path.join(__projectRoot, safePath);
-            st = await stat(absPath);
-        }
+        // Serve strictly from this server's own directory. No source-tree
+        // fallback: missing files must error out so broken paths (e.g. the AI
+        // worker URL) surface instead of being silently masked.
+        const absPath = path.join(__dirname, safePath);
+        const st = await stat(absPath);
         if (!st.isFile()) { sendError(res, 404); return; }
         const ext = path.extname(absPath).toLowerCase();
         const ct = contentTypes.get(ext) || 'application/octet-stream';
@@ -95,6 +91,7 @@ const server = http.createServer(async (req, res) => {
         const reqPath = (req.url || '/').split('?')[0];
         const hasFileExtension = /\.[a-z0-9]+$/i.test(reqPath);
         if (hasFileExtension) {
+            console.error(`[Server] 404 Not found: ${reqPath}`);
             sendError(res, 404);
             return;
         }
